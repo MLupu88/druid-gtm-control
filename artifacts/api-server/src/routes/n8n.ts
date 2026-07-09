@@ -4,6 +4,48 @@ import { ENDPOINTS, CONFIG_WRITES } from "@workspace/gtm-shared";
 const router = Router();
 
 // ---------------------------------------------------------------------------
+// Helper: flatten cockpit row/top-level fields into the flat contact shape
+// n8n expects. top-level values win over row values when both are present.
+// ---------------------------------------------------------------------------
+function flattenN8nPayload(input: { row?: any; [k: string]: any }) {
+  const { row = {}, ...top } = input;
+
+  const pick = (...ks: string[]) => {
+    for (const k of ks) {
+      const topValue = top?.[k];
+      if (topValue !== undefined && topValue !== null && topValue !== "") return topValue;
+
+      const rowValue = row?.[k];
+      if (rowValue !== undefined && rowValue !== null && rowValue !== "") return rowValue;
+    }
+    return "";
+  };
+
+  const contact_email = pick("contact_email", "best_contact_email");
+  const contact_phone = pick("contact_phone", "best_contact_phone");
+  const linkedin = pick("linkedin", "best_contact_linkedin");
+  const contact_name = pick("contact_name", "best_contact_name");
+  const contact_title = pick("contact_title", "best_contact_title");
+
+  return {
+    ...row,
+    contact_email,
+    contact_phone,
+    linkedin,
+    contact_name,
+    contact_title,
+    selected_contact: {
+      email: contact_email,
+      phone: contact_phone,
+      linkedin,
+      name: contact_name,
+      title: contact_title,
+    },
+    ...top,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Helper: POST to n8n with server-side auth header.
 // N8N_WEBHOOK_SECRET never leaves the server.
 // ---------------------------------------------------------------------------
@@ -59,9 +101,10 @@ router.post("/activate", async (req, res) => {
     return;
   }
   try {
-    const result = await postToN8n(ENDPOINTS.activate, {
-      channel, row, approved_by, approved_at, reason,
-    });
+    const result = await postToN8n(
+      ENDPOINTS.activate,
+      flattenN8nPayload({ channel, row, approved_by, approved_at, reason }),
+    );
     res.json(result);
   } catch (err: unknown) {
     req.log.warn({ err }, "n8n/activate failed");
@@ -83,9 +126,10 @@ router.post("/decision", async (req, res) => {
     return;
   }
   try {
-    const result = await postToN8n(ENDPOINTS.decision, {
-      decision, row, approved_by, approved_at, reason,
-    });
+    const result = await postToN8n(
+      ENDPOINTS.decision,
+      flattenN8nPayload({ decision, row, approved_by, approved_at, reason }),
+    );
     res.json(result);
   } catch (err: unknown) {
     req.log.warn({ err }, "n8n/decision failed");
@@ -107,9 +151,10 @@ router.post("/action", async (req, res) => {
     return;
   }
   try {
-    const result = await postToN8n(ENDPOINTS.action, {
-      action, row, approved_by, approved_at, reason,
-    });
+    const result = await postToN8n(
+      ENDPOINTS.action,
+      flattenN8nPayload({ action, row, approved_by, approved_at, reason }),
+    );
     res.json(result);
   } catch (err: unknown) {
     req.log.warn({ err }, "n8n/action failed");
