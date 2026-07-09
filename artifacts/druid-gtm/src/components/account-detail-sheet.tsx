@@ -31,6 +31,20 @@ import { cn } from "@/lib/utils";
 import { BUTTONS } from "@workspace/gtm-shared";
 import { Building2, User, Phone, Mail, Globe, AlertTriangle } from "lucide-react";
 
+// Live outreach actions gated behind Gate B — never shown as active primary buttons
+// until a real email/LinkedIn/voice integration is connected.
+const ACTIVATION_BUTTON_KEYS: ReadonlySet<ButtonKey> = new Set([
+  "approve_call",
+  "approve_email",
+  "approve_linkedin",
+]);
+
+const ACTIVATION_UNAVAILABLE_COPY: Partial<Record<ButtonKey, string>> = {
+  approve_email: "Coming later — requires a live email integration (Gate B). Not enabled yet.",
+  approve_linkedin: "Coming later — requires a live LinkedIn integration (Gate B). Not enabled yet.",
+  approve_call: "Coming later — requires a live voice integration (Gate B). Not enabled yet.",
+};
+
 interface AccountDetailSheetProps {
   row: Row;
   source: string;
@@ -90,6 +104,15 @@ export function AccountDetailSheet({
   }
 
   const totalScore = Number(row.account_score || row.total_score || 0) || null;
+
+  // Split out live-outreach actions that aren't available yet so they render
+  // in a separate "Coming later" section instead of as disabled green buttons.
+  const activeActionButtons = buttons.filter(
+    (btnKey) => !ACTIVATION_BUTTON_KEYS.has(btnKey) || !getDisabled(btnKey).disabled,
+  );
+  const unavailableActivationButtons = buttons.filter(
+    (btnKey) => ACTIVATION_BUTTON_KEYS.has(btnKey) && getDisabled(btnKey).disabled,
+  );
 
   return (
     <>
@@ -281,42 +304,76 @@ export function AccountDetailSheet({
             {/* Take action */}
             {buttons.length > 0 && (
               <Section title="Take action">
-                <div className="flex flex-col gap-2">
-                  {buttons.map((btnKey) => {
-                    const btn = BUTTONS[btnKey];
-                    if (!btn) return null;
-                    const { disabled, reason } = getDisabled(btnKey);
+                {activeActionButtons.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    {activeActionButtons.map((btnKey) => {
+                      const btn = BUTTONS[btnKey];
+                      if (!btn) return null;
+                      const { disabled, reason } = getDisabled(btnKey);
 
-                    if (btn.kind === "ui" && btnKey === "view_reason") {
-                      return null; // already shown via block_reason section above
-                    }
+                      if (btn.kind === "ui" && btnKey === "view_reason") {
+                        return null; // already shown via block_reason section above
+                      }
 
-                    return (
-                      <div key={btnKey}>
-                        <Button
-                          variant={
-                            btnKey.startsWith("approve") ? "default" : "outline"
-                          }
-                          disabled={disabled}
-                          onClick={() => !disabled && setActiveButton(btnKey)}
-                          className={cn(
-                            "w-full h-10 text-sm font-medium justify-start",
-                            !disabled &&
-                              btnKey.startsWith("approve") &&
-                              "bg-primary text-primary-foreground hover:bg-[#00c853] shadow-lg shadow-primary/20",
+                      return (
+                        <div key={btnKey}>
+                          <Button
+                            variant={
+                              btnKey.startsWith("approve") ? "default" : "outline"
+                            }
+                            disabled={disabled}
+                            onClick={() => !disabled && setActiveButton(btnKey)}
+                            className={cn(
+                              "w-full h-10 text-sm font-medium justify-start",
+                              !disabled &&
+                                btnKey.startsWith("approve") &&
+                                "bg-primary text-primary-foreground hover:bg-[#00c853] shadow-lg shadow-primary/20",
+                            )}
+                          >
+                            {btn.label}
+                          </Button>
+                          {disabled && reason && (
+                            <p className="text-[11px] text-muted-foreground mt-1 px-1 leading-snug">
+                              {reason}
+                            </p>
                           )}
-                        >
-                          {btn.label}
-                        </Button>
-                        {disabled && reason && (
-                          <p className="text-[11px] text-muted-foreground mt-1 px-1 leading-snug">
-                            {reason}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {unavailableActivationButtons.length > 0 && (
+                  <div
+                    className={cn(
+                      activeActionButtons.length > 0 && "mt-4 pt-4 border-t border-border/60",
+                    )}
+                  >
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      Coming later — not enabled yet
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {unavailableActivationButtons.map((btnKey) => {
+                        const btn = BUTTONS[btnKey];
+                        if (!btn) return null;
+                        return (
+                          <div key={btnKey}>
+                            <Button
+                              variant="ghost"
+                              disabled
+                              className="w-full h-10 text-sm font-medium justify-start text-muted-foreground"
+                            >
+                              {btn.label}
+                            </Button>
+                            <p className="text-[11px] text-muted-foreground mt-1 px-1 leading-snug">
+                              {ACTIVATION_UNAVAILABLE_COPY[btnKey]}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </Section>
             )}
           </div>

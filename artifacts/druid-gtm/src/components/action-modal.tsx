@@ -58,9 +58,9 @@ export function ActionModal({
   }
 
   async function handleConfirm() {
-    if (!reason.trim() || previewOnly) return;
+    if (!reason.trim()) return;
 
-    if (btn.kind === "ui") {
+    if (previewOnly || btn.kind === "ui") {
       setPhase("success");
       setResultMessage(btn.honest);
       onSuccess?.();
@@ -201,8 +201,8 @@ export function ActionModal({
               </Button>
               {phase === "confirm" && (
                 <Button
-                  onClick={previewOnly ? undefined : handleConfirm}
-                  disabled={!reason.trim() || previewOnly}
+                  onClick={handleConfirm}
+                  disabled={!reason.trim()}
                   className="flex-1 bg-primary text-primary-foreground hover:bg-[#00c853] shadow-lg shadow-primary/20 disabled:opacity-50"
                 >
                   {previewOnly ? "Preview only" : "Confirm"}
