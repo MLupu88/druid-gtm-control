@@ -7,7 +7,17 @@ import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
+const REQUIRED_ENV_VARS = ["SESSION_SECRET", "APP_PASSWORD", "APP_ORIGIN"] as const;
+
+for (const name of REQUIRED_ENV_VARS) {
+  if (!process.env[name]) {
+    throw new Error(`${name} environment variable is required but was not provided.`);
+  }
+}
+
 const app: Express = express();
+
+app.set("trust proxy", 1);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,7 +44,7 @@ app.use(
   }),
 );
 
-app.use(cors());
+app.use(cors({ origin: process.env.APP_ORIGIN, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

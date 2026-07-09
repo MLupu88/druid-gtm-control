@@ -1,14 +1,22 @@
 import { Router } from "express";
 import crypto from "crypto";
+import rateLimit from "express-rate-limit";
 
 const router = Router();
+
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/auth/login
 // Body: { password: string }
 // Checks against DRUID_ACCESS_CODE env var, sets an httpOnly signed cookie.
 // ---------------------------------------------------------------------------
-router.post("/login", (req, res) => {
+router.post("/login", loginRateLimiter, (req, res) => {
   const accessCode = process.env.APP_PASSWORD;
 
   if (!accessCode) {
