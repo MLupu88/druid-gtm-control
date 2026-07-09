@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { ENDPOINTS, CONFIG_WRITES } from "@workspace/gtm-shared";
 
 const router = Router();
@@ -90,12 +90,31 @@ router.get("/status", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Helper: stamp the server-verified operator identity onto an n8n payload.
+// approved_by / approved_by_email / operator_role / approved_at are always
+// derived from req.operator (set by requireAuth from the signed auth
+// cookie) — any approved_by / approved_by_email sent by the client is
+// ignored so the audit trail can't be spoofed from the browser.
+// ---------------------------------------------------------------------------
+function withOperatorStamp(req: Request) {
+  const operator = req.operator;
+  if (!operator) {
+    throw new Error("Authentication required.");
+  }
+  return {
+    approved_by: operator.name,
+    approved_by_email: operator.email,
+    operator_role: operator.role,
+    approved_at: new Date().toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/n8n/activate  — approve voice / email / linkedin
-// Body: { channel, row, approved_by, approved_at, reason }
+// Body: { channel, row, reason }
 // ---------------------------------------------------------------------------
 router.post("/activate", async (req, res) => {
-  const { channel, row, approved_by, approved_at, reason } =
-    req.body as Record<string, unknown>;
+  const { channel, row, reason } = req.body as Record<string, unknown>;
   if (!channel || !reason) {
     res.status(400).json({ error: "channel and reason are required." });
     return;
@@ -103,7 +122,7 @@ router.post("/activate", async (req, res) => {
   try {
     const result = await postToN8n(
       ENDPOINTS.activate,
-      flattenN8nPayload({ channel, row, approved_by, approved_at, reason }),
+      flattenN8nPayload({ channel, row, reason, ...withOperatorStamp(req) }),
     );
     res.json(result);
   } catch (err: unknown) {
@@ -116,11 +135,10 @@ router.post("/activate", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/n8n/decision  — reject / nurture / manual_review / suppress
-// Body: { decision, row, approved_by, approved_at, reason }
+// Body: { decision, row, reason }
 // ---------------------------------------------------------------------------
 router.post("/decision", async (req, res) => {
-  const { decision, row, approved_by, approved_at, reason } =
-    req.body as Record<string, unknown>;
+  const { decision, row, reason } = req.body as Record<string, unknown>;
   if (!decision || !reason) {
     res.status(400).json({ error: "decision and reason are required." });
     return;
@@ -128,7 +146,7 @@ router.post("/decision", async (req, res) => {
   try {
     const result = await postToN8n(
       ENDPOINTS.decision,
-      flattenN8nPayload({ decision, row, approved_by, approved_at, reason }),
+      flattenN8nPayload({ decision, row, reason, ...withOperatorStamp(req) }),
     );
     res.json(result);
   } catch (err: unknown) {
@@ -141,11 +159,10 @@ router.post("/decision", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // POST /api/n8n/action  — owner_alert / retry
-// Body: { action, row, approved_by, approved_at, reason }
+// Body: { action, row, reason }
 // ---------------------------------------------------------------------------
 router.post("/action", async (req, res) => {
-  const { action, row, approved_by, approved_at, reason } =
-    req.body as Record<string, unknown>;
+  const { action, row, reason } = req.body as Record<string, unknown>;
   if (!action || !reason) {
     res.status(400).json({ error: "action and reason are required." });
     return;
@@ -153,7 +170,7 @@ router.post("/action", async (req, res) => {
   try {
     const result = await postToN8n(
       ENDPOINTS.action,
-      flattenN8nPayload({ action, row, approved_by, approved_at, reason }),
+      flattenN8nPayload({ action, row, reason, ...withOperatorStamp(req) }),
     );
     res.json(result);
   } catch (err: unknown) {

@@ -151,7 +151,9 @@ export function buttonEndpointRoute(buttonKey: ButtonKey): string | null {
   }
 }
 
-// Build POST body for a button action
+// Build POST body for a button action.
+// Operator identity (approved_by / approved_by_email / approved_at) is
+// derived server-side from the authenticated session, not sent by the client.
 export function buttonPostBody(
   buttonKey: ButtonKey,
   row: Row,
@@ -161,12 +163,9 @@ export function buttonPostBody(
   const body = btn.kind === "server"
     ? (btn as { kind: "server"; body?: Record<string, unknown> }).body ?? {}
     : {};
-  const now = new Date().toISOString();
   return {
     ...body,
     row,
-    approved_by: "operator",
-    approved_at: now,
     reason,
   };
 }

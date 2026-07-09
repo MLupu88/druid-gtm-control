@@ -42,7 +42,7 @@ const ANALYTICS_URL: string =
 
 function AppSidebar() {
   const [location] = useLocation();
-  const { logout } = useAuth();
+  const { logout, operator } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const navItems = [
@@ -162,6 +162,12 @@ function AppSidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+
+        {operator?.name && (
+          <p className="px-3 pt-2 text-[10px] text-muted-foreground truncate group-data-[collapsible=icon]:hidden">
+            Acting as {operator.name}
+          </p>
+        )}
       </SidebarFooter>
     </Sidebar>
   );

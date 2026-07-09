@@ -1,12 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
+export interface Operator {
+  name: string;
+  email: string;
+  role: string;
+}
+
 interface AuthState {
-  ok: boolean;
+  authenticated: boolean;
+  operator?: Operator;
 }
 
 async function fetchMe(): Promise<AuthState> {
   const res = await fetch("/api/auth/me", { credentials: "include" });
-  if (res.status === 401) return { ok: false };
+  if (res.status === 401) return { authenticated: false };
   if (!res.ok) throw new Error("Auth check failed");
   return res.json() as Promise<AuthState>;
 }
@@ -48,13 +55,14 @@ export function useAuth() {
       });
     },
     onSuccess: () => {
-      qc.setQueryData<AuthState>(["auth", "me"], { ok: false });
+      qc.setQueryData<AuthState>(["auth", "me"], { authenticated: false });
     },
   });
 
   return {
     isLoading: meQuery.isLoading,
-    isAuthed: meQuery.data?.ok === true,
+    isAuthed: meQuery.data?.authenticated === true,
+    operator: meQuery.data?.operator,
     login: loginMutation,
     logout: logoutMutation,
   };
