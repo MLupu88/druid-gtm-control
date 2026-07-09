@@ -1,0 +1,17 @@
+services:
+  gtm-control:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gtm-control
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    networks:
+      - n8n_network
+
+networks:
+  n8n_network:
+    external: true

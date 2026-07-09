@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express, { type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -6,6 +8,10 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendDist = path.resolve(__dirname, "../../druid-gtm/dist/public");
 
 app.use(cookieParser(process.env.SESSION_SECRET));
 app.use(
@@ -27,10 +33,22 @@ app.use(
     },
   }),
 );
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
+
+app.use(express.static(frontendDist));
+
+app.use((req, res, next) => {
+  if (req.method !== "GET" || req.path.startsWith("/api")) {
+    next();
+    return;
+  }
+
+  res.sendFile(path.join(frontendDist, "index.html"));
+});
 
 export default app;
