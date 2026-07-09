@@ -1,0 +1,143 @@
+Continue the build with Feature Batch 1.
+
+Do not rebuild the app.
+Do not redesign the app.
+Do not change the shared contract.
+Do not change existing working routes unless needed.
+Do not add vendor integrations.
+Do not expose secrets.
+
+Read:
+- REPLIT_PROMPT_v3.md
+- lib/gtm-shared/src/gtmContract.js
+- lib/gtm-shared/src/mockData.js
+- design-system-extract.md
+
+Build these features:
+
+1. Add Action Log read support
+
+Create a server-side route:
+
+GET /api/sheets/action-log
+
+It should read the ICP_Action_Log tab from Google Sheets.
+If the tab is empty or unavailable, return:
+{
+  rows: [],
+  usingSampleData: false or true depending on whether the sheet read failed
+}
+
+Do not use sample activity unless Google Sheets itself is unavailable.
+If the live sheet is connected but the action log is empty, return an empty list.
+
+2. Dashboard: Recent Activity
+
+Update Dashboard to read /api/sheets/action-log.
+
+If action log has rows:
+- show recent activity using plain business language
+- use STATUS_LABELS_V3 when the status matches
+- do not say something was sent unless the status label says so
+- show company/contact if available
+- show timestamp if available
+
+If action log is empty:
+- show: “No recent actions yet.”
+
+Do not invent activity.
+
+3. Dashboard: Current operating state
+
+Add a compact summary card near the top showing:
+
+- Live data: Connected / Using sample data
+- Sending: current ENGINE_MODE_LABELS label
+- Scoring: current QUEUE_SOURCE_LABELS label
+- Queue writing: On / Off based on account_queue_write
+- US calling: Locked / Unlocked based on us_voice_cleared
+
+Use plain business language only.
+Do not show raw config key names.
+
+4. Settings: make controls clearer
+
+Settings should show three cards for sending state:
+- Fully Live
+- Review Mode
+- Paused
+
+Cards should be clickable only when automation connection is reachable.
+Changing state must open a confirmation modal with:
+- what will change
+- what it means
+- required reason field
+- confirm button
+
+Use POST /api/n8n/config with allowed key engine_mode only.
+Do not fake success.
+Show returned result honestly.
+
+For scoring source:
+Keep it visually de-emphasized.
+If changing source is not ready or you are not confident the backend write is safe, keep it read-only and say:
+“Changing this is disabled for now. It affects where review items are read from.”
+
+5. Settings: queue writing toggle
+
+Add a queue writing section.
+
+Show:
+- On: review rows can be written
+- Off: scoring can run, but new account review rows will not appear in the list
+
+If config writes are available, allow changing account_queue_write via /api/n8n/config.
+Require confirmation and reason.
+If not available, keep disabled.
+
+Do not show the raw name account_queue_write.
+
+6. Try a Sample Lead: after-submit guidance
+
+After a sample is submitted:
+- show whether the request was accepted by the automation engine
+- if queue writing is off, say it will not appear in the review list yet
+- if queue writing is on, tell the operator to check Review Queue
+- add a “Go to Review Queue” button
+- do not claim a row exists unless you actually see one from /api/sheets/queue
+
+7. Review Queue: empty state enhancement
+
+Keep current empty state, but add a secondary line:
+“Try a Sample Lead can send a safe example through scoring. It will only appear here when queue writing is turned on.”
+
+Do not show this as an error.
+
+Rendered UI banned words:
+Do not show these anywhere in visible UI:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed only as a small honest badge if fallback data is being used.
+
+After changes:
+- typecheck frontend and backend
+- restart
+- report files changed
+- routes added
+- what changed on each page
+- any controls disabled and why

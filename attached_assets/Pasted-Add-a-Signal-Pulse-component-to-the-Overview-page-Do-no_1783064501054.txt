@@ -1,0 +1,143 @@
+Add a Signal Pulse component to the Overview page.
+
+Do not rebuild the app.
+Do not redesign the whole app.
+Do not change backend routes.
+Do not expose secrets.
+Do not call vendor APIs.
+Do not change the shared contract unless absolutely necessary.
+
+Goal:
+Add a dynamic “Signal Pulse” visual on the Overview page that shows how strong marketplace buying interest is right now.
+
+This should feel like a business signal indicator, not a sci-fi animation.
+
+Placement:
+On Overview, place it near the top:
+- below the page title/subtitle
+- above “What is live right now?”
+
+Component title:
+Signal Pulse
+
+Subtitle:
+A live-style readout of marketplace interest based on MQLs, review signals, and recent activity.
+
+The component should show:
+- an animated pulse/heartbeat line
+- a plain-language status
+- a few supporting metrics
+
+Status labels:
+- Quiet
+- Building
+- Active
+- Hot
+
+Status logic:
+Calculate a pulse score from the currently selected data mode.
+
+Use live rows in Live data mode.
+Use sample rows in Sample data mode.
+
+Suggested scoring:
+- each MQL / Ready for Sales row = +35
+- each Worth a Look row = +15
+- each active review item = +5
+- average account score contribution = average score / 5, capped at +20
+- recent action activity, if available = +10
+- blocked rows should not increase pulse
+
+Clamp score between 0 and 100.
+
+Status:
+0–15 = Quiet
+16–39 = Building
+40–69 = Active
+70–100 = Hot
+
+Important:
+MQL / Ready for Sales must only count true MQL rows.
+Do not count Worth a Look as MQL.
+Do not count high score alone as MQL.
+Blocked or do-not-contact rows should not increase the pulse.
+
+Visual:
+- Use an SVG or CSS-based animated pulse line.
+- The line should move subtly, not aggressively.
+- In Light mode it must remain visible.
+- In Dark mode it must remain visible.
+- Use DRUID green as the main pulse color.
+- Use amber accent only for Building / warning states.
+- Use red/amber only for blocked/low safety states if needed.
+- Do not use blue as the brand pulse color.
+- Respect reduced-motion if possible:
+  if prefers-reduced-motion is enabled, show a static line.
+
+Supporting metrics:
+Show compact text under or beside the pulse:
+- MQLs / Ready for Sales: X
+- Worth a Look: Y
+- Signals captured: Z
+
+If sample mode is active:
+Show a small “Sample data” badge.
+
+If live mode has no rows:
+Status should be Quiet.
+Copy:
+“No live signals need review right now.”
+
+Do not make it sound like a medical heartbeat.
+Do not call it “heartbeat” in the UI.
+Call it:
+Signal Pulse
+
+Copy examples:
+Quiet:
+“Marketplace interest is quiet right now.”
+
+Building:
+“Marketplace interest is building.”
+
+Active:
+“Marketplace interest is active.”
+
+Hot:
+“Marketplace interest is hot — review sales-ready accounts first.”
+
+Design:
+Use the current DRUID design system.
+Keep the card compact.
+It should look like part of the product, not a decorative widget.
+
+Language rules:
+Do not show banned words:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+After changes:
+- typecheck frontend
+- restart
+- confirm Signal Pulse appears on Overview
+- confirm it works in Light mode
+- confirm it works in Dark mode
+- confirm pulse changes between Live data and Sample data
+- confirm MQL count excludes Worth a Look
+- report files changed

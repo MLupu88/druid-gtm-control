@@ -1,0 +1,212 @@
+Fix light mode and sidebar logo together.
+
+Do not rebuild the app.
+Do not redesign the whole app.
+Do not change backend routes.
+Do not call vendor APIs.
+Do not expose secrets.
+Do not replace the shared contract.
+Do not change data logic.
+Do not change navigation labels.
+Do not bring “Try a Sample Lead” back into the sidebar.
+
+Goal:
+Add/fix light mode properly, make it the default, and fix the DRUID logo so it does not stretch.
+
+Important:
+Do not break the DRUID colors.
+Do not turn the app blue.
+Do not invent a new palette.
+Do not squash, stretch, crop, or distort the logo.
+
+Use design-system-extract.md as the visual source of truth.
+
+1. Light mode default
+
+Make Light mode the default theme.
+
+If localStorage has no saved theme:
+- use Light mode
+
+If the user switches to Dark:
+- persist Dark mode
+- reload should keep Dark mode
+
+Use:
+document.documentElement.setAttribute("data-theme", theme)
+
+Do not rely only on Tailwind dark classes if the app uses CSS variables.
+
+2. Theme toggle
+
+Add or keep a simple Appearance toggle.
+
+Placement:
+Bottom of sidebar above Sign out.
+
+Label:
+Appearance
+
+Buttons:
+Light
+Dark
+
+The active theme should be visually clear.
+
+3. Light mode tokens
+
+Use these exact light-mode values:
+
+page background: #f5f7f6
+card background: #ffffff
+border: #dde0e6
+body text: #1a1a1a
+muted text: #6b7280
+primary green: #00c158
+muted surface: #f3f4f6
+
+Dark mode must remain:
+
+background: #0a0f0d
+card: #111816
+border: #1f2924
+input/muted: #1a2220
+primary green: #00e676
+muted text: #9ca3af
+
+4. Do not break semantic colors
+
+Keep:
+- success / connected = green
+- off / pending / warning = amber
+- locked / blocked = red or amber-red
+- info notices = blue only where informational
+
+Primary/active brand color must remain DRUID green, not blue.
+
+5. Sidebar in light mode
+
+Light sidebar should be readable and premium:
+- white or very light surface
+- subtle border
+- dark text
+- green active state
+- no harsh black blocks
+- no washed-out gray text
+
+Dark sidebar should remain visually close to current dark mode.
+
+6. Fix sidebar logo layout
+
+Problem:
+The logo was stretched horizontally.
+
+Fix:
+- Logo must preserve original aspect ratio.
+- Do not set both width and height in a way that distorts it.
+- Do not use object-fit: fill.
+- Do not force the image to fill the full sidebar width.
+- Use height with width auto.
+
+Sidebar header layout:
+- DRUID logo on top
+- App name underneath:
+  GTM Marketplace Signals
+
+Suggested logo styling:
+height: 32px or 36px
+width: auto
+object-fit: contain
+max-width: 160px
+
+Wrapper:
+- align left
+- no forced full-width image scaling
+- enough spacing between logo and app name
+- app name should wrap neatly if needed
+
+7. Logo assets
+
+Use:
+- white logo in dark mode
+- black logo in light mode, if the black logo asset exists
+
+Existing assets may include:
+- new_logo_white.png
+- new-druid-logo-black.png
+
+If the black logo exists:
+- use it in light mode
+- apply the same sizing rules
+
+If the black logo does not exist:
+- keep the white logo only if it remains readable
+- otherwise use text fallback, but do not invent a new logo
+
+8. Check all pages in light mode
+
+Make sure light mode works on:
+- Overview
+- Needs Your Attention
+- Reports
+- Settings
+- Sample workflow page if opened from Settings
+
+Check:
+- sidebar
+- cards
+- tables
+- filters
+- badges
+- inputs
+- modals/sheets
+- action modal
+- sample data badges
+- disabled buttons
+- CSV/report buttons
+
+9. Do not break existing behavior
+
+Do not change:
+- live/sample data toggle logic
+- sample row behavior
+- action modal preview-only behavior
+- Settings write behavior
+- Reports calculations
+- CSV export
+- sidebar navigation items
+- app title text
+
+10. Language rules
+
+Do not show banned words:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+After changes:
+- typecheck frontend
+- restart
+- confirm Light mode is default
+- confirm Dark mode still works
+- confirm selected theme persists after reload
+- confirm DRUID logo is not stretched
+- confirm logo switches correctly if black logo exists
+- confirm app name sits under the logo
+- confirm primary color remains DRUID green
+- report files changed

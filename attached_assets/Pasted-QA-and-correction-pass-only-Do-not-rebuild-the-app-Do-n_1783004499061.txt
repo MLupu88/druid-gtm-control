@@ -1,0 +1,72 @@
+QA and correction pass only.
+
+Do not rebuild the app.
+Do not redesign the UI.
+Do not replace the shared contract.
+Do not add new integrations.
+Do not invent new labels if a shared label exists.
+
+Fix these issues:
+
+1. Settings changes must not be blocked just because the current sending mode is Review Mode.
+The operator must be able to change sending mode through the Settings page when n8n is reachable.
+Do not create a deadlock where live mode cannot be turned on because live mode is not already on.
+
+Rules:
+- Settings writes may be enabled when the automation connection is reachable.
+- Dangerous settings still require confirmation.
+- US calling still requires the exact confirmation phrase and a legal reason.
+- If n8n is unreachable, disable settings writes with plain text explaining that the automation connection is unavailable.
+
+2. Review Queue empty state should not claim that the system filling it is not running unless the app has explicit evidence.
+Replace the empty state with:
+“No review items yet. When the GTM engine adds accounts for review, they will appear here.”
+
+Do not show raw internal source names.
+
+3. Try a Sample Lead must be extra clear while queue writing is off.
+If account_queue_write is off, keep the button enabled only if the UI says before submission:
+“Queue writing is currently off. You can send a sample through the scoring system, but it will not appear in the review list until queue writing is turned on.”
+
+After submission, show:
+“Sample sent. Queue writing is currently off, so it will not appear in the review list yet.”
+
+Do not imply that a visible queue row was created if writing is off.
+
+4. Check rendered UI text for banned words:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+Do not count code comments. Only rendered UI.
+
+5. Keep all external actions server-side only.
+Browser must not receive N8N_WEBHOOK_SECRET or GOOGLE_SERVICE_ACCOUNT_JSON.
+
+After fixes:
+- typecheck frontend and backend
+- restart
+- confirm login still works
+- confirm Settings live data still connected
+- confirm Dashboard empty state works
+- confirm Review Queue empty state uses the safer wording
+- confirm Settings mode changes are not deadlocked
+- confirm Try a Sample Lead explains queue writing off correctly
+
+Report only:
+- files changed
+- exact fixes made
+- final QA results

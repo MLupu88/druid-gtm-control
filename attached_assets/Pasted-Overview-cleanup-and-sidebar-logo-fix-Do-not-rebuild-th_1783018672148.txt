@@ -1,0 +1,152 @@
+Overview cleanup and sidebar logo fix.
+
+Do not rebuild the app.
+Do not redesign the whole app.
+Do not change backend routes.
+Do not call vendor APIs.
+Do not expose secrets.
+Do not replace the shared contract.
+
+Make these changes only:
+
+1. Remove the top Review Mode card from Overview
+
+On the Overview page, remove the large banner/card that says:
+
+“Review Mode — You can review and approve accounts, but nothing is sent yet…”
+
+Do not replace it with another banner.
+
+2. Remove “What this page shows”
+
+On the Overview page, remove the explanatory card/section called:
+
+“What this page shows”
+
+The Overview page should start with the page title/subtitle, then the operational status section.
+
+3. Rename and improve the operational status section
+
+Replace the title:
+
+“How the system is running right now”
+
+With:
+
+“What is live right now?”
+
+Make the section more semantic and business-readable.
+
+Use exactly these cards:
+
+Card 1:
+Title: Data source
+Value: Live workbook connected
+Description: Reading the GTM workbook.
+
+Card 2:
+Title: Outreach
+Value: Off
+Description: Decisions can be saved, but the app will not contact anyone.
+
+Card 3:
+Title: New review items
+Value: Off
+Description: Scoring can run, but new account review items will not appear here yet.
+
+Card 4:
+Title: US AI calling
+Value: Locked
+Description: Calls to US contacts require legal approval first.
+
+Optional small line below the cards:
+Scoring view: Per-visit — each signal is reviewed on its own.
+
+Important:
+Do not use these visible phrases:
+- Review Mode
+- engine status
+- queue writing
+- activation
+- system running
+
+4. Make the status cards visually semantic
+
+Use status tone:
+- Connected = green
+- Off = amber
+- Locked = amber or red/amber
+- Disabled/off states should look intentional, not broken
+
+Each card should have:
+- short semantic title
+- large clear value
+- one plain-language explanation
+
+5. Fix sidebar logo/title layout
+
+Current issue:
+The app name sits awkwardly next to the logo.
+
+Change sidebar header layout:
+- DRUID logo on top
+- “GTM Marketplace Signals” underneath the logo
+- smaller secondary text is okay, but do not put the app name on the same horizontal line as the logo
+
+Suggested layout:
+[DRUID logo]
+GTM Marketplace Signals
+
+If the sidebar is narrow, allow the title to wrap neatly.
+Do not squash the logo.
+Do not make the logo huge.
+
+6. Keep navigation unchanged
+
+Sidebar should still show:
+- Overview
+- Needs Your Attention
+- Reports
+- Settings
+
+Do not bring “Try a Sample Lead” back into the sidebar.
+
+7. Keep existing sections below
+
+Keep:
+- Signal funnel
+- Needs your attention
+- Reports page
+- Settings sample workflow link
+
+8. Language rules
+
+Do not show banned words:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+After changes:
+- typecheck frontend
+- restart
+- report files changed
+- confirm Overview no longer has the Review Mode banner
+- confirm Overview no longer has “What this page shows”
+- confirm the status section is called “What is live right now?”
+- confirm sidebar logo is above the app name
+- confirm no backend routes changed

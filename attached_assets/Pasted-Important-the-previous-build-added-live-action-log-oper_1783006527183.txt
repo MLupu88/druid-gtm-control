@@ -1,0 +1,180 @@
+Important: the previous build added live action-log, operating-state cards, queue writing controls, and Try a Sample Lead guidance.
+
+Now continue with the separate Sample Data preview mode.
+
+This is not a production automation test. This is to make the interface understandable to stakeholders while live workflows are still being finalized.
+
+Continue the build by making the interface feel like the final product using representative sample data.
+
+Important context:
+Production workflow links and real queue writes will come later, once the n8n workflows are fully functional.
+For now, the goal is to make the interface as close as possible to the final version and easy for stakeholders to understand.
+Use sample data from @workspace/gtm-shared/mockData.js to demonstrate the full workflow.
+
+Do not rebuild the app.
+Do not redesign the app.
+Do not change backend auth.
+Do not expose secrets.
+Do not call vendor APIs.
+Do not trigger live outreach.
+Do not replace the shared contract.
+
+Read:
+- REPLIT_PROMPT_v3.md
+- design-system-extract.md
+- lib/gtm-shared/src/gtmContract.js
+- lib/gtm-shared/src/mockData.js
+
+Goal:
+Add a clear, safe “Sample Data” experience that lets the UI show realistic review rows even when the live Google Sheet queue is empty.
+
+Rules:
+- The app should still show that live data is connected.
+- But when the live queue has 0 rows, allow the operator to switch to a sample-data view.
+- The UI may say “Sample data” as a small honest badge.
+- Do not use the word “mock” anywhere in rendered UI.
+- Do not imply sample rows are real leads.
+- Do not allow sample-row actions to call n8n.
+- Sample-row actions should open the same confirmation modal, but the final confirm button should be disabled or should show “Preview only — no action will be sent.”
+- The goal is to demonstrate the workflow, not execute it.
+
+Build these features:
+
+1. Sample data toggle
+
+Add a small control near the top of Dashboard and Review Queue:
+
+Live data / Sample data
+
+Behavior:
+- Live data remains the default.
+- If live queue has 0 rows, show a helpful empty state with a button:
+  “View sample workflow”
+- When sample data is selected, use rows from @workspace/gtm-shared/mockData.js.
+- Show a small badge: “Sample data”
+- Make it obvious but not alarming.
+
+2. Dashboard with sample data
+
+When sample data is selected:
+- Show counts by recommendation type.
+- Show “Needs Your Attention” using sample rows.
+- Show a realistic Recent Activity section, but label it as sample data.
+- Do not invent integrations.
+- Do not say email/LinkedIn/CRM/ad actions were sent.
+- Use STATUS_LABELS_V3 when relevant.
+
+When live data is selected and empty:
+- Keep the calm empty state.
+
+3. Review Queue with sample data
+
+When sample data is selected:
+- Render sample rows as if they are real queue rows.
+- Recommendation/output type must be first and visually strongest.
+- Score is secondary.
+- Use:
+  - OUTPUT_TYPE_LABELS
+  - IDENTITY_LABELS
+  - BLOCK_REASON_LABELS
+  - costLabel()
+  - visitorSafeCopy()
+
+Support:
+- search
+- filtering by recommendation type
+- filtering by needs attention
+
+4. Account Detail with sample data
+
+Opening a sample row should show the full Account Detail experience:
+- About this account
+- Why this recommendation
+- What led here
+- Score explanation
+- People/contact
+- What this would cost
+- Take action
+- What happened on the call only if call data exists
+
+Use sample data to make the page feel complete.
+If a field is missing, show calm fallback text.
+
+5. Action modal in sample mode
+
+For sample rows:
+- Show the same action buttons that would appear in the final app.
+- Buttons must come from BUTTONS / buttonsForOutput / buttonDisabled / buttonDisabledPhaseC.
+- Every action opens the confirmation modal.
+- Modal must show:
+  - what would happen
+  - whether it would send or only log
+  - cost line from costLabel()
+  - reason field
+
+But:
+- Do not post to n8n for sample rows.
+- Final confirm button should say:
+  “Preview only”
+  or be disabled with:
+  “Sample data — no action will be sent.”
+- This is for understanding the workflow only.
+
+6. Settings
+
+Keep Settings connected to live config.
+Do not use sample data for Settings.
+Settings should still show:
+- live data connected
+- sending state
+- active scoring view
+- automation engine reachable
+- queue writing state
+- US calling permission
+- do-not-contact list
+
+7. Try a Sample Lead
+
+Keep the page, but make the purpose clearer:
+This is different from sample-data preview.
+
+Explain:
+- Sample data preview shows the interface without touching automation.
+- Try a Sample Lead sends a safe example to the automation engine.
+- Since production workflows are not fully functional yet, this may not create a visible row.
+
+Do not over-emphasize this page for now.
+
+Rendered UI banned words:
+Do not show these anywhere in visible UI:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+Design:
+Use the current DRUID design system and logo.
+Do not change the visual identity.
+Keep it close to final product quality.
+
+After changes:
+- typecheck frontend and backend
+- restart
+- report files changed
+- explain how to switch between live data and sample data
+- explain what is disabled in sample mode
+- confirm no sample action calls n8n

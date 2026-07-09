@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.local/
+.cache/
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Replit artifact metadata
+.replit-artifact/
+artifacts/**/.replit-artifact/
+
+# Generated/build outputs
+coverage/

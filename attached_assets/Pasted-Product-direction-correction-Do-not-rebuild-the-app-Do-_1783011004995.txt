@@ -1,0 +1,225 @@
+Product direction correction.
+
+Do not rebuild the app.
+Do not redesign the app.
+Do not change backend routes.
+Do not call vendor APIs.
+Do not expose secrets.
+Do not change the shared contract unless absolutely required for UI labels.
+Do not remove existing functionality.
+
+The app purpose has become too generic. Reframe the product around the actual use case:
+
+App name:
+GTM Marketplace Signals
+
+Purpose:
+This app helps DRUID review marketplace and campaign buying signals, understand which accounts need attention, and decide whether to act, nurture, route, suppress, or export.
+
+This is not a generic “Mission Control”.
+This is not just a technical queue.
+This is a marketplace/GTM signal review product.
+
+Make these product copy and navigation changes:
+
+1. Rename app header
+
+Replace:
+“Mission Control”
+
+With:
+“GTM Marketplace Signals”
+
+In the sidebar header, use:
+DRUID logo + “GTM Marketplace Signals”
+
+Keep it visually clean. If the full title is too long, use:
+“GTM Signals”
+as the compact/collapsed label, but the full app title should be visible in normal sidebar mode.
+
+2. Rename navigation
+
+Current navigation:
+- Dashboard
+- Review Queue
+- Reports
+- Try a Sample Lead
+- Settings
+
+Change to:
+- Overview
+- Needs Your Attention
+- Reports
+- Settings
+
+Remove “Try a Sample Lead” from the main sidebar navigation.
+
+Do not delete the Try a Sample Lead page/functionality.
+Move access to it into Settings under a small section called:
+“Sample workflow”
+
+Settings copy:
+“Use this only to send a safe example through the scoring workflow while the production workflows are being finalized.”
+
+Button/link:
+“Open sample workflow”
+
+3. Dashboard → Overview
+
+Rename the Dashboard page to:
+Overview
+
+Title:
+“Marketplace signals overview”
+
+Subtitle:
+“See what the GTM signal engine is finding, what needs attention, and what is only being logged for now.”
+
+Keep the existing content, but make it more human and less systems-like.
+
+4. Review Queue → Needs Your Attention
+
+Rename the Review Queue page to:
+Needs Your Attention
+
+Title:
+“Needs your attention”
+
+Subtitle:
+“Accounts and signals that need a human decision before anything happens.”
+
+Replace any “queue” wording in user-facing copy where possible:
+- “review queue” → “review list”
+- “queue rows” → “review items”
+- “in your queue” → “signals to review”
+- “No accounts in the queue yet” → “No signals need review right now.”
+
+Keep internal code names if needed, but do not show them in the UI.
+
+5. Improve Current State card copy
+
+The current labels are still too technical.
+
+Replace “Current State” with:
+“How the system is running right now”
+
+Use more human descriptions:
+
+Live data
+Label: “Real workbook connected”
+Description: “The app is reading from the live GTM workbook.”
+
+Sending
+Label should still use ENGINE_MODE_LABELS.
+For Review Mode, explain:
+“Approvals are saved, but outreach is not sent yet.”
+
+Scoring
+For Per-Visit Scoring:
+“Each website visit or signal is reviewed on its own.”
+For Whole-Company Scoring:
+“All activity from the same company is grouped together.”
+
+Queue writing
+Rename visible label to:
+“New review items”
+If off:
+“Off — scoring can run, but new account review items will not appear here yet.”
+If on:
+“On — new review items can appear here.”
+
+US calling
+If locked:
+“Locked — AI calls to US contacts require legal approval first.”
+If unlocked:
+“Unlocked — US AI calling has been approved.”
+
+Do not show “queue writing” as a user-facing label.
+
+6. Add an MQL filter
+
+On Needs Your Attention, add a clear filter for MQLs / Ready for Sales.
+
+There is already “Ready for Sales”, but add an explicit compact filter chip:
+“MQL / Ready for Sales”
+
+It should match rows where:
+- recommended_output is “MQL”
+or
+- OUTPUT_TYPE_LABELS maps the row to “Ready for Sales”
+or
+- score_tier / recommended_action indicates MQL / outbound-ready if using classic queue rows
+
+Do not remove the existing “Ready for Sales” label, but make the filter understandable for sales/marketing users.
+
+7. Clarify row meaning
+
+On Needs Your Attention, add this short helper text near the filters:
+
+“Start with the recommendation on the left. The score helps explain priority, but the decision should be based on the recommendation, the reason, and whether we are allowed to act.”
+
+For sample mode:
+“These are sample signals so stakeholders can understand the workflow. No action will be sent.”
+
+8. Reports copy alignment
+
+Reports should also refer to:
+- marketplace signals
+- campaign actions
+- manual export
+- month-over-month comparison
+
+Avoid making it sound like a generic analytics dashboard.
+
+Reports title:
+“Campaign signal reports”
+
+Subtitle:
+“Compare campaign activity, estimated action cost, and manual export progress.”
+
+9. Language cleanup
+
+Remove or replace visible generic/technical terms:
+- “queue” where a human-facing word works better
+- “current state” → “how the system is running right now”
+- “sample lead” in main navigation
+- “Mission Control” app title
+
+Keep these banned words out of rendered UI:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+10. Acceptance checks
+
+After changes:
+- typecheck frontend
+- restart
+- confirm sidebar shows:
+  Overview
+  Needs Your Attention
+  Reports
+  Settings
+- confirm app title is GTM Marketplace Signals
+- confirm Try a Sample Lead is no longer in the main sidebar
+- confirm Settings has a Sample workflow entry/link
+- confirm Overview explains what the user is looking at
+- confirm Needs Your Attention explains what rows mean
+- confirm MQL / Ready for Sales filter exists
+- confirm no vendor APIs are called
+- confirm no backend routes were changed unless strictly necessary

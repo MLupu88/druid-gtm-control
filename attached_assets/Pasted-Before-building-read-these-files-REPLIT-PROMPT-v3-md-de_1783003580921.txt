@@ -1,0 +1,263 @@
+Before building, read these files:
+
+- REPLIT_PROMPT_v3.md
+- design-system-extract.md
+- lib/gtm-shared/src/gtmContract.js
+- lib/gtm-shared/src/mockData.js
+- reference/server_n8n.js
+- reference/server_sheets.js
+
+Use them as source-of-truth/reference files.
+
+Do not rewrite the shared contract.
+Do not replace working backend routes unless needed.
+Do not invent labels, statuses, routes, buttons, output types, queue logic, cost labels, disabled-button rules, visitor-safety wording, or visual styling.
+
+Current state:
+- Login works with APP_PASSWORD.
+- Google Sheets live read works.
+- /api/sheets/config works.
+- /api/sheets/queue works.
+- /api/sheets/suppression works.
+- /api/n8n/status works.
+- Settings / Connection Status exists.
+- Active queue currently has 0 rows.
+- n8n is reachable.
+
+Build the remaining DRUID GTM Mission Control app according to REPLIT_PROMPT_v3.md and the shared contract.
+
+Use imports from @workspace/gtm-shared wherever possible:
+- ENGINE_MODE_LABELS
+- QUEUE_SOURCE_LABELS
+- OUTPUT_TYPE_LABELS
+- SALES_REVIEW_REASON_LABELS
+- IDENTITY_LABELS
+- BLOCK_REASON_LABELS
+- STATUS_LABELS_V3
+- BUTTONS
+- ENDPOINTS
+- buttonsForOutput()
+- buttonDisabled()
+- buttonDisabledPhaseC()
+- costLabel()
+- visitorSafeCopy()
+- needsReview()
+- needsReviewAccount()
+- resolveQueueTab()
+- resolveMatchKey()
+
+Build or complete these views:
+
+1. Dashboard
+
+Title: “What needs my attention today?”
+
+Show:
+- sending state using ENGINE_MODE_LABELS
+- active scoring view using QUEUE_SOURCE_LABELS
+- live data status
+- automation status
+- counts by recommendation type using OUTPUT_TYPE_LABELS
+- counts by status using STATUS_LABELS_V3 when available
+- “Needs Your Attention” list using real queue rows only
+- “Recent Activity” using real rows/action data only if available
+
+If the queue is empty, show a calm empty state. Do not invent activity.
+
+2. Review Queue
+
+Main work list.
+One row per account or signal from /api/sheets/queue.
+
+The recommendation must be the first and most visually important item.
+The numeric score is secondary.
+
+Use:
+- OUTPUT_TYPE_LABELS for recommendation/output type
+- IDENTITY_LABELS for identity confidence when available
+- BLOCK_REASON_LABELS for blocked reasons
+- costLabel(row) for cost/credit copy
+- visitorSafeCopy(row.why_now, row.visitor_claim_allowed) before rendering activity or reason text
+
+Support:
+- search by company/domain/contact
+- filter by recommendation type
+- filter by needs review
+- empty state if no rows
+
+Do not show raw field names.
+Do not show raw internal enum values when a label exists.
+
+3. Account Detail
+
+Open from Dashboard or Review Queue.
+
+Sections:
+- About this account
+- Why this recommendation
+- What led here
+- Score explanation
+- People/contact
+- What this would cost
+- Take action
+- What happened on the call, only if call data exists
+
+Use plain-language labels from the shared contract.
+Run activity/reason text through visitorSafeCopy.
+Do not claim a specific person did something unless visitor_claim_allowed allows it.
+If data is missing, show a calm “Not available yet” state, not broken UI.
+
+4. Settings
+
+Keep the current Connection Status.
+
+Clean up raw internal sheet/tab/source names from visible UI.
+
+Add Settings sections required by REPLIT_PROMPT_v3.md:
+- Is sending turned on?
+- Which scoring is active?
+- US calling permission
+- Do-not-contact list
+
+For now:
+- settings changes may be wired to a backend route only if the server-side n8n config proxy exists
+- if not wired yet, show the controls disabled with plain text explaining that changes are not enabled yet
+- do not fake a successful settings change
+
+5. Try a Sample Lead
+
+Build the view but keep it safe.
+
+Use the title:
+“Try a Sample Lead”
+
+Use this explanation:
+“Send a made-up example lead through the system to see how it gets scored and what shows up in the queue. This safely writes a real test row — it does not contact anyone.”
+
+Presets:
+- A person from a US company visits our site
+- A company in Europe visits our site
+- A company in Europe visits and we find a likely contact
+- Someone browses anonymously
+- A known contact from our CRM engages
+- One of our own team members
+- A visitor with a personal email address
+
+Important:
+- It must post only to the server-side route that maps to ENDPOINTS.testSignal.
+- Never post test signals to live intake.
+- If the backend proxy route is missing, show the page but disable the submit button and say the connection is not enabled yet.
+- Do not contact anyone.
+
+Backend write/proxy routes:
+
+If missing, create server-side routes only:
+
+POST /api/n8n/activate
+POST /api/n8n/decision
+POST /api/n8n/action
+POST /api/n8n/config
+POST /api/n8n/test-signal
+
+These must:
+- run server-side only
+- use N8N_BASE_URL and N8N_WEBHOOK_SECRET from process.env
+- never expose N8N_WEBHOOK_SECRET to the browser
+- use endpoint paths from ENDPOINTS in @workspace/gtm-shared
+- include the full row snapshot when acting on a row
+- include approved_by, approved_at, reason
+- require a reason for all human actions
+- return the n8n result honestly
+
+Do not call Retell, HubSpot, Gmail, Cognism, Salesforge, Dripify, Slack, LinkedIn, Google Ads, Meta Ads, or any vendor API directly from the app.
+
+Action UI:
+
+Add action buttons only where allowed by the shared contract:
+- buttonsForOutput()
+- buttonDisabled()
+- buttonDisabledPhaseC()
+- BUTTONS
+
+Every action must open a confirmation modal first.
+
+The modal must show:
+- what will actually happen
+- whether anything will actually be sent or only logged
+- cost line from costLabel(row)
+- required reason text field
+
+Do not say “sent” for email, LinkedIn, owner alert, or ads unless the shared status label says so.
+Use STATUS_LABELS_V3 for result text.
+
+Navigation:
+
+Add navigation for:
+- Dashboard
+- Review Queue
+- Try a Sample Lead
+- Settings
+
+Design:
+
+Use design-system-extract.md as the visual source of truth.
+
+Use:
+- dark mode default
+- DRUID green #00e676 for primary actions and active states
+- background #0a0f0d
+- card #111816
+- border #1f2924
+- muted text #9ca3af
+- Inter for body
+- Plus Jakarta Sans for headings
+- rounded-xl cards
+- subtle borders
+- dense but legible internal-product layout
+
+Do not redesign the visual identity.
+Do not make it look like a sci-fi control room.
+It should feel like a serious internal DRUID product surface.
+
+Rendered UI banned words:
+
+Do not show these anywhere in the visible UI:
+
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed only as a small honest badge if the app is actually using fallback data.
+
+Acceptance checks before you stop:
+- Typecheck frontend and backend.
+- Login still works with APP_PASSWORD.
+- Settings still shows live data connected.
+- Dashboard works with an empty live queue.
+- Review Queue works with an empty live queue.
+- Account Detail works when rows exist and does not crash when rows are missing.
+- Try a Sample Lead is safe and does not use live intake.
+- Browser never receives secrets.
+- No banned words appear in rendered UI.
+- No fake activity is shown.
+- No vendor API is called directly.
+
+Stop after completing the app build and report:
+- files changed
+- routes added
+- views completed
+- what each view shows with the current live data
+- any disabled functionality and why

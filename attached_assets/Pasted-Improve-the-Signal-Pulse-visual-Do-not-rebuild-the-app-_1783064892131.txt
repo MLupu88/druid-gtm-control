@@ -1,0 +1,128 @@
+Improve the Signal Pulse visual.
+
+Do not rebuild the app.
+Do not redesign the whole app.
+Do not change backend routes.
+Do not expose secrets.
+Do not call vendor APIs.
+Do not change the shared contract.
+
+Problem:
+The current Signal Pulse line looks dull and decorative. It looks like a simple sine wave.
+It should feel like a meaningful marketplace-interest pulse.
+
+Goal:
+Make Signal Pulse more visually intentional while staying professional and not sci-fi.
+
+Changes:
+
+1. Replace the smooth sine wave look
+
+Use a pulse waveform that feels like signal activity:
+- mostly calm baseline
+- occasional sharp interest spikes
+- quick recovery
+- slight variation based on pulse score
+
+It should not look medical.
+It should not look like a generic audio waveform.
+It should feel like “marketplace interest is moving”.
+
+2. Make intensity dynamic
+
+The waveform should visually change based on status:
+
+Quiet:
+- mostly flat
+- low amplitude
+- slow movement
+- muted green
+
+Building:
+- moderate movement
+- a few small spikes
+- green/amber accent
+
+Active:
+- stronger movement
+- visible spikes
+- DRUID green
+
+Hot:
+- strongest movement
+- brighter green glow
+- more frequent spikes
+- still tasteful, not aggressive
+
+3. Improve styling
+
+Use:
+- thicker stroke than current
+- subtle glow behind the line
+- very light gradient fill under the pulse, if it looks good
+- rounded line caps
+- DRUID green as the main color
+
+In light mode:
+- line must be clearly visible
+- do not make it neon on white
+- use #00c158 or similar DRUID green
+
+In dark mode:
+- use #00e676 with subtle glow
+
+4. Add a small intensity meter
+
+Below or beside the line, add:
+
+Interest strength: XX / 100
+
+Use a slim progress bar:
+- green fill
+- muted background
+- rounded corners
+
+This makes the pulse feel measurable, not decorative.
+
+5. Keep existing metrics
+
+Keep:
+- MQLs / Ready for Sales
+- Worth a Look
+- Signals captured
+
+But make them visually cleaner, for example as small metric pills.
+
+6. Keep copy business-like
+
+Keep status copy:
+Quiet: “Marketplace interest is quiet right now.”
+Building: “Marketplace interest is building.”
+Active: “Marketplace interest is active.”
+Hot: “Marketplace interest is hot — review sales-ready accounts first.”
+
+Do not call it heartbeat in the UI.
+
+7. Accessibility
+
+Respect prefers-reduced-motion:
+- if reduced motion is enabled, show a static pulse line
+- keep the same interest score and status text
+
+8. Do not break logic
+
+Do not change the scoring logic unless needed for visualization.
+MQL / Ready for Sales must still exclude Worth a Look.
+Blocked rows must not increase pulse.
+
+9. Acceptance checks
+
+After changes:
+- typecheck frontend
+- restart
+- confirm Signal Pulse looks stronger in Sample data mode
+- confirm it still works in Live data mode
+- confirm it looks good in Light mode
+- confirm it looks good in Dark mode
+- confirm Interest strength score is visible
+- report files changed

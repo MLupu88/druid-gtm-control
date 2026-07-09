@@ -1,0 +1,303 @@
+Continue product development with the Campaign Reports + Manual Export Workflow module.
+
+Important context:
+We want PDF campaign exports, cost per action, and current-month vs previous-month comparison added now, but only where technically supportable from current data and honest assumptions.
+
+Production workflow links will come later.
+Do not invent production tracking.
+Do not pretend vendor spend exists.
+Do not pretend Dripify has an API.
+Dripify has no API in our current setup, so LinkedIn must be treated as a logged/manual export workflow, not an automated send.
+
+Do not rebuild the app.
+Do not redesign the app.
+Do not change auth.
+Do not expose secrets.
+Do not call vendor APIs.
+Do not trigger live outreach.
+Do not replace the shared contract.
+Use the current DRUID design system and logo.
+
+Read:
+- REPLIT_PROMPT_v3.md
+- design-system-extract.md
+- lib/gtm-shared/src/gtmContract.js
+- lib/gtm-shared/src/mockData.js
+
+Current app state:
+- Live data works.
+- Sample Data preview mode works.
+- Dashboard, Review Queue, Account Detail, Try a Sample Lead, and Settings exist.
+- /api/sheets/action-log exists.
+- The app has a live/sample data toggle.
+- Sample-row actions must never call n8n.
+
+Add navigation item:
+Reports
+
+Build a Reports page with Live data / Sample data toggle.
+
+Default behavior:
+- Live data remains default.
+- If live action log and live queue data are empty, show:
+  “No campaign activity has been recorded yet. Use Sample data to preview the reporting workflow.”
+- Add button:
+  “View sample report”
+- Do not invent live rows.
+
+Reports page sections:
+
+1. Campaign selector
+
+In Sample data mode, show sample campaigns:
+- Insurance Claims Automation — US
+- Healthcare Patient Scheduling — EMEA
+- Banking Customer Self-Service — Global
+- Marketplace Publisher Recruitment — EMEA
+
+In Live data mode:
+- derive campaigns only from available live rows if campaign fields exist
+- if no campaign field exists, show:
+  “Campaign tracking is not connected yet.”
+- do not fabricate live campaign names
+
+2. Campaign summary
+
+In Sample data mode:
+Show representative metrics:
+- campaign status
+- date range
+- target region
+- target industry
+- accounts reviewed
+- ready for sales
+- worth a look
+- nurture decisions
+- blocked / do-not-contact
+- actions logged
+- estimated cost
+
+Clearly show “Sample data”.
+
+In Live data mode:
+Calculate only from /api/sheets/action-log and /api/sheets/queue if rows exist.
+If no rows exist, show the empty state.
+Do not use sample values in Live data mode.
+
+3. Cost per action
+
+Add a cost breakdown using only supportable assumptions.
+
+Action types:
+- AI call
+- Email approval logged
+- LinkedIn approval logged
+- Account owner notification logged
+- Retargeting marker
+- Nurture decision
+- Reject / not a fit
+- Block / do-not-contact
+
+For each show:
+- count
+- estimated unit cost
+- estimated total cost
+- cost driver
+- execution status
+
+Important:
+- AI calls may have estimated paid calling/minute cost.
+- Email approvals are logged until an email tool is connected.
+- LinkedIn approvals are logged for manual Dripify upload. Do not say LinkedIn was sent automatically.
+- Account owner notifications are logged until CRM writeback is connected.
+- Retargeting markers do not spend ad budget until ad sync is connected.
+- Nurture/reject/block decisions have no direct tool cost.
+- Do not show actual vendor spend unless live data includes it.
+- Label estimates clearly.
+
+4. Manual export workflow
+
+Add a section:
+“Manual export workflow”
+
+Explain plainly:
+- LinkedIn execution is handled outside this app through a manual Dripify import/export workflow.
+- The app can log LinkedIn approvals and prepare them for export.
+- A human imports the CSV into Dripify.
+- Outcomes can be imported back later when available.
+
+Add a table/card for export states:
+- Ready for export
+- Exported for Dripify
+- Imported to Dripify
+- Outcome received
+- No outcome yet
+
+In Sample data mode:
+Show representative rows and counts.
+
+In Live data mode:
+Use live action-log/export rows only if available.
+If no export source exists yet, show:
+“LinkedIn export tracking is not connected yet.”
+
+Do not call Dripify.
+Do not mention an API.
+Do not imply automatic Dripify sync.
+
+5. CSV export for Dripify
+
+Implement a client-side CSV export if technically feasible without backend secrets.
+
+Button:
+“Download LinkedIn CSV”
+
+CSV should include only sample data in Sample mode, or live export-ready rows if live source exists.
+
+Columns:
+- campaign_name
+- company_name
+- company_domain
+- contact_name
+- contact_title
+- linkedin_profile_url
+- country
+- industry
+- recommended_solution
+- safe_context
+- message_1
+- message_2
+- message_3
+- status
+
+Rules:
+- In Sample mode, filename should include “sample”.
+- Do not include secrets.
+- Do not include raw technical fields.
+- Do not claim exported rows were imported to Dripify.
+- If no rows are available, disable the button with a clear message.
+
+6. Cost assumptions
+
+Add a visible section:
+“Cost assumptions”
+
+Include:
+- Costs are estimates until production cost feeds are connected.
+- AI calls may consume call minutes and telephony.
+- Email approvals are logged until an email tool is connected.
+- LinkedIn approvals are prepared for manual Dripify upload.
+- Account owner notifications are logged until CRM writeback is connected.
+- Retargeting markers do not spend ad budget until ad sync is connected.
+- Actual cost per action requires production action logs plus vendor cost data.
+
+7. Current month vs previous month
+
+In Sample data mode:
+Show a representative month-over-month comparison.
+
+Metrics:
+- accounts reviewed
+- ready for sales
+- worth a look
+- actions logged
+- estimated cost
+- estimated cost per ready-for-sales account
+- blocked / do-not-contact count
+- LinkedIn approvals logged
+- LinkedIn rows exported
+
+Show:
+- current month
+- previous month
+- absolute change
+- percentage change
+- plain direction text
+
+Use plain language:
+- up from last month
+- down from last month
+- no change
+
+In Live data mode:
+Only calculate if live rows have usable dates.
+If there is not enough dated history, show:
+“Not enough history yet. Month-over-month reporting starts once campaign activity is recorded across two calendar months.”
+
+Do not overclaim performance.
+Do not imply revenue impact.
+
+8. PDF export
+
+Implement PDF export if technically feasible client-side without backend secrets.
+
+Button:
+“Export campaign report”
+
+Export should include:
+- campaign name
+- sample/live label
+- campaign summary
+- cost per action table
+- manual export workflow summary
+- cost assumptions
+- month-over-month comparison
+- data readiness note
+
+Rules:
+- Do not include raw internal field names.
+- Do not include secrets.
+- Do not include banned UI words.
+- If PDF generation is not technically feasible in this pass, show the button disabled with:
+  “PDF export layout is ready, but export generation is not connected yet.”
+
+9. Data readiness
+
+Add a section:
+“Data readiness”
+
+Show:
+- Campaign activity source: connected / no rows yet
+- Action log source: connected / no rows yet
+- LinkedIn export source: not connected yet / ready when export rows exist
+- Cost data: estimated until vendor spend is connected
+- Month comparison: ready only after two months of dated activity
+- PDF export: available / not connected
+
+Rendered UI banned words:
+Do not show these anywhere in visible UI:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+Design:
+Use the current DRUID design system and logo.
+Keep it close to final product quality.
+This should feel like a real reporting area, not a placeholder.
+
+After changes:
+- typecheck frontend and backend
+- restart
+- report files changed
+- explain what is live-data-backed
+- explain what is sample-only
+- explain whether CSV export is implemented
+- explain whether PDF export is implemented
+- confirm no Dripify API is called
+- confirm no vendor APIs are called
+- confirm no production spend is invented

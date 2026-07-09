@@ -1,0 +1,190 @@
+Continue product development with a comprehension and month-comparison pass.
+
+Do not rebuild the app.
+Do not redesign the app.
+Do not change auth.
+Do not change backend routes unless absolutely necessary.
+Do not call vendor APIs.
+Do not trigger live outreach.
+Do not expose secrets.
+Do not replace the shared contract.
+Do not implement real PDF export yet.
+
+Goal:
+Make the app easier to understand for a first-time stakeholder or operator.
+Also improve month-over-month comparative analysis in Reports.
+
+Read:
+- REPLIT_PROMPT_v3.md
+- design-system-extract.md
+- lib/gtm-shared/src/gtmContract.js
+- lib/gtm-shared/src/mockData.js
+
+1. Reports: placeholder export button
+
+Move/add an “Export campaign report” button to the top right of the Reports page header.
+
+For now:
+- keep it disabled
+- label it clearly as planned
+- show helper text or tooltip:
+  “PDF export is planned. The report layout is ready, but export generation is not connected yet.”
+
+Do not implement real PDF export in this pass.
+
+2. Reports: improve month-over-month comparative analysis
+
+The Month-over-month section should become more useful, not just a table.
+
+Add a short insight summary above the table.
+
+In Sample data mode, generate plain-language insights from the sample comparison, for example:
+- “More accounts were reviewed this month.”
+- “Ready-for-sales accounts increased.”
+- “Estimated cost stayed flat.”
+- “LinkedIn export activity increased.”
+- “Blocked accounts also increased, so review data quality and suppression rules should be watched.”
+
+Use actual values from the comparison data, not hardcoded text.
+
+Show:
+- current month
+- previous month
+- absolute change
+- percentage change
+- direction label
+- plain interpretation
+
+Add a small “What this means” card:
+- explain whether volume improved
+- explain whether cost moved
+- explain whether quality/risk changed
+- explain what an operator should look at next
+
+In Live data mode:
+- if there is not enough history, keep the empty state:
+  “Not enough history yet. Month-over-month reporting starts once campaign activity is recorded across two calendar months.”
+- also explain what data is needed:
+  “To enable this, action logs need dated campaign activity for both the current and previous month.”
+
+Do not imply revenue impact.
+Do not invent pipeline or closed-won metrics.
+
+3. Dashboard: explain what the operator is looking at
+
+Add a short explanatory panel near the top of Dashboard, below the title or state banner.
+
+Title:
+“What this page shows”
+
+Copy:
+“This dashboard shows which accounts need a human decision today. In Review Mode, approvals are recorded, but nothing is sent until sending is turned on.”
+
+If Sample data mode is active, add:
+“You are viewing sample accounts to understand the workflow. Switch to Live data to see the real queue.”
+
+If Live data mode is active and queue is empty, add:
+“Your live review queue is empty. That means there are no accounts waiting for a decision right now.”
+
+Keep it concise and product-like.
+
+4. Dashboard: clarify the sections
+
+For “Current State”, add small helper labels:
+- Live data: whether the app is reading the workbook
+- Sending: whether approved actions are sent or only logged
+- Scoring: whether accounts are scored per visit or as whole companies
+- Queue writing: whether new review rows can appear
+- US calling: whether AI calls to US contacts are allowed
+
+For “In your queue”, add helper text:
+“These cards group accounts by the recommendation the system made.”
+
+For “Needs your attention”, add helper text:
+“These are the accounts that still need a human decision.”
+
+5. Review Queue: explain what the operator is looking at
+
+Add a short explanatory panel near the top of Review Queue.
+
+Title:
+“What this list shows”
+
+Copy:
+“Each row is an account or signal the GTM engine thinks may need action. The colored label on the left is the recommendation. The score is secondary — use the recommendation and the reason to decide what to do.”
+
+If Sample data mode is active, add:
+“These are sample rows for understanding the workflow. Actions are preview-only and will not be sent.”
+
+If Live data mode is active and empty, add:
+“There are no live review items yet.”
+
+6. Review Queue: clarify row anatomy
+
+For sample rows and future live rows:
+- recommendation label remains visually strongest
+- score stays secondary
+- add subtle labels or tooltips for:
+  - recommendation
+  - identity confidence
+  - why now
+  - cost/action impact
+  - needs review
+
+Add a compact legend above or beside the filters:
+- “Recommendation” = what the system thinks should happen next
+- “Identity” = how confident we are about who the visitor/contact is
+- “Needs review” = no human decision has been recorded yet
+- “Sample data” = example row, no action will be sent
+
+Keep this calm, not tutorial-heavy.
+
+7. Account Detail: add orientation
+
+At the top of Account Detail, add a short sentence:
+“This page explains why the account received this recommendation and what would happen if you act.”
+
+If sample mode:
+“This is sample data. You can preview the workflow, but no action will be sent.”
+
+8. Language rules
+
+Do not show these anywhere in visible UI:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+Do not say email, LinkedIn, CRM, or ads were sent unless the shared label says so.
+Do not imply Dripify has an API.
+Do not imply production spend exists.
+Do not imply revenue impact.
+
+Design:
+Use the current DRUID design system and logo.
+Keep it close to final product quality.
+The new explanations should feel like helpful product copy, not documentation pasted onto the page.
+
+After changes:
+- typecheck frontend
+- restart
+- report files changed
+- summarize what changed on Dashboard
+- summarize what changed on Review Queue
+- summarize what changed on Reports
+- confirm PDF export is still placeholder only
+- confirm no vendor APIs are called

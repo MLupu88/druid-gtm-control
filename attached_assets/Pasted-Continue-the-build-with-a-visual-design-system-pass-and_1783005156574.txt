@@ -1,0 +1,81 @@
+Continue the build with a visual/design-system pass and logo integration.
+
+Do not rebuild the app.
+Do not change backend routes.
+Do not change data logic.
+Do not replace the shared contract.
+Do not add new integrations.
+
+Read and apply:
+- design-system-extract.md
+- REPLIT_PROMPT_v3.md
+
+Goal:
+Make the app visually conform to the DRUID design system and add the DRUID logo.
+
+Design system requirements:
+- Use Inter for body text.
+- Use Plus Jakarta Sans for headings.
+- Dark mode remains default.
+- Background must use #0a0f0d.
+- Cards/surfaces must use #111816.
+- Borders must use #1f2924.
+- Primary/active green must use #00e676.
+- Muted text must use #9ca3af.
+- Buttons, inputs, cards, badges, and navigation should follow design-system-extract.md.
+- Use rounded-xl cards, subtle borders, dense but legible internal-product spacing.
+- Do not make it look like a sci-fi dashboard.
+- Do not use bright blue as the main brand color. Blue is allowed only for secondary/info states.
+- Primary active states should feel DRUID green.
+
+Logo:
+- Use the DRUID logo asset if present in:
+  artifacts/druid-gtm/src/assets/druid-logo-white.png
+- If a black logo also exists, use:
+  artifacts/druid-gtm/src/assets/druid-logo-black.png
+  for light mode later.
+- Replace the text-only “DRUID / Mission Control” sidebar header with the logo plus “Mission Control”.
+- Keep the logo size restrained and product-like.
+- If the logo file is missing, do not invent one. Keep text fallback and report that the asset is missing.
+
+Navigation:
+- Keep current sections:
+  Dashboard
+  Review Queue
+  Try a Sample Lead
+  Settings
+
+Visual cleanup:
+- Make section headings, cards, badges, inputs, and buttons consistent.
+- Make empty states look intentional, not unfinished.
+- Make the Settings cards visually clearer.
+- Make the Try a Sample Lead scenario cards feel like selectable product cards.
+- Keep all current copy and safety rules.
+- Do not introduce banned rendered UI words.
+
+Rendered UI banned words:
+Do not show these anywhere in visible UI:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+After changes:
+- typecheck frontend
+- restart
+- report files changed
+- confirm whether logo asset was found and used
+- confirm fonts are loaded
+- confirm design tokens are applied

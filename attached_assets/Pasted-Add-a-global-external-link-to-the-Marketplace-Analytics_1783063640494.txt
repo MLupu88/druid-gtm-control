@@ -1,0 +1,117 @@
+Add a global external link to the Marketplace Analytics Looker Studio report.
+
+Do not rebuild the app.
+Do not redesign the app.
+Do not change backend routes.
+Do not expose secrets.
+Do not call vendor APIs.
+Do not replace the shared contract.
+Do not change existing navigation labels.
+
+Goal:
+Add a clear global link from GTM Marketplace Signals to the existing Looker Studio / Google Data Studio dashboard.
+
+Use this public report URL:
+https://datastudio.google.com/u/0/reporting/8475305e-1260-4c51-851d-b2f755d4c82c/page/p_92rv9whn3d
+
+Implementation:
+
+1. Add environment variable
+
+Use:
+VITE_MARKETPLACE_ANALYTICS_URL
+
+Add it to .env.example as:
+VITE_MARKETPLACE_ANALYTICS_URL=
+
+If the app already has a frontend env pattern, follow it.
+
+This is not a secret. It is okay for the browser to use it.
+
+2. Sidebar global link
+
+In the sidebar, add a small external-link section below the main navigation and above Appearance / Sign out.
+
+Section label:
+External analytics
+
+Link label:
+Marketplace Analytics
+
+Add an external-link icon if available.
+
+Click behavior:
+- opens VITE_MARKETPLACE_ANALYTICS_URL in a new browser tab
+- use target="_blank"
+- use rel="noreferrer"
+
+If the env var is missing:
+- show the link disabled or hidden
+- do not crash the app
+
+3. Reports page link
+
+On the Reports page header, add a secondary button/link near the top-right:
+
+Open Marketplace Analytics
+
+Click opens the same URL in a new tab.
+
+This should sit near the export campaign report placeholder, but should not replace the internal Reports page.
+
+4. Copy clarification
+
+On Reports page, add small helper text if useful:
+
+“Use Marketplace Analytics for traffic and campaign source performance. Use this Reports page for GTM signal review, action cost estimates, manual exports, and month-over-month signal reporting.”
+
+Keep it concise.
+
+5. Design
+
+Use current DRUID design system.
+The link should feel like a global utility, not a primary workflow.
+Use subtle outline/secondary button styling.
+Do not make it the main CTA.
+
+6. Do not change
+
+Do not remove:
+- Overview
+- Needs Your Attention
+- Reports
+- Settings
+- Sample data mode
+- CSV export
+- existing report sections
+
+7. Language rules
+
+Do not show banned words:
+webhook
+JSON
+payload
+endpoint
+gate
+engine_mode
+queue_source
+queue_key
+account_key
+ICP_Review_Queue
+ICP_Account_Queue
+ICP_Config
+sandbox
+simulator
+synthetic
+mock
+
+“Sample data” is allowed.
+
+After changes:
+- typecheck frontend
+- restart
+- confirm sidebar shows Marketplace Analytics external link
+- confirm Reports page has Open Marketplace Analytics link
+- confirm both open in a new tab
+- confirm app does not crash if VITE_MARKETPLACE_ANALYTICS_URL is missing
+- report files changed
