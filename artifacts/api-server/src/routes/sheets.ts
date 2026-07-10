@@ -202,6 +202,53 @@ function normalizeActionLogRow(
   };
 }
 
+
+function enrichQueueRowsWithCampaign(
+  queueRows: Record<string, string>[],
+  accountRows: Record<string, string>[],
+): Record<string, string>[] {
+  const byAccountKey = new Map<string, Record<string, string>>();
+  const byDomain = new Map<string, Record<string, string>>();
+
+  for (const account of accountRows) {
+    const accountKey = firstString(account.account_key);
+    const domain = firstString(account.company_domain).toLowerCase();
+
+    if (accountKey) byAccountKey.set(accountKey, account);
+    if (domain) byDomain.set(domain, account);
+  }
+
+  return queueRows.map((row) => {
+    const accountKey = firstString(row.account_key);
+    const domain = firstString(row.company_domain).toLowerCase();
+
+    const account =
+      (accountKey ? byAccountKey.get(accountKey) : undefined) ??
+      (domain ? byDomain.get(domain) : undefined);
+
+    if (!account) return row;
+
+    const campaignName = firstString(
+      row.campaign_name,
+      row.latest_campaign,
+      row.campaign,
+      account.latest_campaign,
+      account.campaign_name,
+      account.campaign,
+    );
+
+    return {
+      ...row,
+      campaign_name: campaignName,
+      latest_campaign: firstString(
+        row.latest_campaign,
+        account.latest_campaign,
+        campaignName,
+      ),
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/sheets/config
 // ---------------------------------------------------------------------------
@@ -249,7 +296,25 @@ router.get("/queue", async (req, res) => {
         : "ICP_Review_Queue";
 
     const rows = await readTab(sheetId, tab);
-    res.json({ source: queueSource, tab, rows, usingSampleData: false });
+
+    let enrichedRows = rows;
+
+    try {
+      const accountRows = await readTab(sheetId, "ICP_Account_Records");
+      enrichedRows = enrichQueueRowsWithCampaign(rows, accountRows);
+    } catch (accountErr) {
+      req.log.warn(
+        { err: accountErr },
+        "sheets/queue: account campaign enrichment unavailable",
+      );
+    }
+
+    res.json({
+      source: queueSource,
+      tab,
+      rows: enrichedRows,
+      usingSampleData: false,
+    });
   } catch (err) {
     req.log.warn({ err }, "sheets/queue: falling back to sample data");
     const isSampleAccountQueue =
