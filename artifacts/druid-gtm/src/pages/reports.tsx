@@ -266,6 +266,523 @@ function downloadCsv(rows: Record<string, string>[], filename: string) {
   URL.revokeObjectURL(url);
 }
 
+
+interface CampaignPdfMeta {
+  status?: string;
+  period?: string;
+  region?: string;
+  industry?: string;
+}
+
+interface CampaignPdfInput {
+  campaignName: string;
+  mode: "sample" | "live";
+  campaignMeta?: CampaignPdfMeta;
+  stats: CampaignStats;
+  costActions: CostAction[];
+  linkedinRows: LinkedInExportRow[];
+  momMetrics: MomMetric[] | null;
+}
+
+function pdfText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[–—]/g, "-")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\u00a0/g, " ")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pdfFilenameSlug(value: string): string {
+  return pdfText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 70);
+}
+
+async function downloadCampaignPdf(input: CampaignPdfInput): Promise<void> {
+  const [{ jsPDF }, { autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: "a4",
+  });
+
+  const tableDoc = doc as typeof doc & {
+    lastAutoTable?: {
+      finalY: number;
+    };
+  };
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
+  const footerReserve = 18;
+
+  const generatedAt = new Date();
+  const campaignName = pdfText(input.campaignName) || "Campaign";
+
+  doc.setProperties({
+    title: `${campaignName} - Campaign Signal Report`,
+    subject: "DRUID GTM campaign signal report",
+    author: "DRUID GTM Mission Control",
+    creator: "DRUID GTM Mission Control",
+  });
+
+  let y = 0;
+
+  const ensureSpace = (requiredHeight = 18) => {
+    if (y + requiredHeight > pageHeight - footerReserve) {
+      doc.addPage();
+      y = 16;
+    }
+  };
+
+  const drawWrapped = (
+    value: string,
+    fontSize = 9,
+    color: [number, number, number] = [56, 61, 71],
+  ) => {
+    const lines = doc.splitTextToSize(
+      pdfText(value),
+      contentWidth,
+    ) as string[];
+
+    ensureSpace(lines.length * 4.2 + 4);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(fontSize);
+    doc.setTextColor(...color);
+    doc.text(lines, margin, y);
+
+    y += lines.length * 4.2 + 3;
+  };
+
+  const drawSectionTitle = (title: string) => {
+    ensureSpace(13);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(91, 74, 163);
+    doc.text(pdfText(title).toUpperCase(), margin, y);
+
+    y += 2;
+
+    doc.setDrawColor(91, 74, 163);
+    doc.setLineWidth(0.35);
+    doc.line(margin, y, pageWidth - margin, y);
+
+    y += 6;
+  };
+
+  const updateYAfterTable = () => {
+    y = (tableDoc.lastAutoTable?.finalY ?? y) + 7;
+  };
+
+  // Header
+  doc.setFillColor(91, 74, 163);
+  doc.rect(0, 0, pageWidth, 27, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(17);
+  doc.setTextColor(255, 255, 255);
+  doc.text("DRUID GTM Mission Control", margin, 11);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text("Campaign signal report", margin, 19);
+
+  y = 37;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(31, 35, 43);
+
+  const campaignTitleLines = doc.splitTextToSize(
+    campaignName,
+    contentWidth,
+  ) as string[];
+
+  doc.text(campaignTitleLines, margin, y);
+  y += campaignTitleLines.length * 7 + 1;
+
+  const metadata = [
+    `Mode: ${input.mode === "sample" ? "Sample data" : "Live data"}`,
+    input.campaignMeta?.status
+      ? `Status: ${input.campaignMeta.status}`
+      : "",
+    input.campaignMeta?.period
+      ? `Period: ${input.campaignMeta.period}`
+      : "",
+    input.campaignMeta?.region
+      ? `Region: ${input.campaignMeta.region}`
+      : "",
+    input.campaignMeta?.industry
+      ? `Industry: ${input.campaignMeta.industry}`
+      : "",
+    `Generated: ${generatedAt.toLocaleString("en-GB")}`,
+  ].filter(Boolean);
+
+  drawWrapped(metadata.join(" | "), 8.5, [90, 95, 105]);
+
+  if (input.mode === "sample") {
+    ensureSpace(14);
+
+    doc.setFillColor(255, 247, 224);
+    doc.setDrawColor(224, 174, 65);
+    doc.roundedRect(
+      margin,
+      y,
+      contentWidth,
+      10,
+      2,
+      2,
+      "FD",
+    );
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(130, 84, 0);
+    doc.text(
+      "SAMPLE DATA - This report is for workflow demonstration and must not be used as external performance reporting.",
+      margin + 4,
+      y + 6.4,
+    );
+
+    y += 16;
+  }
+
+  // Campaign summary
+  drawSectionTitle("Campaign summary");
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Metric", "Value"]],
+    body: [
+      ["Accounts reviewed", pdfText(input.stats.accounts_reviewed)],
+      ["Ready for sales", pdfText(input.stats.ready_for_sales)],
+      ["Worth a look", pdfText(input.stats.worth_a_look)],
+      ["Nurture decisions", pdfText(input.stats.nurture)],
+      ["Blocked", pdfText(input.stats.blocked)],
+      ["Actions logged", pdfText(input.stats.actions_logged)],
+      ["Estimated cost", pdfText(input.stats.estimated_cost)],
+    ],
+    theme: "grid",
+    margin: {
+      left: margin,
+      right: margin,
+      bottom: footerReserve,
+    },
+    styles: {
+      font: "helvetica",
+      fontSize: 8.5,
+      cellPadding: 2.4,
+      overflow: "linebreak",
+      textColor: "#20242C",
+      lineColor: "#D9DCE3",
+      lineWidth: 0.15,
+    },
+    headStyles: {
+      fillColor: "#5B4AA3",
+      textColor: "#FFFFFF",
+      fontStyle: "bold",
+    },
+    columnStyles: {
+      0: { cellWidth: 120 },
+      1: { cellWidth: 55, halign: "right", fontStyle: "bold" },
+    },
+    showHead: "everyPage",
+  });
+
+  updateYAfterTable();
+
+  // Cost breakdown
+  drawSectionTitle("Cost per action");
+
+  const costRows = input.costActions.length
+    ? input.costActions.map((action) => [
+        pdfText(action.type),
+        pdfText(action.count),
+        pdfText(action.unit_cost),
+        pdfText(action.total_cost),
+        pdfText(action.cost_driver),
+        pdfText(action.execution_status),
+      ])
+    : [[
+        "No actions logged",
+        "0",
+        "$0",
+        "$0",
+        "No action data is available for this campaign.",
+        "Not available",
+      ]];
+
+  autoTable(doc, {
+    startY: y,
+    head: [[
+      "Action type",
+      "Count",
+      "Unit cost",
+      "Total",
+      "Cost driver",
+      "Status",
+    ]],
+    body: costRows,
+    theme: "grid",
+    margin: {
+      left: margin,
+      right: margin,
+      bottom: footerReserve,
+    },
+    styles: {
+      font: "helvetica",
+      fontSize: 7.5,
+      cellPadding: 2.1,
+      overflow: "linebreak",
+      valign: "top",
+      textColor: "#20242C",
+      lineColor: "#D9DCE3",
+      lineWidth: 0.15,
+    },
+    headStyles: {
+      fillColor: "#5B4AA3",
+      textColor: "#FFFFFF",
+      fontStyle: "bold",
+    },
+    columnStyles: {
+      0: { cellWidth: 45 },
+      1: { cellWidth: 17, halign: "right" },
+      2: { cellWidth: 28, halign: "right" },
+      3: { cellWidth: 25, halign: "right" },
+      4: { cellWidth: 105 },
+      5: { cellWidth: 35 },
+    },
+    showHead: "everyPage",
+    rowPageBreak: "avoid",
+  });
+
+  updateYAfterTable();
+
+  drawWrapped(
+    "Costs shown in this report are estimates until production vendor cost feeds are connected.",
+    8,
+    [100, 104, 113],
+  );
+
+  // LinkedIn workflow
+  drawSectionTitle("Manual LinkedIn export workflow");
+
+  const linkedinRows = input.linkedinRows.length
+    ? input.linkedinRows.map((row) => [
+        pdfText(
+          row.company_domain
+            ? `${row.company_name} (${row.company_domain})`
+            : row.company_name,
+        ),
+        pdfText(row.country),
+        pdfText(row.industry),
+        pdfText(row.contact_name || "-"),
+        pdfText(row.export_status),
+      ])
+    : [[
+        "No LinkedIn rows",
+        "",
+        "",
+        "",
+        "Nothing ready for export",
+      ]];
+
+  autoTable(doc, {
+    startY: y,
+    head: [[
+      "Company",
+      "Country",
+      "Industry",
+      "Contact",
+      "Export status",
+    ]],
+    body: linkedinRows,
+    theme: "grid",
+    margin: {
+      left: margin,
+      right: margin,
+      bottom: footerReserve,
+    },
+    styles: {
+      font: "helvetica",
+      fontSize: 7.8,
+      cellPadding: 2.2,
+      overflow: "linebreak",
+      textColor: "#20242C",
+      lineColor: "#D9DCE3",
+      lineWidth: 0.15,
+    },
+    headStyles: {
+      fillColor: "#5B4AA3",
+      textColor: "#FFFFFF",
+      fontStyle: "bold",
+    },
+    columnStyles: {
+      0: { cellWidth: 90 },
+      1: { cellWidth: 25 },
+      2: { cellWidth: 45 },
+      3: { cellWidth: 60 },
+      4: { cellWidth: 48 },
+    },
+    showHead: "everyPage",
+    rowPageBreak: "avoid",
+  });
+
+  updateYAfterTable();
+
+  drawWrapped(
+    "LinkedIn activity is prepared for manual CSV export and import into Dripify. No LinkedIn message is sent automatically from this application.",
+    8,
+    [100, 104, 113],
+  );
+
+  // Month-over-month
+  drawSectionTitle("Month-over-month");
+
+  if (input.momMetrics?.length) {
+    autoTable(doc, {
+      startY: y,
+      head: [[
+        "Metric",
+        "This month",
+        "Last month",
+        "Change",
+      ]],
+      body: input.momMetrics.map((metric) => [
+        pdfText(metric.label),
+        pdfText(metric.current),
+        pdfText(metric.previous),
+        pdfText(`${metric.change} ${metric.pct}`),
+      ]),
+      theme: "grid",
+      margin: {
+        left: margin,
+        right: margin,
+        bottom: footerReserve,
+      },
+      styles: {
+        font: "helvetica",
+        fontSize: 8,
+        cellPadding: 2.2,
+        overflow: "linebreak",
+        textColor: "#20242C",
+        lineColor: "#D9DCE3",
+        lineWidth: 0.15,
+      },
+      headStyles: {
+        fillColor: "#5B4AA3",
+        textColor: "#FFFFFF",
+        fontStyle: "bold",
+      },
+      columnStyles: {
+        0: { cellWidth: 130 },
+        1: { cellWidth: 42, halign: "right" },
+        2: { cellWidth: 42, halign: "right" },
+        3: { cellWidth: 48, halign: "right" },
+      },
+      showHead: "everyPage",
+      rowPageBreak: "avoid",
+    });
+
+    updateYAfterTable();
+
+    const insights = buildMomInsights(input.momMetrics);
+
+    if (insights.bullets.length) {
+      drawSectionTitle("Management interpretation");
+
+      for (const insight of insights.bullets) {
+        drawWrapped(`- ${insight}`, 8.5);
+      }
+    }
+
+    if (insights.whatNext.length) {
+      drawSectionTitle("What to do next");
+
+      for (const nextStep of insights.whatNext) {
+        drawWrapped(`- ${nextStep}`, 8.5);
+      }
+    }
+  } else {
+    drawWrapped(
+      "Not enough dated campaign history is available yet. Month-over-month reporting requires activity across two calendar months.",
+      8.5,
+    );
+  }
+
+  // Assumptions and operational status
+  drawSectionTitle("Operational assumptions");
+
+  const assumptions = [
+    "Costs are estimates until production vendor cost feeds are connected.",
+    "Email approvals are logged only; no email-sending tool is connected.",
+    "LinkedIn approvals are prepared for manual import into Dripify.",
+    "Account owner notifications are logged until CRM writeback is connected.",
+    "Retargeting markers do not spend advertising budget until an ad-platform sync is connected.",
+    "Nurture, not-a-fit, and blocked decisions have no direct tool cost.",
+  ];
+
+  for (const assumption of assumptions) {
+    drawWrapped(`- ${assumption}`, 8.2);
+  }
+
+  // Footer and pagination
+  const pageCount = doc.getNumberOfPages();
+
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    doc.setPage(pageNumber);
+
+    doc.setDrawColor(214, 217, 225);
+    doc.setLineWidth(0.2);
+    doc.line(
+      margin,
+      pageHeight - 11,
+      pageWidth - margin,
+      pageHeight - 11,
+    );
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(112, 116, 126);
+
+    doc.text(
+      pdfText(`DRUID GTM Mission Control - ${campaignName}`),
+      margin,
+      pageHeight - 6,
+    );
+
+    doc.text(
+      `Page ${pageNumber} of ${pageCount}`,
+      pageWidth - margin,
+      pageHeight - 6,
+      { align: "right" },
+    );
+  }
+
+  const filenameCampaign = pdfFilenameSlug(campaignName) || "campaign";
+  const filenameDate = generatedAt.toISOString().slice(0, 10);
+
+  doc.save(
+    `druid-${input.mode}-campaign-report-${filenameCampaign}-${filenameDate}.pdf`,
+  );
+}
+
+
 // ─── Live data helpers ────────────────────────────────────────────────────────
 function deriveLiveCampaigns(rows: ActionLogRow[]): string[] {
   const names = new Set<string>();
@@ -477,6 +994,7 @@ export default function ReportsPage() {
   const isSample = viewMode === "sample";
 
   const [selectedId, setSelectedId] = useState<string>(SAMPLE_CAMPAIGNS[0].id);
+  const [pdfExporting, setPdfExporting] = useState(false);
 
   const actionLogQ = useQuery<ActionLogResponse>({
     queryKey: ["sheets", "action-log"],
@@ -540,6 +1058,50 @@ export default function ReportsPage() {
     }));
 
   const hasLiveLinkedIn = liveCsvRows.length > 0;
+  const canExportPdf = isSample || Boolean(activeLiveCampaign);
+
+  async function handlePdfExport() {
+    if (!canExportPdf) return;
+
+    setPdfExporting(true);
+
+    try {
+      await downloadCampaignPdf({
+        campaignName: isSample
+          ? sampleCampaign.name
+          : activeLiveCampaign ?? "Live campaign",
+        mode: isSample ? "sample" : "live",
+        campaignMeta: isSample
+          ? {
+              status: sampleCampaign.status,
+              period: sampleCampaign.dateRange,
+              region: sampleCampaign.region,
+              industry: sampleCampaign.industry,
+            }
+          : undefined,
+        stats: isSample ? sampleStats : liveStats,
+        costActions: isSample ? sampleCosts : liveCostActions,
+        linkedinRows: isSample
+          ? sampleLinkedIn
+          : liveCsvRows.map((row) => ({
+              company_name: row.company_name,
+              company_domain: row.company_domain,
+              country: row.country,
+              industry: row.industry,
+              contact_name: row.contact_name,
+              export_status: "Ready for export",
+            })),
+        momMetrics: isSample ? sampleMom : liveMom,
+      });
+    } catch (error) {
+      console.error("Campaign PDF export failed", error);
+      window.alert(
+        "The campaign report could not be generated. Check the browser console for details.",
+      );
+    } finally {
+      setPdfExporting(false);
+    }
+  }
 
   // Empty state for live mode
   if (!isSample && !loading && !hasLiveData) {
@@ -622,14 +1184,19 @@ export default function ReportsPage() {
             <Button
               size="sm"
               variant="outline"
-              disabled
-              className="gap-2 text-xs opacity-60 cursor-not-allowed"
+              disabled={pdfExporting || !canExportPdf}
+              className="gap-2 text-xs"
+              onClick={() => void handlePdfExport()}
             >
               <FileText className="w-3.5 h-3.5" />
-              Export campaign report
+              {pdfExporting ? "Generating PDF..." : "Export campaign report"}
             </Button>
-            <p className="text-[10px] text-muted-foreground/60 text-right max-w-[200px] leading-snug">
-              PDF export is planned — not connected yet.
+            <p className="text-[10px] text-muted-foreground/60 text-right max-w-[220px] leading-snug">
+              {isSample
+                ? "Exports the selected sample campaign as a PDF."
+                : activeLiveCampaign
+                  ? "Exports the selected live campaign as a PDF."
+                  : "Select a campaign before exporting."}
             </p>
           </div>
           <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
