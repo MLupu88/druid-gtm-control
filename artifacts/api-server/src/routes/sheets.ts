@@ -88,6 +88,120 @@ function stripSensitiveConfigKeys(
   return safe;
 }
 
+
+function parseActionPayload(value: string): Record<string, unknown> {
+  if (!value) return {};
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Older or malformed audit rows remain readable without payload enrichment.
+  }
+
+  return {};
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+
+    const result = String(value).trim();
+    if (result) return result;
+  }
+
+  return "";
+}
+
+function normalizeActionLogRow(
+  row: Record<string, string>,
+): Record<string, string> {
+  const payload = parseActionPayload(row.payload_json);
+
+  const selectedContact =
+    payload.selected_contact &&
+    typeof payload.selected_contact === "object" &&
+    !Array.isArray(payload.selected_contact)
+      ? (payload.selected_contact as Record<string, unknown>)
+      : {};
+
+  return {
+    ...row,
+
+    final_status: firstString(
+      row.final_status,
+      row.status,
+      payload.final_status,
+      payload.status,
+    ),
+
+    campaign_name: firstString(
+      row.campaign_name,
+      payload.campaign_name,
+      payload.latest_campaign,
+      payload.campaign,
+    ),
+
+    contact_name: firstString(
+      row.contact_name,
+      row.selected_contact_name,
+      selectedContact.name,
+      payload.contact_name,
+      payload.best_contact_name,
+    ),
+
+    contact_email: firstString(
+      row.contact_email,
+      row.selected_contact_email,
+      selectedContact.email,
+      payload.contact_email,
+      payload.best_contact_email,
+    ),
+
+    contact_title: firstString(
+      row.contact_title,
+      row.selected_contact_title,
+      selectedContact.title,
+      payload.contact_title,
+      payload.best_contact_title,
+    ),
+
+    linkedin_profile_url: firstString(
+      row.linkedin_profile_url,
+      selectedContact.linkedin,
+      payload.linkedin_profile_url,
+      payload.linkedin,
+      payload.best_contact_linkedin,
+    ),
+
+    country: firstString(
+      row.country,
+      payload.country,
+      payload.country_raw,
+      payload.region,
+    ),
+
+    industry: firstString(
+      row.industry,
+      payload.industry,
+    ),
+
+    recommended_solution: firstString(
+      row.recommended_solution,
+      payload.recommended_solution,
+    ),
+
+    why_now: firstString(
+      row.why_now,
+      payload.why_now,
+      payload.signal_detail,
+    ),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/sheets/config
 // ---------------------------------------------------------------------------
@@ -181,7 +295,7 @@ router.get("/action-log", async (req, res) => {
   }
 
   try {
-    const rows = await readTab(sheetId, "ICP_Action_Log");
+    const rows = (await readTab(sheetId, "ICP_Action_Log")).map(normalizeActionLogRow);
     res.json({ rows, usingSampleData: false });
   } catch (err) {
     req.log.warn({ err }, "sheets/action-log: could not read action log tab");
