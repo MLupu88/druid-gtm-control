@@ -38,7 +38,7 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm --filter @workspace/gtm-action-web... install --frozen-lockfile
 
       - name: Typecheck gtm-action-web
         run: pnpm --filter @workspace/gtm-action-web typecheck
