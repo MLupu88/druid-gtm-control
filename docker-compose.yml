@@ -12,6 +12,12 @@ services:
     networks:
       - n8n_network
 
+  gtm-action-web:
+    image: ghcr.io/mlupu88/druid-gtm-control/gtm-action-web:latest
+    restart: unless-stopped
+    networks:
+      - n8n_network
+
 networks:
   n8n_network:
     external: true
