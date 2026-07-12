@@ -44,6 +44,9 @@ jobs:
         run: pnpm --filter @workspace/gtm-action-web typecheck
 
       - name: Build gtm-action-web
+        env:
+          VITE_GTM_APP_URL: ${{ vars.VITE_GTM_APP_URL }}
+          VITE_WALKTHROUGH_MAILTO: ${{ vars.VITE_WALKTHROUGH_MAILTO }}
         run: pnpm --filter @workspace/gtm-action-web build
 
       - name: Set up Docker Buildx
