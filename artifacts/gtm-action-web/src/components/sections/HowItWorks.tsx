@@ -1,30 +1,30 @@
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { Card } from "@/components/ui/Card";
 
 const STEPS = [
   {
-    title: "Listen",
+    title: "Listen for meaningful activity",
     description:
-      "Collect signals from website, CRM, intent, campaign, partner, and enrichment sources.",
+      "Collect activity from your website, CRM, campaigns, intent tools, partners and enrichment sources.",
   },
   {
-    title: "Build the account picture",
-    description: "Normalize, deduplicate, enrich, and combine activity at the account level.",
+    title: "Build one account picture",
+    description:
+      "Clean up duplicate activity and combine the available company, person and engagement context around the account.",
   },
   {
-    title: "Decide what it means",
+    title: "Decide what it probably means",
     description:
-      "Assess ICP fit, intent, timing, buying context, route to action, and disqualifiers.",
+      "Check fit, intent, timing, customer status, opportunity context and the strength of the buying activity.",
   },
   {
-    title: "Keep a human in control",
+    title: "Put the right action in front of a person",
     description:
-      "Recommend the next action, but require human review where commercial or compliance judgment matters.",
+      "Recommend the next step and require review where commercial judgment, consent or compliance matters.",
   },
   {
-    title: "Act and learn",
+    title: "Record what happened",
     description:
-      "Prepare or route the approved action, record the outcome, and use it in campaign and account reporting.",
+      "Track the recommendation, the human decision, the action status and the eventual outcome so future decisions have better context.",
   },
 ];
 
@@ -33,28 +33,53 @@ export function HowItWorks() {
     <section
       id="how-it-works"
       aria-labelledby="how-it-works-heading"
-      className="border-b border-white/10 px-4 py-20 sm:px-6 lg:px-8"
+      className="overflow-hidden border-b border-white/10 px-4 py-20 sm:px-6 lg:px-8"
     >
-      <div className="mx-auto max-w-7xl">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-0 h-[28rem] w-[46rem] -translate-x-1/2 rounded-full bg-cyan-400/[0.06] blur-3xl"
+      />
+      <div className="relative mx-auto max-w-7xl">
         <SectionHeading
           id="how-it-works-heading"
           eyebrow="How it works"
-          title="How the Action Web works"
+          title="From scattered activity to a decision someone can use."
         />
 
-        <ol className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-5">
-          {STEPS.map((step, index) => (
-            <li key={step.title}>
-              <Card className="h-full">
-                <span className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/30 text-sm font-semibold text-cyan-200">
-                  {index + 1}
-                </span>
-                <h3 className="text-base font-semibold text-white">{step.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-white/70">{step.description}</p>
-              </Card>
-            </li>
-          ))}
-        </ol>
+        <div className="mt-16 lg:flex lg:items-start lg:gap-10">
+          {/* Oversized 5 — a sibling, never forces vertical stacking of the steps */}
+          <div className="mb-10 flex items-center gap-4 lg:mb-0 lg:flex-shrink-0 lg:flex-col lg:items-start lg:gap-2">
+            <span className="bg-gradient-to-b from-cyan-300 to-violet-400 bg-clip-text text-7xl font-bold leading-none text-transparent sm:text-8xl">
+              5
+            </span>
+            <span className="text-sm font-semibold uppercase tracking-wide text-white/40">
+              steps, start to finish
+            </span>
+          </div>
+
+          {/* Timeline */}
+          <div className="relative flex-1">
+            <div
+              aria-hidden="true"
+              className="absolute left-[15px] top-2 bottom-2 w-px bg-gradient-to-b from-cyan-400/60 via-white/15 to-violet-400/40 lg:left-0 lg:right-0 lg:top-4 lg:bottom-auto lg:h-px lg:w-auto lg:bg-gradient-to-r"
+            />
+
+            <ol className="relative space-y-10 lg:grid lg:grid-cols-5 lg:gap-6 lg:space-y-0">
+              {STEPS.map((step, index) => (
+                <li key={step.title} className="relative pl-10 lg:pl-0">
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-0 top-0 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 border-cyan-300 bg-navy-900 text-sm font-semibold text-cyan-200 lg:relative lg:mb-4"
+                  >
+                    {index + 1}
+                  </span>
+                  <h3 className="text-lg font-semibold text-white">{step.title}</h3>
+                  <p className="mt-2 text-base leading-relaxed text-white/70">{step.description}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
       </div>
     </section>
   );

@@ -10,8 +10,12 @@ export function FinalCta() {
     >
       <div className="mx-auto max-w-3xl text-center">
         <h2 id="final-cta-heading" className="text-3xl font-semibold text-white sm:text-4xl">
-          See the Action Web in operation.
+          Stop sending more leads. Start sending better next actions.
         </h2>
+        <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-white/70">
+          See how GTM Action Web can turn fragmented buying activity into decisions that marketing
+          and sales can actually use.
+        </p>
 
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Button href={GTM_APP_URL} variant="primary">

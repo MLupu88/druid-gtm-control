@@ -1,28 +1,7 @@
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { Card } from "@/components/ui/Card";
-import { cn } from "@/lib/utils";
 
-type ChipTone = "cyan" | "red" | "amber" | "grey" | "violet";
-
-const DECISION_CHIPS: { label: string; tone: ChipTone }[] = [
-  { label: "Approve", tone: "cyan" },
-  { label: "Reject", tone: "red" },
-  { label: "Suppress", tone: "red" },
-  { label: "Send to sales review", tone: "amber" },
-  { label: "Notify owner", tone: "grey" },
-  { label: "Nurture", tone: "grey" },
-  { label: "Retarget", tone: "grey" },
-  { label: "Prepare outreach", tone: "grey" },
-  { label: "Request enrichment", tone: "violet" },
-];
-
-const TONE_CLASSES: Record<ChipTone, string> = {
-  cyan: "border-cyan-400/30 bg-cyan-400/10 text-cyan-200",
-  red: "border-red-400/30 bg-red-400/10 text-red-200",
-  amber: "border-amber-400/30 bg-amber-400/10 text-amber-200",
-  grey: "border-slate-400/30 bg-slate-400/10 text-slate-200",
-  violet: "border-violet-400/30 bg-violet-400/10 text-violet-200",
-};
+const FORWARD_ACTIONS = ["Notify owner", "Pipeline assist", "Sales review", "Prepare outreach"];
+const HOLD_ACTIONS = ["Retarget", "Nurture", "Suppress", "No action"];
 
 export function HumanInTheLoop() {
   return (
@@ -34,26 +13,89 @@ export function HumanInTheLoop() {
       <div className="mx-auto max-w-7xl">
         <SectionHeading
           id="human-in-the-loop-heading"
-          eyebrow="Human in the loop"
-          title="Automation recommends. People decide."
-          description="Every recommendation explains what was observed, why the action is suggested, what policy checks applied, and whether execution actually occurred."
+          eyebrow="Human control"
+          title="Automation should reduce busywork, not remove judgment."
+          description={
+            <>
+              <p>
+                The system can recommend what should happen next, but a person remains in control
+                when the decision could affect a prospect, customer, account owner or active
+                opportunity.
+              </p>
+              <p className="mt-4 text-lg font-medium text-white">
+                The objective is not to automate every action. It is to make the next decision
+                easier, faster and better informed.
+              </p>
+            </>
+          }
         />
 
-        <Card className="mt-10">
-          <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/50">
-            Decisions available at the review gate
-          </h3>
-          <ul className="flex flex-wrap gap-2">
-            {DECISION_CHIPS.map((chip) => (
-              <li
-                key={chip.label}
-                className={cn("rounded-full border px-4 py-1.5 text-sm", TONE_CLASSES[chip.tone])}
-              >
-                {chip.label}
-              </li>
-            ))}
-          </ul>
-        </Card>
+        {/* Decision-routing visual */}
+        <div className="mt-16">
+          <div className="flex justify-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-400/50 bg-amber-400/10 px-5 py-2.5 text-base font-medium text-amber-200">
+              Human review where needed
+            </div>
+          </div>
+
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 100 34"
+            preserveAspectRatio="none"
+            className="mx-auto mt-2 h-16 w-full max-w-3xl sm:h-20"
+          >
+            <path
+              d="M50 0 C50 16, 22 12, 22 32"
+              stroke="#fbbf24"
+              strokeWidth={0.6}
+              fill="none"
+              opacity={0.5}
+              vectorEffect="non-scaling-stroke"
+            />
+            <path
+              d="M50 0 C50 16, 78 12, 78 32"
+              stroke="#fbbf24"
+              strokeWidth={0.6}
+              fill="none"
+              opacity={0.5}
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+
+          <div className="mx-auto grid max-w-3xl gap-10 sm:grid-cols-2">
+            <div className="text-center sm:text-left">
+              <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-cyan-200/80">
+                Move the account forward
+              </h3>
+              <ul className="space-y-3">
+                {FORWARD_ACTIONS.map((action) => (
+                  <li
+                    key={action}
+                    className="border-b border-cyan-400/15 pb-3 text-base font-medium text-cyan-100 last:border-b-0"
+                  >
+                    {action}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="text-center sm:text-left">
+              <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/50">
+                Hold or step back
+              </h3>
+              <ul className="space-y-3">
+                {HOLD_ACTIONS.map((action) => (
+                  <li
+                    key={action}
+                    className="border-b border-white/10 pb-3 text-base font-medium text-white/75 last:border-b-0"
+                  >
+                    {action}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );

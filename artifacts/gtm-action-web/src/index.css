@@ -24,3 +24,111 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
+
+section[id] {
+  position: relative;
+}
+
+section[id]:not(:last-of-type)::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(34, 211, 238, 0.35),
+    rgba(167, 139, 250, 0.35),
+    transparent
+  );
+  pointer-events: none;
+}
+
+.awv-dot-grid {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .awv-drift-a {
+    animation: awv-drift-a 14s ease-in-out infinite alternate;
+  }
+  .awv-drift-b {
+    animation: awv-drift-b 18s ease-in-out infinite alternate;
+  }
+  .awv-drift-c {
+    animation: awv-drift-c 11s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes awv-drift-a {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(8px, -10px, 0);
+  }
+}
+
+@keyframes awv-drift-b {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-10px, 6px, 0);
+  }
+}
+
+@keyframes awv-drift-c {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(6px, 8px, 0);
+  }
+}
+
+input[type="range"].awv-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.14);
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"].awv-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #22d3ee, #a78bfa);
+  border: 2px solid #05070f;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.45);
+  cursor: pointer;
+}
+
+input[type="range"].awv-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #22d3ee, #a78bfa);
+  border: 2px solid #05070f;
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.45);
+  cursor: pointer;
+}
+
+input[type="range"].awv-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+input[type="range"].awv-slider:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 4px;
+}
