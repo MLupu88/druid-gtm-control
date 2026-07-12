@@ -1,100 +1,109 @@
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { Card } from "@/components/ui/Card";
-import { cn } from "@/lib/utils";
 
-type GroupTone = "cyan" | "grey" | "amber" | "violet" | "outline";
+const CONNECTED = ["Website and forms", "Manual and CSV imports", "Google Sheets", "n8n"];
 
-const GROUPS: { id: string; label: string; items: string[]; tone: GroupTone }[] = [
-  {
-    id: "connected",
-    label: "Connected",
-    items: ["Website and forms", "Manual and CSV inputs", "n8n", "Google Sheets"],
-    tone: "cyan",
-  },
-  {
-    id: "contract-ready",
-    label: "Contract ready",
-    items: ["RB2B", "Dealfront", "PostHog", "LLM interpretation", "Salesforge"],
-    tone: "grey",
-  },
-  {
-    id: "manual-export",
-    label: "Manual export",
-    items: [
-      "HubSpot",
-      "Paid media",
-      "LinkedIn export / Dripify workflow",
-      "Google Ads audiences",
-      "LinkedIn Ads audiences",
-    ],
-    tone: "amber",
-  },
-  {
-    id: "awaiting-credentials",
-    label: "Awaiting credentials",
-    items: ["Cognism"],
-    tone: "grey",
-  },
-  {
-    id: "planned",
-    label: "Planned",
-    items: ["Client Radar"],
-    tone: "violet",
-  },
-  {
-    id: "post-approval",
-    label: "Post-approval",
-    items: ["Retell", "Data platform (post-approval)", "SSO (post-approval)"],
-    tone: "outline",
-  },
+const ONE_STEP_FURTHER = [
+  { label: "RB2B", status: "webhook" },
+  { label: "Dealfront", status: "webhook" },
+  { label: "PostHog", status: "webhook" },
+  { label: "AI-assisted activity interpretation", status: "webhook" },
+  { label: "Salesforge", status: "webhook" },
+  { label: "HubSpot", status: "manual export" },
+  { label: "Paid media", status: "manual export" },
+  { label: "LinkedIn export (via Dripify)", status: "manual export" },
+  { label: "Google Ads audiences", status: "manual export" },
+  { label: "LinkedIn Ads audiences", status: "manual export" },
 ];
 
-const TONE_CLASSES: Record<GroupTone, string> = {
-  cyan: "border-cyan-400/30 bg-cyan-400/10 text-cyan-200",
-  grey: "border-slate-400/30 bg-slate-400/10 text-slate-200",
-  amber: "border-amber-400/30 bg-amber-400/10 text-amber-200",
-  violet: "border-violet-400/30 bg-violet-400/10 text-violet-200",
-  outline: "border-white/20 bg-transparent text-white/60",
-};
+const FURTHER_OUT = [
+  { label: "Cognism", status: "waiting on access" },
+  { label: "On-demand account research", status: "planned" },
+  { label: "Retell", status: "pending approval" },
+  { label: "Data platform", status: "pending approval" },
+  { label: "Single sign-on", status: "pending approval" },
+];
 
 export function ConnectedEcosystem() {
   return (
     <section
       id="ecosystem"
       aria-labelledby="ecosystem-heading"
-      className="border-b border-white/10 px-4 py-20 sm:px-6 lg:px-8"
+      className="overflow-hidden border-b border-white/10 px-4 py-20 sm:px-6 lg:px-8"
     >
-      <div className="mx-auto max-w-7xl">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute right-0 top-1/3 h-[24rem] w-[24rem] rounded-full bg-violet-500/[0.08] blur-3xl"
+      />
+      <div className="relative mx-auto max-w-7xl">
         <SectionHeading
           id="ecosystem-heading"
-          eyebrow="Connected ecosystem"
-          title="Where signals come from, and how connected each source is"
-          description="Conservative, current-state labels — this map does not imply a live integration where one doesn't exist yet. Internal platform and identity products are named generically."
+          eyebrow="Ecosystem"
+          title="Designed to work with the tools already in your GTM stack."
+          description="Some sources connect directly today. Others work through webhook contracts, manual imports or exports while production access is being added."
         />
 
-        <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {GROUPS.map((group) => (
-            <Card key={group.id}>
-              <h3
-                className={cn(
-                  "inline-flex rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide",
-                  TONE_CLASSES[group.tone],
-                )}
-              >
-                {group.label}
-              </h3>
-              <ul className="mt-4 flex flex-wrap gap-2">
-                {group.items.map((item) => (
+        <div className="relative mt-16">
+          <div
+            aria-hidden="true"
+            className="absolute left-0 right-0 top-4 hidden h-px bg-gradient-to-r from-cyan-400/50 via-white/10 to-transparent sm:block"
+          />
+
+          <div className="space-y-12">
+            <div>
+              <div className="mb-4 flex items-baseline gap-3">
+                <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-cyan-400" />
+                <h3 className="text-base font-semibold text-cyan-200">Closest to the product</h3>
+                <span className="text-sm text-white/40">— connected today</span>
+              </div>
+              <ul className="flex flex-wrap gap-3 pl-0 sm:pl-6">
+                {CONNECTED.map((item) => (
                   <li
                     key={item}
-                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70"
+                    className="rounded-full border border-cyan-400/40 bg-cyan-400/10 px-4 py-2 text-base font-medium text-cyan-100"
                   >
                     {item}
                   </li>
                 ))}
               </ul>
-            </Card>
-          ))}
+            </div>
+
+            <div className="sm:pl-14">
+              <div className="mb-4 flex items-baseline gap-3">
+                <span className="h-2 w-2 flex-shrink-0 rounded-full bg-white/40" />
+                <h3 className="text-base font-medium text-white/70">One step further</h3>
+                <span className="text-sm text-white/35">— webhook or manual today</span>
+              </div>
+              <ul className="flex flex-wrap gap-2.5 pl-0 sm:pl-6">
+                {ONE_STEP_FURTHER.map((tool) => (
+                  <li
+                    key={tool.label}
+                    className="rounded-full border border-white/15 bg-white/[0.04] px-3.5 py-1.5 text-sm text-white/60"
+                  >
+                    {tool.label}
+                    <span className="ml-1.5 text-white/30">· {tool.status}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="opacity-70 sm:pl-28">
+              <div className="mb-4 flex items-baseline gap-3">
+                <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-white/25" />
+                <h3 className="text-sm font-medium text-white/45">Further out</h3>
+              </div>
+              <ul className="flex flex-wrap gap-2 pl-0 sm:pl-6">
+                {FURTHER_OUT.map((tool) => (
+                  <li
+                    key={tool.label}
+                    className="rounded-full border border-white/10 bg-white/[0.02] px-3 py-1 text-xs text-white/40"
+                  >
+                    {tool.label}
+                    <span className="ml-1.5 text-white/25">· {tool.status}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
     </section>

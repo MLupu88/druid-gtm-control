@@ -1,22 +1,20 @@
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { Card } from "@/components/ui/Card";
-import { Check, X } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 const BEFORE = [
-  "Isolated signals treated as if each one proves intent on its own",
-  "Duplicate records across tools inflating the apparent lead count",
-  "Weak-fit leads that pass a form-fill threshold but not a commercial one",
-  "No CRM context to confirm the signal is connected to a real account",
-  "Sales rejects most MQLs, and the rejection is rarely fed back",
+  "Every new activity is treated like a new lead",
+  "Duplicate activity inflates the apparent opportunity",
+  "Sales receives MQLs with little commercial context",
+  "Customers and open opportunities can enter the wrong journey",
+  "Marketing rarely learns why sales rejected a lead",
 ];
 
 const AFTER = [
-  "Account-level context that ties every signal back to a real buyer",
-  "Combined signals assessed together, not counted one at a time",
-  "Customer and opportunity checks before anything is labelled a lead",
-  "An explicit \"why now\" for every recommended action",
-  "Human approval before an action reaches sales or a prospect",
-  "Recorded sales acceptance, not just a marketing-assigned score",
+  "Activity is combined around the account",
+  "CRM, customer and opportunity context is checked first",
+  "Every recommendation includes a clear reason",
+  "A person can approve, change or reject the proposed action",
+  "The outcome becomes part of the account history",
 ];
 
 export function ProblemStatement() {
@@ -30,50 +28,63 @@ export function ProblemStatement() {
         <SectionHeading
           id="problem-heading"
           eyebrow="The problem"
-          title="A click is not an MQL. A form fill is not always an opportunity."
+          title="Most GTM stacks collect activity. They do not decide what it means."
         />
 
         <div className="mt-8 max-w-3xl space-y-4 text-base leading-relaxed text-white/70">
           <p>
-            Most GTM systems count isolated actions — a form fill, an ad click, a page visit, a
-            webinar registration, a CRM contact, an anonymous visit — as if each one, alone,
-            proves that sales should act. None of them do.
+            A pricing-page visit might matter. So might a form fill, an ad click, a webinar
+            registration or a second visit from the same company.
+          </p>
+          <p>But none of those actions, on its own, tells you whether sales should act.</p>
+          <p>
+            The useful picture comes from the combination: who the account is, whether it fits
+            your market, what it has already done, whether it is already a customer or open
+            opportunity, and whether the activity is strong enough to justify a commercial
+            response.
           </p>
           <p className="text-lg font-medium text-white">
-            The problem is not a shortage of signals. The problem is deciding which combinations
-            of signals justify commercial action.
+            The problem is not a shortage of signals. It is knowing which signals deserve action.
           </p>
-          <p>GTM Action Web is the governed layer between signal collection and execution.</p>
         </div>
 
-        <div className="mt-12 grid gap-6 md:grid-cols-2">
-          <Card>
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/50">
-              Before
-            </h3>
-            <ul className="space-y-3">
+        <div className="mt-16 grid gap-8 lg:grid-cols-[1fr_auto_1fr] lg:items-center lg:gap-8">
+          {/* Scattered activity */}
+          <div>
+            <p className="mb-5 text-sm font-semibold uppercase tracking-wide text-white/40">
+              Scattered activity
+            </p>
+            <div className="space-y-4">
               {BEFORE.map((item) => (
-                <li key={item} className="flex gap-3 text-sm text-white/70">
-                  <X aria-hidden="true" className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-400" />
-                  <span>{item}</span>
-                </li>
+                <div key={item} className="flex items-start gap-3">
+                  <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-white/25" />
+                  <p className="text-base text-white/50">{item}</p>
+                </div>
               ))}
-            </ul>
-          </Card>
+            </div>
+          </div>
 
-          <Card className="border-cyan-400/20 bg-cyan-400/[0.03]">
-            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-cyan-200/80">
-              After
-            </h3>
-            <ul className="space-y-3">
+          {/* Transformation marker */}
+          <div className="flex justify-center py-2 lg:py-0">
+            <div className="flex flex-shrink-0 items-center justify-center rounded-full border border-cyan-400/50 bg-cyan-400/10 p-4">
+              <ArrowRight aria-hidden="true" className="h-6 w-6 rotate-90 text-cyan-200 lg:rotate-0" />
+            </div>
+          </div>
+
+          {/* One account picture */}
+          <div>
+            <p className="mb-5 text-sm font-semibold uppercase tracking-wide text-cyan-200/80">
+              One account picture
+            </p>
+            <ul className="space-y-4 border-l-2 border-cyan-400/30 pl-6">
               {AFTER.map((item) => (
-                <li key={item} className="flex gap-3 text-sm text-white/80">
-                  <Check aria-hidden="true" className="mt-0.5 h-4 w-4 flex-shrink-0 text-cyan-300" />
-                  <span>{item}</span>
+                <li key={item} className="relative text-base text-white/85">
+                  <span className="absolute -left-[1.72rem] top-2 h-2.5 w-2.5 rounded-full bg-cyan-400" />
+                  {item}
                 </li>
               ))}
             </ul>
-          </Card>
+          </div>
         </div>
       </div>
     </section>
