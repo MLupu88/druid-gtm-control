@@ -36,3 +36,25 @@ docker compose up -d
 That change will require `docker-compose.yml` to reference the `image:` from
 GHCR (and a login step / pull secret on the server if the package is private).
 This is intentionally out of scope for now.
+
+**Note — GHCR package visibility:** `ghcr.io/mlupu88/druid-gtm-control` is
+currently **private**. A production server cannot `docker pull` it
+anonymously. Before the pull-based deployment above is enabled, the server
+must authenticate to `ghcr.io` using GitHub username `MLupu88` and a token
+with `read:packages` permission. That token must never be committed to the
+repository, written into this file, or placed in a tracked `.env` file —
+supply it securely at runtime, e.g.:
+
+```
+echo "$GHCR_TOKEN" | docker login ghcr.io -u MLupu88 --password-stdin
+```
+
+After authentication, the future deployment flow will use:
+
+```
+docker compose pull
+docker compose up -d
+```
+
+This note is documentation only — it does not switch production away from
+its current local-build deployment method.
