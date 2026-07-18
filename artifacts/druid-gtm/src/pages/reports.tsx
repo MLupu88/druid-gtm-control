@@ -27,6 +27,60 @@ import {
   Minus,
   ChevronRight,
 } from "lucide-react";
+import {
+  DECISION_LABELS,
+  OUTPUT_TYPE_LABELS,
+  ACTION_TYPE_LABELS,
+  humanizeToken,
+  getTruthfulStatusPresentation,
+} from "@workspace/gtm-shared";
+
+// Live-data presentation helpers — map raw enums/values from the campaign-report API
+// to business language for on-screen tables and the human-readable PDF export. The
+// CSV export is left raw on purpose: it's an operational/interchange format, not
+// something an operator reads directly.
+
+function decisionLabel(decision: string): string {
+  if (!decision) return "";
+  return DECISION_LABELS[decision as keyof typeof DECISION_LABELS] ?? humanizeToken(decision);
+}
+
+// Never falls back to the raw enum — an unmapped output type is humanized, not shown verbatim.
+function outputLabel(out: string): string {
+  if (!out) return "";
+  return OUTPUT_TYPE_LABELS[out as keyof typeof OUTPUT_TYPE_LABELS]?.label ?? humanizeToken(out);
+}
+
+// action_type describes the REQUESTED operation (e.g. "Notify account owner"),
+// never a claim that it was externally completed. Kept separate from outputLabel —
+// action_type and recommended_output are different concepts.
+function actionTypeLabel(actionType: string): string {
+  if (!actionType) return "";
+  return (
+    ACTION_TYPE_LABELS[actionType as keyof typeof ACTION_TYPE_LABELS] ?? humanizeToken(actionType)
+  );
+}
+
+// recommended_action / recommended_solution are usually already human-written text
+// from the sheet (e.g. "Approve email sequence (Salesforge)") — only humanize values
+// that look like a raw enum token (snake_case / single lowercase word, no spaces or
+// punctuation), so we never rewrite text that's already readable.
+function humanizeIfEnumLike(value: string): string {
+  if (!value) return value;
+  const trimmed = value.trim();
+  const looksEnumLike = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/.test(trimmed);
+  return looksEnumLike ? humanizeToken(trimmed) : value;
+}
+
+// Status text for a live report row — reuses the exact same proof-based rule as the
+// Cockpit action modal (getTruthfulStatusPresentation): only shows a confirmed-success
+// phrase when the row carries explicit persistence/execution proof fields; otherwise
+// the neutral request/status wording. `row` is typed `unknown` on purpose so any report
+// row type can be passed as evidence without a cast or loosening that type's definition.
+function liveStatusLabel(status: string, row: unknown, emptyFallback: string): string {
+  if (!status) return emptyFallback;
+  return getTruthfulStatusPresentation(status, row).message;
+}
 
 const ANALYTICS_URL: string =
   (import.meta.env.VITE_MARKETPLACE_ANALYTICS_URL as string | undefined) ||
@@ -1464,8 +1518,14 @@ async function downloadLiveCampaignPdf(input: LiveCampaignPdfInput): Promise<voi
     input.attentionAccounts.map((a) => [
       pdfText(a.company_domain ? `${a.company_name} (${a.company_domain})` : a.company_name),
       pdfText(a.why_now),
-      pdfText([a.recommended_output, a.recommended_action, a.recommended_solution].filter(Boolean).join(" / ")),
-      pdfText(a.final_status || "Not yet decided"),
+      pdfText(
+        [
+          outputLabel(a.recommended_output),
+          humanizeIfEnumLike(a.recommended_action),
+          humanizeIfEnumLike(a.recommended_solution),
+        ].filter(Boolean).join(" / "),
+      ),
+      pdfText(liveStatusLabel(a.final_status, a, "Not yet decided")),
     ]),
     "No accounts currently require attention.",
     { 0: { cellWidth: 65 }, 1: { cellWidth: 100 }, 2: { cellWidth: 90 }, 3: { cellWidth: 40 } },
@@ -1478,7 +1538,13 @@ async function downloadLiveCampaignPdf(input: LiveCampaignPdfInput): Promise<voi
     ["Company", "Recommended", "Why now"],
     input.recommendations.map((r) => [
       pdfText(r.company_domain ? `${r.company_name} (${r.company_domain})` : r.company_name),
-      pdfText([r.recommended_output, r.recommended_action, r.recommended_solution].filter(Boolean).join(" / ")),
+      pdfText(
+        [
+          outputLabel(r.recommended_output),
+          humanizeIfEnumLike(r.recommended_action),
+          humanizeIfEnumLike(r.recommended_solution),
+        ].filter(Boolean).join(" / "),
+      ),
       pdfText(r.why_now),
     ]),
     "No recommendations recorded.",
@@ -1492,7 +1558,7 @@ async function downloadLiveCampaignPdf(input: LiveCampaignPdfInput): Promise<voi
     ["Company", "Decision", "Decided at", "Why now"],
     input.decisions.map((d) => [
       pdfText(d.company_domain ? `${d.company_name} (${d.company_domain})` : d.company_name),
-      pdfText(d.decision),
+      pdfText(decisionLabel(d.decision)),
       pdfText(d.decided_at || "—"),
       pdfText(d.why_now),
     ]),
@@ -1507,8 +1573,8 @@ async function downloadLiveCampaignPdf(input: LiveCampaignPdfInput): Promise<voi
     ["Company", "Action type", "Status", "Action at", "Cost status"],
     input.actions.map((a) => [
       pdfText(a.company_domain ? `${a.company_name} (${a.company_domain})` : a.company_name),
-      pdfText(a.action_type),
-      pdfText(a.final_status || a.status),
+      pdfText(actionTypeLabel(a.action_type)),
+      pdfText(liveStatusLabel(a.final_status || a.status, a, "—")),
       pdfText(a.action_at || "—"),
       pdfText(a.cost_status),
     ]),
@@ -1538,7 +1604,7 @@ async function downloadLiveCampaignPdf(input: LiveCampaignPdfInput): Promise<voi
     ["Company", "Action type", "Actual cost", "Estimated cost", "Cost status"],
     input.costs.map((c) => [
       pdfText(c.company_name),
-      pdfText(c.action_type),
+      pdfText(actionTypeLabel(c.action_type)),
       pdfText(c.actual_cost || "—"),
       pdfText(c.estimated_cost || "—"),
       pdfText(c.cost_status),
@@ -2462,9 +2528,15 @@ export default function ReportsPage() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground max-w-[280px]">{a.why_now || "—"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {[a.recommended_output, a.recommended_action, a.recommended_solution].filter(Boolean).join(" / ") || "—"}
+                      {[
+                        outputLabel(a.recommended_output),
+                        humanizeIfEnumLike(a.recommended_action),
+                        humanizeIfEnumLike(a.recommended_solution),
+                      ].filter(Boolean).join(" / ") || "—"}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{a.final_status || "Not yet decided"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {liveStatusLabel(a.final_status, a, "Not yet decided")}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -2495,7 +2567,11 @@ export default function ReportsPage() {
                       {r.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{r.company_domain}</span>}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {[r.recommended_output, r.recommended_action, r.recommended_solution].filter(Boolean).join(" / ") || "—"}
+                      {[
+                        outputLabel(r.recommended_output),
+                        humanizeIfEnumLike(r.recommended_action),
+                        humanizeIfEnumLike(r.recommended_solution),
+                      ].filter(Boolean).join(" / ") || "—"}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground max-w-[320px]">{r.why_now || "—"}</TableCell>
                   </TableRow>
@@ -2528,7 +2604,7 @@ export default function ReportsPage() {
                       {d.company_name}
                       {d.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{d.company_domain}</span>}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{d.decision}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{decisionLabel(d.decision)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{d.decided_at || "—"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground max-w-[280px]">{d.why_now || "—"}</TableCell>
                   </TableRow>
@@ -2562,8 +2638,10 @@ export default function ReportsPage() {
                       {a.company_name}
                       {a.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{a.company_domain}</span>}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{a.action_type || "—"}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{a.final_status || a.status || "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{actionTypeLabel(a.action_type) || "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {liveStatusLabel(a.final_status || a.status, a, "—")}
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{a.action_at || "—"}</TableCell>
                     <TableCell><CostStatusBadge status={a.cost_status} /></TableCell>
                   </TableRow>
@@ -2627,7 +2705,7 @@ export default function ReportsPage() {
                 {costs.map((c, i) => (
                   <TableRow key={i} className="hover:bg-white/[0.02]">
                     <TableCell className="text-sm font-medium text-foreground">{c.company_name}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{c.action_type || "—"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{actionTypeLabel(c.action_type) || "—"}</TableCell>
                     <TableCell className="text-xs text-right text-muted-foreground">{c.actual_cost || "—"}</TableCell>
                     <TableCell className="text-xs text-right text-muted-foreground">{c.estimated_cost || "—"}</TableCell>
                     <TableCell><CostStatusBadge status={c.cost_status} /></TableCell>

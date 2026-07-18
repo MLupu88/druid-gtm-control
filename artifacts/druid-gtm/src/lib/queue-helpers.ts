@@ -3,6 +3,8 @@ import {
   IDENTITY_LABELS,
   BLOCK_REASON_LABELS,
   STATUS_LABELS_V3,
+  STATUS_FALLBACK_LABEL,
+  humanizeToken,
   needsReview,
   needsReviewAccount,
   visitorSafeCopy,
@@ -90,14 +92,17 @@ export function outputTypeBadgeClasses(out: OutputTypeKey): string {
   }
 }
 
-// Human-readable block reason
+// Human-readable block reason — never leaks a raw internal enum (e.g. "excluded:internal")
 export function blockReasonText(reason: string): string {
-  return BLOCK_REASON_LABELS[reason as keyof typeof BLOCK_REASON_LABELS] ?? reason;
+  return (
+    BLOCK_REASON_LABELS[reason as keyof typeof BLOCK_REASON_LABELS] ?? humanizeToken(reason)
+  );
 }
 
-// Human-readable status label
+// Human-readable status label — falls back to the same neutral, non-overclaiming
+// wording used everywhere else, never the raw final_status string.
 export function statusLabelText(status: string): string {
-  return STATUS_LABELS_V3[status as keyof typeof STATUS_LABELS_V3] ?? status;
+  return STATUS_LABELS_V3[status as keyof typeof STATUS_LABELS_V3] ?? STATUS_FALLBACK_LABEL;
 }
 
 // Get safe why_now text for display

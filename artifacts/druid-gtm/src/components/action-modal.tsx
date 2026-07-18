@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { AlertCircle, CheckCircle2, Info } from "lucide-react";
-import { BUTTONS, STATUS_LABELS_V3 } from "@workspace/gtm-shared";
+import { BUTTONS, getTruthfulStatusPresentation } from "@workspace/gtm-shared";
 import {
   type Row,
   type ButtonKey,
@@ -28,7 +28,7 @@ interface ActionModalProps {
   previewOnly?: boolean;
 }
 
-type Phase = "confirm" | "loading" | "success" | "error";
+type Phase = "confirm" | "loading" | "success" | "pending" | "error";
 
 export function ActionModal({
   open,
@@ -98,11 +98,21 @@ export function ActionModal({
         data.data && typeof data.data === "object"
           ? String((data.data as Record<string, unknown>).final_status ?? "")
           : "";
-      const statusText =
-        STATUS_LABELS_V3[finalStatus as keyof typeof STATUS_LABELS_V3] ?? btn.honest;
 
-      setResultMessage(statusText);
-      setPhase("success");
+      // Never fall back to btn.honest here: that describes what the button was expected
+      // to do (intent), not what the server actually confirmed happened. The phase/message
+      // pair is decided entirely by getTruthfulStatusPresentation, the single source of
+      // truth for this rule.
+      const responseData = data.data as Record<string, unknown> | undefined;
+      const { phase: resultPhase, message } = getTruthfulStatusPresentation(
+        finalStatus,
+        responseData,
+      );
+
+      setResultMessage(message);
+      setPhase(resultPhase as Phase);
+      // "Request handled; refresh state" — fires for both persisted and pending
+      // outcomes. Not a claim of external execution success.
       onSuccess?.();
     } catch {
       setErrorMessage("Could not reach the server. Please check your connection.");
@@ -185,6 +195,17 @@ export function ActionModal({
             </div>
           )}
 
+          {phase === "pending" && (
+            <div className="flex flex-col items-center py-6 text-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-blue-500/15 flex items-center justify-center">
+                <Info className="w-6 h-6 text-blue-400" />
+              </div>
+              <p className="text-sm text-foreground leading-relaxed max-w-sm">
+                {resultMessage}
+              </p>
+            </div>
+          )}
+
           {phase === "error" && (
             <div className="flex items-start gap-3 rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -222,7 +243,7 @@ export function ActionModal({
               )}
             </>
           )}
-          {(phase === "success" || phase === "loading") && (
+          {(phase === "success" || phase === "pending" || phase === "loading") && (
             <Button
               onClick={handleClose}
               disabled={phase === "loading"}
