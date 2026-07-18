@@ -21,6 +21,9 @@ import {
   matchedByDisplay,
   scoreTierLabel,
   firstValidNumber,
+  isRowProcessed,
+  DECISION_LABELS,
+  humanizeToken,
 } from "@workspace/gtm-shared";
 import {
   type Row,
@@ -28,11 +31,13 @@ import {
   rowOutputType,
   rowIdentityLabel,
   rowButtons,
+  rowNeedsReview,
   isButtonDisabled,
   isButtonDisabledAccount,
   safeWhyNow,
   rowCostLabel,
   blockReasonText,
+  statusLabelText,
 } from "@/lib/queue-helpers";
 import { cn } from "@/lib/utils";
 import { BUTTONS } from "@workspace/gtm-shared";
@@ -81,6 +86,18 @@ export function AccountDetailSheet({
   const buttons = rowButtons(row, source);
   const isAccountQueue = String(source).toLowerCase() === "account_queue";
   const isTestRow = String(row.test_mode).toLowerCase() === "true";
+  // Once a decision/final status has actually been persisted, this row must not offer
+  // decision buttons again — it must show what was recorded instead. Deliberately based
+  // only on persisted evidence (operator_decision/final_status), never on engine/gate
+  // state — a row the engine simply isn't asking about right now is not the same thing
+  // as a row a human has actually decided on.
+  const isProcessed = isRowProcessed(row);
+  const processedDecisionLabel = row.final_status
+    ? statusLabelText(row.final_status)
+    : row.operator_decision
+    ? DECISION_LABELS[row.operator_decision as keyof typeof DECISION_LABELS] ??
+      humanizeToken(row.operator_decision)
+    : "Decision recorded.";
 
   function getDisabled(btnKey: ButtonKey): { disabled: boolean; reason: string } {
     if (isAccountQueue) {
@@ -357,8 +374,36 @@ export function AccountDetailSheet({
               </Section>
             )}
 
-            {/* Take action */}
-            {buttons.length > 0 && (
+            {/* Decision already recorded — shown instead of action buttons so a
+                processed row can never be decided twice. */}
+            {isProcessed && (
+              <Section title="Decision recorded">
+                <div className="px-3 py-2.5 rounded-lg bg-muted/30 border border-border space-y-1">
+                  <p className="text-sm font-medium text-foreground">
+                    {processedDecisionLabel}
+                  </p>
+                  {row.reason && (
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {row.reason}
+                    </p>
+                  )}
+                  {(row.approved_by || row.approved_at) && (
+                    <p className="text-[11px] text-muted-foreground/70">
+                      {[
+                        row.approved_by && `By ${row.approved_by}`,
+                        row.approved_at,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
+                </div>
+              </Section>
+            )}
+
+            {/* Take action — only when the row still genuinely needs a human decision
+                AND no decision has already been persisted for it. */}
+            {rowNeedsReview(row, source) && !isProcessed && buttons.length > 0 && (
               <Section title="Take action">
                 {activeActionButtons.length > 0 && (
                   <div className="flex flex-col gap-2">

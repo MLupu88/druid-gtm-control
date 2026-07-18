@@ -1,6 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
-import { OUTPUT_TYPE_LABELS, MOCK_ACCOUNT_QUEUE, firstValidNumber } from "@workspace/gtm-shared";
+import {
+  OUTPUT_TYPE_LABELS,
+  MOCK_ACCOUNT_QUEUE,
+  firstValidNumber,
+  countUnresolvedRows,
+  QUEUE_QUERY_KEY,
+} from "@workspace/gtm-shared";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -49,9 +55,12 @@ const SAMPLE_SOURCE = "account_queue";
 export default function QueuePage() {
   const [selectedRow, setSelectedRow] = useState<Row | null>(null);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<FilterType>("all");
+  // Default to the unresolved-only view — a row that already has a persisted decision
+  // is not something that "needs your attention," so it must not be the default sight.
+  const [filter, setFilter] = useState<FilterType>("attention");
   const { viewMode, setViewMode } = useSampleMode();
   const isSampleMode = viewMode === "sample";
+  const queryClient = useQueryClient();
 
   const configQ = useQuery<ConfigResponse>({
     queryKey: ["sheets", "config"],
@@ -63,7 +72,7 @@ export default function QueuePage() {
   });
 
   const queueQ = useQuery<QueueResponse>({
-    queryKey: ["sheets", "queue"],
+    queryKey: QUEUE_QUERY_KEY,
     queryFn: () =>
       fetch("/api/sheets/queue", { credentials: "include" }).then(
         (r) => r.json(),
@@ -78,6 +87,13 @@ export default function QueuePage() {
 
   const rows = isSampleMode ? SAMPLE_ROWS : liveRows;
   const source = isSampleMode ? SAMPLE_SOURCE : liveSource;
+
+  // The headline, orientation panel, and "Needs attention" chip must all reflect rows
+  // that still need a decision — never rows.length, which counts already-processed rows.
+  const unresolvedCount = useMemo(
+    () => countUnresolvedRows(rows, source),
+    [rows, source],
+  );
 
   const presentTypes = useMemo(() => {
     const set = new Set<OutputTypeKey>();
@@ -127,8 +143,8 @@ export default function QueuePage() {
             {loading
               ? "Loading…"
               : isSampleMode
-              ? `${rows.length} sample signal${rows.length !== 1 ? "s" : ""} — not from the live review list`
-              : `${rows.length} signal${rows.length !== 1 ? "s" : ""} need review`}
+              ? `${unresolvedCount} sample signal${unresolvedCount !== 1 ? "s" : ""} — not from the live review list`
+              : `${unresolvedCount} signal${unresolvedCount !== 1 ? "s" : ""} need review`}
           </p>
         </div>
         <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
@@ -170,7 +186,7 @@ export default function QueuePage() {
               be sent.
             </p>
           )}
-          {!isSampleMode && !loading && rows.length === 0 && (
+          {!isSampleMode && !loading && unresolvedCount === 0 && (
             <p>No signals need review right now.</p>
           )}
         </div>
@@ -222,7 +238,7 @@ export default function QueuePage() {
           <FilterChip
             label="Needs attention"
             active={filter === "attention"}
-            count={rows.filter((r) => rowNeedsReview(r, source)).length}
+            count={unresolvedCount}
             onClick={() => setFilter("attention")}
           />
           <FilterChip
@@ -263,6 +279,10 @@ export default function QueuePage() {
         <EmptyState
           hasRows={rows.length > 0}
           hasFilter={filter !== "all" || !!search.trim()}
+          // On the default "attention" view with no active search, an empty result
+          // means everything has been actioned — that's a good outcome, not "try a
+          // different filter," so it gets the same friendly message as zero rows.
+          showAttentionEmpty={filter === "attention" && !search.trim()}
           isSampleMode={isSampleMode}
           onViewSample={() => setViewMode("sample")}
         />
@@ -291,7 +311,9 @@ export default function QueuePage() {
           previewOnly={isSampleMode}
           onAction={() => {
             setSelectedRow(null);
-            if (!isSampleMode) void queueQ.refetch();
+            // Invalidate (not just refetch this one hook instance) so the persisted
+            // decision/final status appears immediately everywhere this query is used.
+            if (!isSampleMode) void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
           }}
         />
       )}
@@ -439,24 +461,28 @@ function QueueRow({
 function EmptyState({
   hasRows,
   hasFilter,
+  showAttentionEmpty,
   isSampleMode,
   onViewSample,
 }: {
   hasRows: boolean;
   hasFilter: boolean;
+  showAttentionEmpty?: boolean;
   isSampleMode?: boolean;
   onViewSample?: () => void;
 }) {
-  if (!hasRows) {
+  if (!hasRows || showAttentionEmpty) {
     return (
       <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
         <p className="text-sm font-medium text-foreground mb-1">
           No signals need review right now.
         </p>
         <p className="text-xs text-muted-foreground">
-          When the GTM engine finds signals that need a decision, they will appear here.
+          {hasRows
+            ? "Everything in the queue has been actioned — nothing is waiting for a decision."
+            : "When the GTM engine finds signals that need a decision, they will appear here."}
         </p>
-        {!isSampleMode && onViewSample && (
+        {!hasRows && !isSampleMode && onViewSample && (
           <Button
             size="sm"
             variant="outline"
