@@ -60,7 +60,18 @@ export function ActionModal({
   async function handleConfirm() {
     if (!reason.trim()) return;
 
-    if (previewOnly || btn.kind === "ui") {
+    if (previewOnly) {
+      // No backend call, ever. Deliberately does NOT call onSuccess() — that would
+      // cascade into closing the parent account sheet (AccountDetailSheet's onSuccess
+      // -> onAction -> setSelectedRow(null)), which previously made "Preview only"
+      // look like it silently closed everything. Nothing happened, so nothing closes;
+      // the modal stays open on a neutral state until the operator clicks Done.
+      setPhase("pending");
+      setResultMessage("Preview complete — no action was sent or recorded.");
+      return;
+    }
+
+    if (btn.kind === "ui") {
       setPhase("success");
       setResultMessage(btn.honest);
       onSuccess?.();
@@ -85,6 +96,7 @@ export function ActionModal({
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         data?: { final_status?: string };
+        lifecycle?: Record<string, unknown>;
         error?: string;
       };
 
@@ -100,13 +112,18 @@ export function ActionModal({
           : "";
 
       // Never fall back to btn.honest here: that describes what the button was expected
-      // to do (intent), not what the server actually confirmed happened. The phase/message
-      // pair is decided entirely by getTruthfulStatusPresentation, the single source of
-      // truth for this rule.
-      const responseData = data.data as Record<string, unknown> | undefined;
+      // to do (intent), not what the server actually confirmed happened. Prefer the
+      // server-built lifecycle envelope (request_id, strictly whitelisted proof fields)
+      // when present; fall back to the raw n8n data for older/other response shapes.
+      // The phase/message pair is decided entirely by getTruthfulStatusPresentation,
+      // the single source of truth for this rule.
+      const evidence: Record<string, unknown> | undefined =
+        data.lifecycle && typeof data.lifecycle === "object"
+          ? data.lifecycle
+          : (data.data as Record<string, unknown> | undefined);
       const { phase: resultPhase, message } = getTruthfulStatusPresentation(
         finalStatus,
-        responseData,
+        evidence,
       );
 
       setResultMessage(message);

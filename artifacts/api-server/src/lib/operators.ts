@@ -4,6 +4,12 @@ export interface Operator {
   name: string;
   email: string;
   role: string;
+  // Additive, optional, forward-compatible fields for the future role-aware model.
+  // Not used for any authorization or filtering yet — see gtmContract.js's
+  // resolveOperatorAccessLocal/resolveOperatorAccessEntra, which are prepared and
+  // tested but never called by any route in this package.
+  id?: string;
+  allowedIndustries?: string[];
 }
 
 export const DEFAULT_OPERATOR: Operator = {
@@ -15,12 +21,19 @@ export const DEFAULT_OPERATOR: Operator = {
 function isValidOperator(value: unknown): value is Operator {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
+  const idOk = v.id === undefined || typeof v.id === "string";
+  const industriesOk =
+    v.allowedIndustries === undefined ||
+    (Array.isArray(v.allowedIndustries) &&
+      v.allowedIndustries.every((entry) => typeof entry === "string"));
   return (
     typeof v.name === "string" &&
     v.name.length > 0 &&
     typeof v.email === "string" &&
     typeof v.role === "string" &&
-    v.role.length > 0
+    v.role.length > 0 &&
+    idOk &&
+    industriesOk
   );
 }
 

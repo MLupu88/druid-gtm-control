@@ -1,5 +1,11 @@
-import { Router, type Request } from "express";
-import { ENDPOINTS, CONFIG_WRITES } from "@workspace/gtm-shared";
+import { Router, type Request, type Response } from "express";
+import {
+  ENDPOINTS,
+  CONFIG_WRITES,
+  buildLifecycleEnvelope,
+  buildRequestContext,
+} from "@workspace/gtm-shared";
+import { generateRequestId } from "../lib/requestId";
 
 const router = Router();
 
@@ -152,26 +158,96 @@ function withOperatorStamp(req: Request) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared by /activate, /decision, /action: sends the response for a completed
+// (non-exception) n8n call. A non-2xx result.ok is a downstream failure — our own
+// API still accepted and validated the request (accepted stays true), but the
+// lifecycle status must be "failed". The error is a server-generated message about
+// the HTTP status, never inferred from final_status/call_id/provider_status/any other
+// text in result.data — those still only flow through extractLifecycleProof's strict
+// whitelist inside buildLifecycleEnvelope, same as the success path.
+// ---------------------------------------------------------------------------
+function respondFromN8nResult(
+  req: Request,
+  res: Response,
+  label: string,
+  requestId: string,
+  result: { ok: boolean; status: number; data: unknown },
+  requestContext: Record<string, unknown>,
+) {
+  if (!result.ok) {
+    const message = `Automation engine returned HTTP ${result.status}.`;
+    const lifecycle = buildLifecycleEnvelope({
+      requestId,
+      accepted: true,
+      n8nData: result.data,
+      error: message,
+      operator: req.operator,
+      requestContext,
+    });
+    req.log.warn(
+      { request_id: requestId, status: result.status },
+      `n8n/${label}: upstream returned a non-2xx response`,
+    );
+    res.status(502).json({ ...result, error: message, lifecycle });
+    return;
+  }
+
+  const lifecycle = buildLifecycleEnvelope({
+    requestId,
+    accepted: true,
+    n8nData: result.data,
+    operator: req.operator,
+    requestContext,
+  });
+  req.log.info({ request_id: requestId }, `n8n/${label}: request accepted`);
+  res.json({ ...result, lifecycle });
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/n8n/activate  — approve voice / email / linkedin
 // Body: { channel, row, reason }
 // ---------------------------------------------------------------------------
 router.post("/activate", async (req, res) => {
+  // Generated before calling n8n (not only for the response) so the outgoing n8n
+  // payload, the API logs, and the returned lifecycle envelope all share one id.
+  const requestId = generateRequestId();
   const { channel, row, reason } = req.body as Record<string, unknown>;
+
   if (!channel || !reason) {
-    res.status(400).json({ error: "channel and reason are required." });
+    const errorMessage = "channel and reason are required.";
+    const lifecycle = buildLifecycleEnvelope({
+      requestId,
+      accepted: false,
+      error: errorMessage,
+      operator: req.operator,
+      requestContext: buildRequestContext(row),
+    });
+    res.status(400).json({ error: errorMessage, lifecycle });
     return;
   }
   try {
     const result = await postToN8n(
       ENDPOINTS.activate,
-      flattenN8nPayload({ channel, row, reason, ...withOperatorStamp(req) }),
+      flattenN8nPayload({
+        channel,
+        row,
+        reason,
+        request_id: requestId,
+        ...withOperatorStamp(req),
+      }),
     );
-    res.json(result);
+    respondFromN8nResult(req, res, "activate", requestId, result, buildRequestContext(row));
   } catch (err: unknown) {
-    req.log.warn({ err }, "n8n/activate failed");
-    res.status(502).json({
-      error: err instanceof Error ? err.message : "Could not reach the automation engine.",
+    const message = err instanceof Error ? err.message : "Could not reach the automation engine.";
+    const lifecycle = buildLifecycleEnvelope({
+      requestId,
+      accepted: true,
+      error: message,
+      operator: req.operator,
+      requestContext: buildRequestContext(row),
     });
+    req.log.warn({ err, request_id: requestId }, "n8n/activate failed");
+    res.status(502).json({ error: message, lifecycle });
   }
 });
 
@@ -180,22 +256,44 @@ router.post("/activate", async (req, res) => {
 // Body: { decision, row, reason }
 // ---------------------------------------------------------------------------
 router.post("/decision", async (req, res) => {
+  const requestId = generateRequestId();
   const { decision, row, reason } = req.body as Record<string, unknown>;
+
   if (!decision || !reason) {
-    res.status(400).json({ error: "decision and reason are required." });
+    const errorMessage = "decision and reason are required.";
+    const lifecycle = buildLifecycleEnvelope({
+      requestId,
+      accepted: false,
+      error: errorMessage,
+      operator: req.operator,
+      requestContext: buildRequestContext(row),
+    });
+    res.status(400).json({ error: errorMessage, lifecycle });
     return;
   }
   try {
     const result = await postToN8n(
       ENDPOINTS.decision,
-      flattenN8nPayload({ decision, row, reason, ...withOperatorStamp(req) }),
+      flattenN8nPayload({
+        decision,
+        row,
+        reason,
+        request_id: requestId,
+        ...withOperatorStamp(req),
+      }),
     );
-    res.json(result);
+    respondFromN8nResult(req, res, "decision", requestId, result, buildRequestContext(row));
   } catch (err: unknown) {
-    req.log.warn({ err }, "n8n/decision failed");
-    res.status(502).json({
-      error: err instanceof Error ? err.message : "Could not reach the automation engine.",
+    const message = err instanceof Error ? err.message : "Could not reach the automation engine.";
+    const lifecycle = buildLifecycleEnvelope({
+      requestId,
+      accepted: true,
+      error: message,
+      operator: req.operator,
+      requestContext: buildRequestContext(row),
     });
+    req.log.warn({ err, request_id: requestId }, "n8n/decision failed");
+    res.status(502).json({ error: message, lifecycle });
   }
 });
 
@@ -204,22 +302,44 @@ router.post("/decision", async (req, res) => {
 // Body: { action, row, reason }
 // ---------------------------------------------------------------------------
 router.post("/action", async (req, res) => {
+  const requestId = generateRequestId();
   const { action, row, reason } = req.body as Record<string, unknown>;
+
   if (!action || !reason) {
-    res.status(400).json({ error: "action and reason are required." });
+    const errorMessage = "action and reason are required.";
+    const lifecycle = buildLifecycleEnvelope({
+      requestId,
+      accepted: false,
+      error: errorMessage,
+      operator: req.operator,
+      requestContext: buildRequestContext(row),
+    });
+    res.status(400).json({ error: errorMessage, lifecycle });
     return;
   }
   try {
     const result = await postToN8n(
       ENDPOINTS.action,
-      flattenN8nPayload({ action, row, reason, ...withOperatorStamp(req) }),
+      flattenN8nPayload({
+        action,
+        row,
+        reason,
+        request_id: requestId,
+        ...withOperatorStamp(req),
+      }),
     );
-    res.json(result);
+    respondFromN8nResult(req, res, "action", requestId, result, buildRequestContext(row));
   } catch (err: unknown) {
-    req.log.warn({ err }, "n8n/action failed");
-    res.status(502).json({
-      error: err instanceof Error ? err.message : "Could not reach the automation engine.",
+    const message = err instanceof Error ? err.message : "Could not reach the automation engine.";
+    const lifecycle = buildLifecycleEnvelope({
+      requestId,
+      accepted: true,
+      error: message,
+      operator: req.operator,
+      requestContext: buildRequestContext(row),
     });
+    req.log.warn({ err, request_id: requestId }, "n8n/action failed");
+    res.status(502).json({ error: message, lifecycle });
   }
 });
 
