@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
-import { OUTPUT_TYPE_LABELS, MOCK_ACCOUNT_QUEUE } from "@workspace/gtm-shared";
+import { OUTPUT_TYPE_LABELS, MOCK_ACCOUNT_QUEUE, firstValidNumber } from "@workspace/gtm-shared";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -356,8 +356,10 @@ function QueueRow({
   const blockReason = row.block_reason
     ? blockReasonText(row.block_reason)
     : null;
-  const score =
-    Number(row.account_score || row.total_score || 0) || null;
+  // Never zero-fill a missing score: firstValidNumber picks the first VALID numeric
+  // candidate (account_score, then total_score) — a real "0" counts as valid, and an
+  // empty/invalid account_score correctly falls through to total_score.
+  const score = firstValidNumber(row.account_score, row.total_score);
 
   return (
     <button

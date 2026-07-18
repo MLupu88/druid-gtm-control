@@ -14,6 +14,13 @@ import {
   OUTPUT_TYPE_LABELS,
   IDENTITY_LABELS,
   SALES_REVIEW_REASON_LABELS,
+  SCORE_COMPONENT_FIELDS,
+  scoreComponentDisplay,
+  riskScoreDisplay,
+  mqlDisplay,
+  matchedByDisplay,
+  scoreTierLabel,
+  firstValidNumber,
 } from "@workspace/gtm-shared";
 import {
   type Row,
@@ -75,19 +82,6 @@ export function AccountDetailSheet({
   const isAccountQueue = String(source).toLowerCase() === "account_queue";
   const isTestRow = String(row.test_mode).toLowerCase() === "true";
 
-  // Score dimensions (account queue only)
-  const scoreFields = [
-    { label: "How well do they match who we sell to?", key: "fit_score", sub: "Fit" },
-    { label: "How interested do they seem?", key: "interest_score", sub: "Interest" },
-    {
-      label: "How confident are we who this is?",
-      key: "identity_score",
-      sub: "Identity",
-    },
-    { label: "Can we actually reach them?", key: "actionability_score", sub: "Reachability" },
-    { label: "How fresh is this?", key: "timing_score", sub: "Timing" },
-  ] as const;
-
   function getDisabled(btnKey: ButtonKey): { disabled: boolean; reason: string } {
     if (isAccountQueue) {
       const d = isButtonDisabledAccount(btnKey, row, config);
@@ -103,7 +97,13 @@ export function AccountDetailSheet({
     return isButtonDisabled(btnKey, row);
   }
 
-  const totalScore = Number(row.account_score || row.total_score || 0) || null;
+  // Never zero-fill a missing score: firstValidNumber picks the first VALID numeric
+  // candidate (account_score, then total_score) — a real "0" counts as valid, and an
+  // empty/invalid account_score correctly falls through to total_score.
+  const totalScore = firstValidNumber(row.account_score, row.total_score);
+  const risk = riskScoreDisplay(row);
+  const mql = mqlDisplay(row);
+  const matchInfo = matchedByDisplay(row);
 
   // Split out live-outreach actions that aren't available yet so they render
   // in a separate "Coming later" section instead of as disabled green buttons.
@@ -176,6 +176,11 @@ export function AccountDetailSheet({
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     {identityInfo.detail}
                   </p>
+                  {matchInfo.available && (
+                    <p className="text-[11px] text-muted-foreground/70 mt-1 leading-relaxed">
+                      {matchInfo.label}
+                    </p>
+                  )}
                 </div>
               )}
             </Section>
@@ -199,34 +204,85 @@ export function AccountDetailSheet({
               )}
             </Section>
 
-            {/* Score (account queue only) */}
-            {isAccountQueue && totalScore !== null && (
+            {/* Score (account queue only) — each dimension shows its own truthful state;
+                nothing here is ever calculated or invented on the frontend. */}
+            {isAccountQueue && (
               <Section title="How this account scores">
                 <div className="space-y-3">
-                  {scoreFields.map(({ label, key }) => {
-                    const val = Number(row[key] ?? 0);
-                    const max = 40;
-                    const pct = Math.min(100, Math.round((val / max) * 100));
+                  {SCORE_COMPONENT_FIELDS.map(({ key }) => {
+                    const comp = scoreComponentDisplay(row, key);
                     return (
                       <div key={key}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-muted-foreground">{label}</span>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-xs text-muted-foreground">{comp.label}</span>
                           <span className="text-xs font-semibold tabular-nums text-foreground">
-                            {val}
+                            {comp.available ? (
+                              comp.value
+                            ) : (
+                              <span className="font-normal text-muted-foreground/60">
+                                Not available
+                              </span>
+                            )}
                           </span>
                         </div>
-                        <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary/60 rounded-full"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
+                        <p className="text-[11px] text-muted-foreground/70 leading-snug">
+                          {comp.question}
+                        </p>
                       </div>
                     );
                   })}
-                  <p className="text-xs text-muted-foreground pt-1">
-                    Total score: <span className="font-semibold text-foreground">{totalScore}</span>
-                  </p>
+
+                  {/* Risk uses the same scoring pipeline, but the engine writes sentinel
+                      values (e.g. 999/1998) when risk was never actually calculated — those
+                      must never render as a real score. */}
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-xs text-muted-foreground">Risk</span>
+                      <span className="text-xs font-semibold tabular-nums text-foreground">
+                        {risk.available ? risk.value : <span className="font-normal text-muted-foreground/60">—</span>}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground/70 leading-snug">
+                      {risk.label}
+                    </p>
+                  </div>
+
+                  <Separator className="my-1" />
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Total score</span>
+                    <span className="text-xs font-semibold text-foreground">
+                      {totalScore !== null ? totalScore : "Not available"}
+                      {row.score_tier && (
+                        <span className="text-muted-foreground font-normal ml-1.5">
+                          — {scoreTierLabel(row.score_tier)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* MQL qualification is a separate fact from the total score — a high
+                      total score never implies MQL by itself. */}
+                  <div className="flex items-start justify-between pt-1">
+                    <span className="text-xs text-muted-foreground shrink-0">MQL qualification</span>
+                    <span
+                      className={cn(
+                        "text-xs font-semibold text-right max-w-[65%]",
+                        mql.known && mql.isMql
+                          ? "text-primary"
+                          : mql.known
+                          ? "text-amber-400"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {mql.label}
+                    </span>
+                  </div>
+                  {mql.reason && (
+                    <p className="text-[11px] text-muted-foreground/70 leading-snug">
+                      {mql.reason}
+                    </p>
+                  )}
                 </div>
               </Section>
             )}
@@ -240,7 +296,7 @@ export function AccountDetailSheet({
                   </span>
                   {row.score_tier && (
                     <span className="text-xs text-muted-foreground">
-                      {row.score_tier.replace(/_/g, " ")}
+                      {scoreTierLabel(row.score_tier)}
                     </span>
                   )}
                 </div>

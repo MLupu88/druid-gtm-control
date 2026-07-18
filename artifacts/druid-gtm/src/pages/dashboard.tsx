@@ -5,6 +5,7 @@ import {
   OUTPUT_TYPE_LABELS,
   QUEUE_SOURCE_LABELS,
   STATUS_LABELS_V3,
+  STATUS_FALLBACK_LABEL,
   MOCK_ACCOUNT_QUEUE,
 } from "@workspace/gtm-shared";
 import { Card, CardContent } from "@/components/ui/card";
@@ -499,8 +500,10 @@ function ActivityItem({ row }: { row: Record<string, string> }) {
     "";
   const statusLabel =
     STATUS_LABELS_V3[rawStatus as keyof typeof STATUS_LABELS_V3];
+  // Never leak a raw technical enum (e.g. an unmapped final_status) to the operator —
+  // fall back to the same neutral wording the live action modal uses.
   const displayText =
-    statusLabel ?? (rawStatus ? rawStatus : "Action recorded");
+    statusLabel ?? (rawStatus ? STATUS_FALLBACK_LABEL : "Action recorded");
   const ts =
     row.action_at ||
     row.approved_at ||
