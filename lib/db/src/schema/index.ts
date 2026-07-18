@@ -1,20 +1,14 @@
-// Export your models here. Add one export per file
-// export * from "./posts";
+// PostgreSQL operational ledger schema.
 //
-// Each model/table should ideally be split into different files.
-// Each model/table should define a Drizzle table, insert schema, and types:
-//
-//   import { pgTable, text, serial } from "drizzle-orm/pg-core";
-//   import { createInsertSchema } from "drizzle-zod";
-//   import { z } from "zod/v4";
-//
-//   export const postsTable = pgTable("posts", {
-//     id: serial("id").primaryKey(),
-//     title: text("title").notNull(),
-//   });
-//
-//   export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true });
-//   export type InsertPost = z.infer<typeof insertPostSchema>;
-//   export type Post = typeof postsTable.$inferSelect;
-
-export {}
+// Google Sheets remains the system of record for existing GTM Mission
+// Control routes. These tables are a durable, additive ledger — nothing
+// here replaces a Sheets-backed route in this unit.
+export * from "./accounts";
+export * from "./signal-events";
+export * from "./score-runs";
+export * from "./queue-items";
+export * from "./operator-decisions";
+export * from "./action-attempts";
+export * from "./action-events";
+export * from "./suppressions";
+export * from "./connector-states";

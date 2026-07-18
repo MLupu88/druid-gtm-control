@@ -1,4 +1,23 @@
 services:
+  gtm-postgres:
+    image: postgres:16
+    container_name: gtm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - gtm_postgres_data:/var/lib/postgresql/data
+    networks:
+      - n8n_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   gtm-control:
     build:
       context: .
@@ -11,12 +30,18 @@ services:
       - "5000:5000"
     networks:
       - n8n_network
+    depends_on:
+      gtm-postgres:
+        condition: service_healthy
 
   gtm-action-web:
     image: ghcr.io/mlupu88/druid-gtm-control/gtm-action-web:latest
     restart: unless-stopped
     networks:
       - n8n_network
+
+volumes:
+  gtm_postgres_data:
 
 networks:
   n8n_network:
