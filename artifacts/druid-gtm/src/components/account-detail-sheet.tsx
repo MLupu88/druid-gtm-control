@@ -43,18 +43,24 @@ import { cn } from "@/lib/utils";
 import { BUTTONS } from "@workspace/gtm-shared";
 import { Building2, User, Phone, Mail, Globe, AlertTriangle } from "lucide-react";
 
-// Live outreach actions gated behind Gate B — never shown as active primary buttons
-// until a real email/LinkedIn/voice integration is connected.
+// Activation-style buttons — split into an active section vs. an unavailable section
+// below based on getDisabled(). approve_email/approve_linkedin are active once the
+// engine is live and the row's gate passes (self-serve LinkedIn export / persisted email
+// draft — no live email/LinkedIn tool required for that). approve_call (voice) is the
+// only one still unconditionally unavailable — see VOICE_UNAVAILABLE_REASON in
+// gtmContract.js, which buttonDisabled() now returns for every row, permanently.
 const ACTIVATION_BUTTON_KEYS: ReadonlySet<ButtonKey> = new Set([
   "approve_call",
   "approve_email",
   "approve_linkedin",
 ]);
 
+// Fallback copy only — getDisabled(btnKey).reason (rendered below) is preferred whenever
+// it's available, since it reflects the real, current, per-row reason.
 const ACTIVATION_UNAVAILABLE_COPY: Partial<Record<ButtonKey, string>> = {
-  approve_email: "Coming later — requires a live email integration (Gate B). Not enabled yet.",
-  approve_linkedin: "Coming later — requires a live LinkedIn integration (Gate B). Not enabled yet.",
-  approve_call: "Coming later — requires a live voice integration (Gate B). Not enabled yet.",
+  approve_email: "Not enabled right now for this account.",
+  approve_linkedin: "Not enabled right now for this account.",
+  approve_call: "Voice activation is not available yet. No call can be placed.",
 };
 
 interface AccountDetailSheetProps {
@@ -467,7 +473,11 @@ export function AccountDetailSheet({
                               {btn.label}
                             </Button>
                             <p className="text-[11px] text-muted-foreground mt-1 px-1 leading-snug">
-                              {ACTIVATION_UNAVAILABLE_COPY[btnKey]}
+                              {/* Prefer the real per-row/per-button reason (e.g. voice's
+                                  permanent unavailability, or "Engine is paused") over the
+                                  static fallback copy, so this never shows a stale or
+                                  inaccurate "Gate B" explanation for why the button is off. */}
+                              {getDisabled(btnKey).reason || ACTIVATION_UNAVAILABLE_COPY[btnKey]}
                             </p>
                           </div>
                         );

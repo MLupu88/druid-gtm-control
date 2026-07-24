@@ -9,15 +9,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, CheckCircle2, Info } from "lucide-react";
-import { BUTTONS, getTruthfulStatusPresentation } from "@workspace/gtm-shared";
+import { AlertCircle, CheckCircle2, Info, Copy, Download, Check } from "lucide-react";
+import { BUTTONS, getTruthfulStatusPresentation, resolveLifecycleEvidence } from "@workspace/gtm-shared";
 import {
   type Row,
   type ButtonKey,
+  type ComposedDraft,
   rowCostLabel,
   buttonEndpointRoute,
   buttonPostBody,
 } from "@/lib/queue-helpers";
+import { MessageComposer } from "@/components/message-composer";
+import { copyText, downloadText } from "@/lib/clipboard";
 
 interface ActionModalProps {
   open: boolean;
@@ -28,7 +31,22 @@ interface ActionModalProps {
   previewOnly?: boolean;
 }
 
-type Phase = "confirm" | "loading" | "success" | "pending" | "error";
+type Phase = "confirm" | "loading" | "success" | "artifact_ready" | "pending" | "error";
+
+interface ArtifactState {
+  type: string | null;
+  filename: string | null;
+  content: string | null;
+  // true when the content shown is the operator's own local draft, because the server
+  // response genuinely lacked confirmed artifact fields (e.g. an older response shape) —
+  // must always be labeled as such, never presented as a persisted/confirmed artifact.
+  isLocalFallback: boolean;
+}
+
+const COMPOSER_CHANNELS: Partial<Record<ButtonKey, "linkedin" | "email">> = {
+  approve_linkedin: "linkedin",
+  approve_email: "email",
+};
 
 export function ActionModal({
   open,
@@ -42,10 +60,14 @@ export function ActionModal({
   const [phase, setPhase] = useState<Phase>("confirm");
   const [resultMessage, setResultMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [draft, setDraft] = useState<ComposedDraft>({ message_draft: "", subject: "" });
+  const [artifact, setArtifact] = useState<ArtifactState | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const btn = BUTTONS[buttonKey];
   if (!btn) return null;
 
+  const composerChannel = COMPOSER_CHANNELS[buttonKey];
   const cost = rowCostLabel(row);
   const route = buttonEndpointRoute(buttonKey);
 
@@ -54,6 +76,8 @@ export function ActionModal({
     setPhase("confirm");
     setResultMessage("");
     setErrorMessage("");
+    setArtifact(null);
+    setCopied(false);
     onClose();
   }
 
@@ -86,7 +110,7 @@ export function ActionModal({
 
     setPhase("loading");
     try {
-      const body = buttonPostBody(buttonKey, row, reason.trim());
+      const body = buttonPostBody(buttonKey, row, reason.trim(), composerChannel ? draft : undefined);
       const res = await fetch(route, {
         method: "POST",
         credentials: "include",
@@ -113,21 +137,44 @@ export function ActionModal({
 
       // Never fall back to btn.honest here: that describes what the button was expected
       // to do (intent), not what the server actually confirmed happened. Prefer the
-      // server-built lifecycle envelope (request_id, strictly whitelisted proof fields)
-      // when present; fall back to the raw n8n data for older/other response shapes.
-      // The phase/message pair is decided entirely by getTruthfulStatusPresentation,
-      // the single source of truth for this rule.
-      const evidence: Record<string, unknown> | undefined =
-        data.lifecycle && typeof data.lifecycle === "object"
-          ? data.lifecycle
-          : (data.data as Record<string, unknown> | undefined);
-      const { phase: resultPhase, message } = getTruthfulStatusPresentation(
-        finalStatus,
-        evidence,
-      );
+      // server-built lifecycle envelope (request_id, strictly whitelisted proof fields —
+      // the envelope IS the trusted proof object, not nested under a `.fields` key) when
+      // present. resolveLifecycleEvidence NEVER trusts data.data raw as a fallback: an
+      // older/missing-lifecycle response is run through extractLifecycleProof's strict
+      // whitelist first, so it can never bypass the whitelist by carrying stray fields
+      // that were never proof of anything. The phase/message pair is decided entirely by
+      // getTruthfulStatusPresentation, the single source of truth for this rule.
+      const evidence = resolveLifecycleEvidence(data.lifecycle, data.data);
+      const presentation = getTruthfulStatusPresentation(finalStatus, evidence);
 
-      setResultMessage(message);
-      setPhase(resultPhase as Phase);
+      setResultMessage(presentation.message);
+      setPhase(presentation.phase as Phase);
+
+      if (presentation.phase === "artifact_ready" && presentation.artifact?.content) {
+        // Server-confirmed artifact — sourced ONLY from the whitelisted lifecycle
+        // fields getTruthfulStatusPresentation already validated, never raw response data.
+        setArtifact({
+          type: presentation.artifact.type ?? null,
+          filename: presentation.artifact.filename ?? null,
+          content: presentation.artifact.content,
+          isLocalFallback: false,
+        });
+      } else if (composerChannel && draft.message_draft.trim()) {
+        // The server response genuinely lacked confirmed artifact content (e.g. an
+        // older/degraded response shape) — offer the operator's own local draft
+        // instead, clearly labeled as such rather than as a persisted artifact.
+        const localText =
+          composerChannel === "email" && draft.subject.trim()
+            ? `Subject: ${draft.subject}\n\n${draft.message_draft}`
+            : draft.message_draft;
+        setArtifact({
+          type: null,
+          filename: null,
+          content: localText,
+          isLocalFallback: true,
+        });
+      }
+
       // "Request handled; refresh state" — fires for both persisted and pending
       // outcomes. Not a claim of external execution success.
       onSuccess?.();
@@ -136,6 +183,24 @@ export function ActionModal({
       setPhase("error");
     }
   }
+
+  async function handleCopyArtifact() {
+    if (!artifact?.content) return;
+    const ok = await copyText(artifact.content);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }
+
+  function handleDownloadArtifact() {
+    if (!artifact?.content) return;
+    const base = row.company_domain || row.company_name || "message";
+    const fallbackName = `${composerChannel ?? "message"}-${base}.txt`;
+    downloadText(artifact.filename || fallbackName, artifact.content);
+  }
+
+  const showResultPhase = phase === "success" || phase === "artifact_ready" || phase === "pending";
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
@@ -160,6 +225,10 @@ export function ActionModal({
               )}
 
               <p className="text-sm text-foreground leading-relaxed">{btn.honest}</p>
+
+              {composerChannel && (
+                <MessageComposer channel={composerChannel} row={row} onDraftChange={setDraft} />
+              )}
 
               {cost && (
                 <div className="rounded-lg bg-muted/40 border border-border px-4 py-3">
@@ -201,25 +270,62 @@ export function ActionModal({
             </div>
           )}
 
-          {phase === "success" && (
+          {showResultPhase && (
             <div className="flex flex-col items-center py-6 text-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-                <CheckCircle2 className="w-6 h-6 text-primary" />
+              <div
+                className={
+                  phase === "pending"
+                    ? "w-12 h-12 rounded-full bg-blue-500/15 flex items-center justify-center"
+                    : "w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center"
+                }
+              >
+                {phase === "pending" ? (
+                  <Info className="w-6 h-6 text-blue-400" />
+                ) : (
+                  <CheckCircle2 className="w-6 h-6 text-primary" />
+                )}
               </div>
               <p className="text-sm text-foreground leading-relaxed max-w-sm">
                 {resultMessage}
               </p>
-            </div>
-          )}
 
-          {phase === "pending" && (
-            <div className="flex flex-col items-center py-6 text-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-blue-500/15 flex items-center justify-center">
-                <Info className="w-6 h-6 text-blue-400" />
-              </div>
-              <p className="text-sm text-foreground leading-relaxed max-w-sm">
-                {resultMessage}
-              </p>
+              {artifact?.content && (
+                <div className="w-full text-left space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {artifact.isLocalFallback ? "Your local draft" : "Ready to send yourself"}
+                    </p>
+                    {artifact.isLocalFallback && (
+                      <span className="text-[10px] text-amber-400">Not confirmed by the server</span>
+                    )}
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5 max-h-40 overflow-y-auto font-sans">
+                    {artifact.content}
+                  </pre>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleCopyArtifact}
+                      className="h-7 text-xs gap-1.5"
+                    >
+                      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      {copied ? "Copied" : "Copy"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDownloadArtifact}
+                      className="h-7 text-xs gap-1.5"
+                    >
+                      <Download className="w-3 h-3" />
+                      Download
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -260,7 +366,7 @@ export function ActionModal({
               )}
             </>
           )}
-          {(phase === "success" || phase === "pending" || phase === "loading") && (
+          {(showResultPhase || phase === "loading") && (
             <Button
               onClick={handleClose}
               disabled={phase === "loading"}

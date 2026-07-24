@@ -6,6 +6,7 @@ import {
   firstValidNumber,
   countUnresolvedRows,
   QUEUE_QUERY_KEY,
+  ACTION_LOG_QUERY_KEY,
 } from "@workspace/gtm-shared";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -313,7 +314,12 @@ export default function QueuePage() {
             setSelectedRow(null);
             // Invalidate (not just refetch this one hook instance) so the persisted
             // decision/final status appears immediately everywhere this query is used.
-            if (!isSampleMode) void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
+            // Also invalidate the action-log query — a persisted activation/decision
+            // writes a new ICP_Action_Log row, and "Recent activity" reads that query.
+            if (!isSampleMode) {
+              void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
+              void queryClient.invalidateQueries({ queryKey: ACTION_LOG_QUERY_KEY });
+            }
           }}
         />
       )}
