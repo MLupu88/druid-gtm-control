@@ -130,13 +130,16 @@ export function isButtonDisabled(
   return buttonDisabled(buttonKey, row);
 }
 
-// Is a button disabled for an account-queue row?
+// Is a button disabled for an account-queue row? previewOnly (sample/demo rows) lets
+// approve_email/approve_linkedin bypass the live engine_mode config gate — see
+// buttonDisabledPhaseC in gtmContract.js for the exact rule (voice stays locked either way).
 export function isButtonDisabledAccount(
   buttonKey: ButtonKey,
   row: Row,
   cfg: Record<string, string>,
+  previewOnly = false,
 ): boolean {
-  return buttonDisabledPhaseC(buttonKey, row, cfg);
+  return buttonDisabledPhaseC(buttonKey, row, cfg, previewOnly);
 }
 
 // Determine which server route to call for a button

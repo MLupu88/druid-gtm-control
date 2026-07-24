@@ -40,15 +40,17 @@ import {
   statusLabelText,
 } from "@/lib/queue-helpers";
 import { cn } from "@/lib/utils";
-import { BUTTONS } from "@workspace/gtm-shared";
+import { BUTTONS, VOICE_UNAVAILABLE_REASON } from "@workspace/gtm-shared";
 import { Building2, User, Phone, Mail, Globe, AlertTriangle } from "lucide-react";
 
 // Activation-style buttons — split into an active section vs. an unavailable section
 // below based on getDisabled(). approve_email/approve_linkedin are active once the
 // engine is live and the row's gate passes (self-serve LinkedIn export / persisted email
-// draft — no live email/LinkedIn tool required for that). approve_call (voice) is the
-// only one still unconditionally unavailable — see VOICE_UNAVAILABLE_REASON in
-// gtmContract.js, which buttonDisabled() now returns for every row, permanently.
+// draft — no live email/LinkedIn tool required for that), OR whenever previewOnly is true
+// (sample/demo rows can never reach a real POST — see ActionModal's previewOnly guard —
+// so exploring the composer must not depend on a live ICP_Config fetch). approve_call
+// (voice) is the only one still unconditionally unavailable in every mode — see
+// VOICE_UNAVAILABLE_REASON in gtmContract.js.
 const ACTIVATION_BUTTON_KEYS: ReadonlySet<ButtonKey> = new Set([
   "approve_call",
   "approve_email",
@@ -106,8 +108,14 @@ export function AccountDetailSheet({
     : "Decision recorded.";
 
   function getDisabled(btnKey: ButtonKey): { disabled: boolean; reason: string } {
+    // Voice is permanently locked on both queue paths — same truthful reason either way,
+    // regardless of config/preview state (signal-queue's isButtonDisabled already returns
+    // this same reason via buttonDisabled(), so this only changes the account-queue path).
+    if (btnKey === "approve_call") {
+      return { disabled: true, reason: VOICE_UNAVAILABLE_REASON };
+    }
     if (isAccountQueue) {
-      const d = isButtonDisabledAccount(btnKey, row, config);
+      const d = isButtonDisabledAccount(btnKey, row, config, previewOnly);
       if (d) {
         // Surface a plain reason where possible
         const blockedReason = row.block_reason
