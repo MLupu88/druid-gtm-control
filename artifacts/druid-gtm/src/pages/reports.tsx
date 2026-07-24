@@ -33,6 +33,7 @@ import {
   ACTION_TYPE_LABELS,
   humanizeToken,
   getTruthfulStatusPresentation,
+  isLinkedinSelfServeStatus,
 } from "@workspace/gtm-shared";
 
 // Live-data presentation helpers — map raw enums/values from the campaign-report API
@@ -1848,10 +1849,12 @@ export default function ReportsPage() {
   const sampleCsvRows  = SAMPLE_CSV_ROWS[selectedId]     ?? [];
 
   // CSV for live mode (linkedin-approved rows) — unchanged source (action log),
-  // unchanged shape, unchanged behavior.
+  // unchanged shape, unchanged behavior. Accepts both the older
+  // approved_linkedin_pending_tool status and the current approved_linkedin_export_ready
+  // status so already-persisted older rows keep showing up in this export.
   const liveRows = actionLogQ.data?.rows ?? [];
   const liveCsvRows = liveRows
-    .filter((r) => r.final_status === "approved_linkedin_pending_tool")
+    .filter((r) => isLinkedinSelfServeStatus(r.final_status))
     .map((r) => ({
       campaign_name: r.campaign_name ?? "",
       company_name:  r.company_name  ?? "",

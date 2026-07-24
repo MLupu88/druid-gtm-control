@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { google } from "googleapis";
-import { MOCK_QUEUE, MOCK_ACCOUNT_QUEUE } from "@workspace/gtm-shared";
+import { MOCK_QUEUE, MOCK_ACCOUNT_QUEUE, isLinkedinSelfServeStatus } from "@workspace/gtm-shared";
 import { logger } from "../lib/logger";
 
 const router = Router();
@@ -947,10 +947,8 @@ router.get("/campaign-report", async (req, res) => {
       cost_status: action.cost_status,
     }));
 
-    const linkedinReady = actions.filter(
-      (action) =>
-        action.final_status ===
-        "approved_linkedin_pending_tool",
+    const linkedinReady = actions.filter((action) =>
+      isLinkedinSelfServeStatus(action.final_status),
     ).length;
 
     const linkedinExported = actions.filter(

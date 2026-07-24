@@ -156,6 +156,14 @@ export function buttonEndpointRoute(buttonKey: ButtonKey): string | null {
   }
 }
 
+// Optional operator-composed draft for approve_linkedin/approve_email — forwarded to n8n
+// inside `row` per the confirmed contract (the live workflow reads row.message_draft and
+// row.subject). This is NOT audit-only: it's the actual text the operator approved.
+export interface ComposedDraft {
+  message_draft: string;
+  subject: string;
+}
+
 // Build POST body for a button action.
 // Operator identity (approved_by / approved_by_email / approved_at) is
 // derived server-side from the authenticated session, not sent by the client.
@@ -163,14 +171,20 @@ export function buttonPostBody(
   buttonKey: ButtonKey,
   row: Row,
   reason: string,
+  draft?: ComposedDraft,
 ): Record<string, unknown> {
   const btn = BUTTONS[buttonKey];
   const body = btn.kind === "server"
     ? (btn as { kind: "server"; body?: Record<string, unknown> }).body ?? {}
     : {};
+
+  const draftFields: Partial<Row> = {};
+  if (draft?.message_draft?.trim()) draftFields.message_draft = draft.message_draft;
+  if (draft?.subject?.trim()) draftFields.subject = draft.subject;
+
   return {
     ...body,
-    row,
+    row: { ...row, ...draftFields },
     reason,
   };
 }

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   ENGINE_MODE_LABELS,
@@ -7,6 +7,8 @@ import {
   STATUS_LABELS_V3,
   STATUS_FALLBACK_LABEL,
   MOCK_ACCOUNT_QUEUE,
+  QUEUE_QUERY_KEY,
+  ACTION_LOG_QUERY_KEY,
 } from "@workspace/gtm-shared";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +91,7 @@ export default function DashboardPage() {
   const [selectedRow, setSelectedRow] = useState<Row | null>(null);
   const { viewMode, setViewMode } = useSampleMode();
   const isSampleMode = viewMode === "sample";
+  const queryClient = useQueryClient();
 
   const configQ = useQuery<ConfigResponse>({
     queryKey: ["sheets", "config"],
@@ -100,7 +103,7 @@ export default function DashboardPage() {
   });
 
   const queueQ = useQuery<QueueResponse>({
-    queryKey: ["sheets", "queue"],
+    queryKey: QUEUE_QUERY_KEY,
     queryFn: () =>
       fetch("/api/sheets/queue", { credentials: "include" }).then(
         (r) => r.json(),
@@ -109,7 +112,7 @@ export default function DashboardPage() {
   });
 
   const actionLogQ = useQuery<ActionLogResponse>({
-    queryKey: ["sheets", "action-log"],
+    queryKey: ACTION_LOG_QUERY_KEY,
     queryFn: () =>
       fetch("/api/sheets/action-log", { credentials: "include" }).then(
         (r) => r.json(),
@@ -430,7 +433,13 @@ export default function DashboardPage() {
           previewOnly={isSampleMode}
           onAction={() => {
             setSelectedRow(null);
-            if (!isSampleMode) void queueQ.refetch();
+            // Invalidate both — a persisted activation/decision writes a new
+            // ICP_Action_Log row, and "Recent activity" reads that query separately
+            // from the queue query.
+            if (!isSampleMode) {
+              void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
+              void queryClient.invalidateQueries({ queryKey: ACTION_LOG_QUERY_KEY });
+            }
           }}
         />
       )}
