@@ -1,5 +1,46 @@
 # Deployment
 
+## Production Runtime
+
+- **SSH host:** `root@88.99.81.51`
+- **Server checkout:** `/root/gtm-control`
+- **Compose file:** `/root/gtm-control/docker-compose.yml`
+- **Service/container:** `gtm-control`
+- **Production URL:** https://gtm.aiexperiments.eu
+- **Deployment mode:** manual Docker Compose deployment. GitHub Actions builds and
+  publishes the GHCR image (see below), but production does not currently consume it
+  automatically — the server builds from its own local checkout instead.
+
+**Do not put credentials, private keys, environment values, or any other secret in
+this file.** It records where to connect and what to run — nothing that grants access
+on its own.
+
+### Read-only inspection (check deployed commit/container without changing anything)
+
+```bash
+ssh root@88.99.81.51 '
+  cd /root/gtm-control &&
+  echo "--- checkout ---" &&
+  git status --short &&
+  git log -1 --format="%H %ci %s" &&
+  echo "--- container ---" &&
+  docker inspect gtm-control \
+    --format "{{.Id}} {{.Created}} {{.State.StartedAt}} {{.Config.Image}}"
+'
+```
+
+### Manual deploy sequence
+
+```bash
+ssh root@88.99.81.51
+cd /root/gtm-control
+git pull --ff-only origin main
+docker compose build
+docker compose up -d
+docker compose ps
+docker compose logs --tail=100 gtm-control
+```
+
 ## Image build (CI)
 
 `.github/workflows/docker-image.yml` builds the Docker image on every push to
