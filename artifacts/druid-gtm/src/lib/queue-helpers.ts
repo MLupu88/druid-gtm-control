@@ -13,6 +13,7 @@ import {
   buttonsForOutput,
   buttonDisabled,
   buttonDisabledPhaseC,
+  hasIdentifiedContact,
 } from "@workspace/gtm-shared";
 
 export type Row = Record<string, string>;
@@ -116,10 +117,23 @@ export function rowCostLabel(row: Row) {
   return costLabel(row);
 }
 
-// Buttons available for a row
+// Buttons available for a row. Prospect-facing draft-preparation buttons
+// (approve_email/approve_linkedin) must never be rendered at all for an insufficiently
+// identified account (reconstructed_contact/company_level/anonymous/unknown) — see
+// hasIdentifiedContact() in gtmContract.js (product decision, 2026-07-24). This holds
+// regardless of recommended_output/engine_mode, which are the only other things
+// buttonsForOutput() considers.
 export function rowButtons(row: Row, source: string): ButtonKey[] {
   const out = rowOutputType(row, source);
-  return (buttonsForOutput(out) as ButtonKey[]).filter((k) => BUTTONS[k]);
+  const base = (buttonsForOutput(out) as ButtonKey[]).filter((k) => BUTTONS[k]);
+  if (rowHasIdentifiedContact(row)) return base;
+  return base.filter((k) => k !== "approve_email" && k !== "approve_linkedin");
+}
+
+// Row-typed entry point for the shared identified-contact predicate — see
+// hasIdentifiedContact() in gtmContract.js for the canonical rule every layer must call.
+export function rowHasIdentifiedContact(row: Row): boolean {
+  return hasIdentifiedContact(row);
 }
 
 // Is a button disabled for a row (signal queue path)?

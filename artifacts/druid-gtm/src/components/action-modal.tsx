@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { AlertCircle, CheckCircle2, Info, Copy, Download, Check } from "lucide-react";
-import { BUTTONS, getTruthfulStatusPresentation, resolveLifecycleEvidence } from "@workspace/gtm-shared";
+import { BUTTONS, getTruthfulStatusPresentation, resolveLifecycleEvidence, hasIdentifiedContact, IDENTIFIED_CONTACT_REQUIRED_REASON } from "@workspace/gtm-shared";
 import {
   type Row,
   type ButtonKey,
@@ -60,7 +60,7 @@ export function ActionModal({
   const [phase, setPhase] = useState<Phase>("confirm");
   const [resultMessage, setResultMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [draft, setDraft] = useState<ComposedDraft>({ message_draft: "", subject: "" });
+  const [draft, setDraft] = useState<ComposedDraft & { blocked?: boolean }>({ message_draft: "", subject: "" });
   const [artifact, setArtifact] = useState<ArtifactState | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -83,6 +83,18 @@ export function ActionModal({
 
   async function handleConfirm() {
     if (!reason.trim()) return;
+
+    // Unconditional identified-contact requirement (product decision, 2026-07-24) — MUST
+    // run before the previewOnly early return below, so Sample/preview mode can never
+    // confirm a prospect-facing draft for an insufficiently identified account. This is
+    // defense in depth alongside the button-visibility filter and the composer's own
+    // blocked result; it should be unreachable via the normal UI path, since rowButtons()
+    // already excludes these buttons for such rows.
+    if (composerChannel && !hasIdentifiedContact(row)) {
+      setErrorMessage(IDENTIFIED_CONTACT_REQUIRED_REASON);
+      setPhase("error");
+      return;
+    }
 
     if (previewOnly) {
       // No backend call, ever. Deliberately does NOT call onSuccess() — that would
@@ -346,7 +358,7 @@ export function ActionModal({
               {phase === "confirm" && (
                 <Button
                   onClick={handleConfirm}
-                  disabled={!reason.trim()}
+                  disabled={!reason.trim() || Boolean(composerChannel && draft.blocked)}
                   className="flex-1 bg-primary text-primary-foreground hover:bg-[#00c853] shadow-lg shadow-primary/20 disabled:opacity-50"
                 >
                   {previewOnly ? "Preview only" : "Confirm"}

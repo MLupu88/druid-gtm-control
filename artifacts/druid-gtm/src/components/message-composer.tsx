@@ -11,7 +11,7 @@ import type { Row } from "@/lib/queue-helpers";
 interface MessageComposerProps {
   channel: "linkedin" | "email";
   row: Row;
-  onDraftChange: (draft: { message_draft: string; subject: string }) => void;
+  onDraftChange: (draft: { message_draft: string; subject: string; blocked?: boolean }) => void;
 }
 
 // composeLinkedinDraft/composeEmailDraft return different shapes (text vs subject+body);
@@ -21,6 +21,12 @@ interface NormalizedDraft {
   message: string;
   subject: string;
   fallback: boolean;
+  // blocked=true means an identified contact is required and this row doesn't have one
+  // (product decision, 2026-07-24) — no greeting, subject, body, copy, download, approval,
+  // or confirmation may be offered in this state. Distinct from `fallback`, which still
+  // produces real (if generic) copy.
+  blocked: boolean;
+  blockedReason: string;
   signalContext: string;
   usedFields: string[];
 }
@@ -35,10 +41,10 @@ export function MessageComposer({ channel, row, onDraftChange }: MessageComposer
   function generate(): NormalizedDraft {
     if (isEmail) {
       const d = composeEmailDraft(row);
-      return { message: d.body, subject: d.subject, fallback: d.fallback, signalContext: d.signalContext, usedFields: d.usedFields };
+      return { message: d.body, subject: d.subject, fallback: d.fallback, blocked: Boolean(d.blocked), blockedReason: d.blockedReason ?? "", signalContext: d.signalContext, usedFields: d.usedFields };
     }
     const d = composeLinkedinDraft(row);
-    return { message: d.text, subject: "", fallback: d.fallback, signalContext: d.signalContext, usedFields: d.usedFields };
+    return { message: d.text, subject: "", fallback: d.fallback, blocked: Boolean(d.blocked), blockedReason: d.blockedReason ?? "", signalContext: d.signalContext, usedFields: d.usedFields };
   }
 
   const [generated, setGenerated] = useState<NormalizedDraft>(generate);
@@ -47,11 +53,13 @@ export function MessageComposer({ channel, row, onDraftChange }: MessageComposer
   const [copied, setCopied] = useState(false);
 
   // Report the current draft up to the parent whenever it changes, so the caller can
-  // read the latest value at approve-time without lifting this state itself.
+  // read the latest value at approve-time without lifting this state itself. `blocked` is
+  // included so ActionModal can independently refuse confirmation — defense in depth
+  // alongside the button-visibility and composer-level guards (product decision, 2026-07-24).
   useEffect(() => {
-    onDraftChange({ message_draft: text, subject: isEmail ? subject : "" });
+    onDraftChange({ message_draft: text, subject: isEmail ? subject : "", blocked: generated.blocked });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, subject]);
+  }, [text, subject, generated.blocked]);
 
   function handleRegenerate() {
     const fresh = generate();
@@ -81,67 +89,83 @@ export function MessageComposer({ channel, row, onDraftChange }: MessageComposer
         <Label className="text-sm font-medium">
           {isEmail ? "Email draft" : "LinkedIn message draft"}
         </Label>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleRegenerate}
-          className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5"
-        >
-          <RefreshCw className="w-3 h-3" />
-          Regenerate from signals
-        </Button>
+        {!generated.blocked && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleRegenerate}
+            className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Regenerate from signals
+          </Button>
+        )}
       </div>
 
-      {generated.fallback && (
-        <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2">
-          <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-          <p className="text-[11px] text-amber-300 leading-relaxed">
-            Limited signal detail was available for this account, so this is a general message —
-            edit it before approving.
+      {generated.blocked ? (
+        // No greeting, subject, body, copy, download, approval, or confirmation is
+        // available in this state — see hasIdentifiedContact() (product decision,
+        // 2026-07-24). This holds in Sample/preview mode too.
+        <div className="flex items-start gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2.5">
+          <Info className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+          <p className="text-[11px] text-red-300 leading-relaxed">
+            {generated.blockedReason || "A draft isn't available for this account."}
           </p>
         </div>
+      ) : (
+        <>
+          {generated.fallback && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2">
+              <Info className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-300 leading-relaxed">
+                Limited signal detail was available for this account, so this is a general message —
+                edit it before approving.
+              </p>
+            </div>
+          )}
+
+          {generated.signalContext && (
+            <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
+              Why this is recommended: {generated.signalContext}
+            </p>
+          )}
+
+          {isEmail && (
+            <Input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Subject"
+              className="h-9 text-sm bg-input border-border"
+            />
+          )}
+
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="resize-none h-32 text-sm bg-input border-border focus-visible:ring-primary"
+            placeholder={isEmail ? "Email body" : "LinkedIn message"}
+          />
+
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={handleCopy} className="h-7 text-xs gap-1.5">
+              {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+              {copied ? "Copied" : "Copy draft"}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={handleDownload} className="h-7 text-xs gap-1.5">
+              <Download className="w-3 h-3" />
+              Download draft
+            </Button>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground">
+            This draft is not sent from here.{" "}
+            {isEmail
+              ? "Approving saves it as a persisted record — no email tool is connected."
+              : "Approving prepares a self-serve export you copy or download and send yourself — not sent automatically."}
+          </p>
+        </>
       )}
-
-      {generated.signalContext && (
-        <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
-          Why this is recommended: {generated.signalContext}
-        </p>
-      )}
-
-      {isEmail && (
-        <Input
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          placeholder="Subject"
-          className="h-9 text-sm bg-input border-border"
-        />
-      )}
-
-      <Textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        className="resize-none h-32 text-sm bg-input border-border focus-visible:ring-primary"
-        placeholder={isEmail ? "Email body" : "LinkedIn message"}
-      />
-
-      <div className="flex items-center gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={handleCopy} className="h-7 text-xs gap-1.5">
-          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-          {copied ? "Copied" : "Copy draft"}
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={handleDownload} className="h-7 text-xs gap-1.5">
-          <Download className="w-3 h-3" />
-          Download draft
-        </Button>
-      </div>
-
-      <p className="text-[11px] text-muted-foreground">
-        This draft is not sent from here.{" "}
-        {isEmail
-          ? "Approving saves it as a persisted record — no email tool is connected."
-          : "Approving generates a self-serve export you copy or download and send yourself."}
-      </p>
     </div>
   );
 }
