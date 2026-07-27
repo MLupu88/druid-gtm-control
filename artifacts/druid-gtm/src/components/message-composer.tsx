@@ -11,7 +11,7 @@ import type { Row } from "@/lib/queue-helpers";
 interface MessageComposerProps {
   channel: "linkedin" | "email";
   row: Row;
-  onDraftChange: (draft: { message_draft: string; subject: string; blocked?: boolean }) => void;
+  onDraftChange: (draft: { message_draft: string; subject: string; blocked?: boolean; edited?: boolean }) => void;
 }
 
 // composeLinkedinDraft/composeEmailDraft return different shapes (text vs subject+body);
@@ -51,21 +51,41 @@ export function MessageComposer({ channel, row, onDraftChange }: MessageComposer
   const [subject, setSubject] = useState(generated.subject);
   const [text, setText] = useState(generated.message);
   const [copied, setCopied] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  // Whether the operator has changed the text away from what was last generated — a plain
+  // equality check against the current generated baseline, recomputed fresh on every
+  // render (not separately tracked state), so it can never drift out of sync with what is
+  // actually on screen.
+  const isEdited = text !== generated.message || (isEmail && subject !== generated.subject);
 
   // Report the current draft up to the parent whenever it changes, so the caller can
-  // read the latest value at approve-time without lifting this state itself. `blocked` is
-  // included so ActionModal can independently refuse confirmation — defense in depth
-  // alongside the button-visibility and composer-level guards (product decision, 2026-07-24).
+  // read the latest value at approve-time without lifting this state itself. `blocked`
+  // and `edited` let ActionModal independently refuse confirmation / warn before
+  // discarding — defense in depth alongside this component's own guards (product
+  // decision, PR 2).
   useEffect(() => {
-    onDraftChange({ message_draft: text, subject: isEmail ? subject : "", blocked: generated.blocked });
+    onDraftChange({ message_draft: text, subject: isEmail ? subject : "", blocked: generated.blocked, edited: isEdited });
+    // onDraftChange itself is intentionally omitted (not memoized by the caller; including
+    // it would re-run this on every parent re-render) — the suppression below is still
+    // necessary for that reason alone, even with isEdited now listed explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, subject, generated.blocked]);
+  }, [text, subject, generated.blocked, generated.message, generated.subject, isEdited]);
 
-  function handleRegenerate() {
+  function doReset() {
     const fresh = generate();
     setGenerated(fresh);
     setSubject(fresh.subject);
     setText(fresh.message);
+    setShowResetConfirm(false);
+  }
+
+  function handleResetClick() {
+    if (isEdited) {
+      setShowResetConfirm(true);
+    } else {
+      doReset();
+    }
   }
 
   async function handleCopy() {
@@ -89,19 +109,35 @@ export function MessageComposer({ channel, row, onDraftChange }: MessageComposer
         <Label className="text-sm font-medium">
           {isEmail ? "Email draft" : "LinkedIn message draft"}
         </Label>
-        {!generated.blocked && (
+        {!generated.blocked && !showResetConfirm && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
-            onClick={handleRegenerate}
+            onClick={handleResetClick}
             className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1.5"
           >
             <RefreshCw className="w-3 h-3" />
-            Regenerate from signals
+            Reset from signals
           </Button>
         )}
       </div>
+
+      {showResetConfirm && (
+        <div className="flex items-center justify-between gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2">
+          <p className="text-[11px] text-amber-300 leading-relaxed">
+            This will discard your edits and restore the original draft from signals.
+          </p>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowResetConfirm(false)} className="h-7 text-xs">
+              Keep editing
+            </Button>
+            <Button type="button" variant="destructive" size="sm" onClick={doReset} className="h-7 text-xs">
+              Reset anyway
+            </Button>
+          </div>
+        </div>
+      )}
 
       {generated.blocked ? (
         // No greeting, subject, body, copy, download, approval, or confirmation is
@@ -162,7 +198,7 @@ export function MessageComposer({ channel, row, onDraftChange }: MessageComposer
             This draft is not sent from here.{" "}
             {isEmail
               ? "Approving saves it as a persisted record — no email tool is connected."
-              : "Approving prepares a self-serve export you copy or download and send yourself — not sent automatically."}
+              : "Approving prepares plain text you copy or download and send yourself — not sent automatically."}
           </p>
         </>
       )}
