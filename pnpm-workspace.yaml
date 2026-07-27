@@ -77,6 +77,13 @@ onlyBuiltDependencies:
 allowBuilds:
   esbuild: true
 
+# core-js's install script is blocked (not run) rather than approved — see the CI
+# failure this addresses: pnpm treats an unresolved ignored build as fatal in
+# non-interactive environments. This records the decision explicitly as "skip",
+# not "run", so core-js's postinstall script never executes.
+ignoredBuiltDependencies:
+  - core-js
+
 overrides:
   # replit uses linux-x64 only, we can exclude all other platforms
   "esbuild>@esbuild/darwin-arm64": "-"
