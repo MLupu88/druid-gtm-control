@@ -40,8 +40,17 @@ import {
   statusLabelText,
 } from "@/lib/queue-helpers";
 import { cn } from "@/lib/utils";
-import { BUTTONS, VOICE_UNAVAILABLE_REASON } from "@workspace/gtm-shared";
-import { Building2, User, Phone, Mail, Globe, AlertTriangle } from "lucide-react";
+import {
+  BUTTONS,
+  VOICE_UNAVAILABLE_REASON,
+  UNAVAILABILITY_CATEGORY,
+  PROSPECTING_NOT_APPLICABLE_REASON,
+  IDENTIFIED_CONTACT_REQUIRED_REASON,
+  NO_PROSPECT,
+  unavailabilityCategory,
+  identityBlocksProspecting,
+} from "@workspace/gtm-shared";
+import { Building2, User, Phone, Mail, Globe, AlertTriangle, Info } from "lucide-react";
 
 // Activation-style buttons — split into an active section vs. an unavailable section
 // below based on getDisabled(). approve_email/approve_linkedin are active once the
@@ -62,7 +71,6 @@ const ACTIVATION_BUTTON_KEYS: ReadonlySet<ButtonKey> = new Set([
 const ACTIVATION_UNAVAILABLE_COPY: Partial<Record<ButtonKey, string>> = {
   approve_email: "Not enabled right now for this account.",
   approve_linkedin: "Not enabled right now for this account.",
-  approve_call: "Voice activation is not available yet. No call can be placed.",
 };
 
 interface AccountDetailSheetProps {
@@ -108,9 +116,10 @@ export function AccountDetailSheet({
     : "Decision recorded.";
 
   function getDisabled(btnKey: ButtonKey): { disabled: boolean; reason: string } {
-    // Voice is permanently locked on both queue paths — same truthful reason either way,
-    // regardless of config/preview state (signal-queue's isButtonDisabled already returns
-    // this same reason via buttonDisabled(), so this only changes the account-queue path).
+    // Voice is currently locked on both queue paths until compliance approval and
+    // provider setup are complete — same reason either way, regardless of config/preview
+    // state (signal-queue's isButtonDisabled already returns this same reason via
+    // buttonDisabled(), so this only changes the account-queue path).
     if (btnKey === "approve_call") {
       return { disabled: true, reason: VOICE_UNAVAILABLE_REASON };
     }
@@ -144,6 +153,38 @@ export function AccountDetailSheet({
   const unavailableActivationButtons = buttons.filter(
     (btnKey) => ACTIVATION_BUTTON_KEYS.has(btnKey) && getDisabled(btnKey).disabled,
   );
+
+  // Whether Email/LinkedIn are unavailable specifically because this row lacks an
+  // identified contact (as opposed to the output type itself never offering them, e.g.
+  // Suppressed/Pipeline Assist) — surfaced as its own explanation, never silently omitted.
+  const identityBlocked = identityBlocksProspecting(row, outputType);
+
+  // NO_PROSPECT outputs (Pipeline Assist/Owner Alert/Retarget/Suppressed) never include
+  // approve_email/approve_linkedin in buttonsForOutput at all, so those buttons never
+  // exist to be disabled in the first place — there is nothing to label "unavailable."
+  // Shown as its own informational notice instead of a synthetic disabled button.
+  const prospectingNotApplicable = NO_PROSPECT.has(outputType);
+
+  // Group whatever activation buttons ARE disabled (today, in practice, only ever voice —
+  // see prospectingNotApplicable above for why email/linkedin never reach this list) by
+  // WHY they're unavailable, so no category is mislabeled as "coming later."
+  const unavailableByCategory: Partial<Record<string, ButtonKey[]>> = {};
+  for (const btnKey of unavailableActivationButtons) {
+    const cat = unavailabilityCategory(btnKey, outputType);
+    (unavailableByCategory[cat] ??= []).push(btnKey);
+  }
+  const unavailableSections = [
+    {
+      category: UNAVAILABILITY_CATEGORY.VOICE_NOT_ENABLED,
+      heading: "Not available",
+      keys: unavailableByCategory[UNAVAILABILITY_CATEGORY.VOICE_NOT_ENABLED] ?? [],
+    },
+    {
+      category: UNAVAILABILITY_CATEGORY.TEMPORARY,
+      heading: "Not enabled right now",
+      keys: unavailableByCategory[UNAVAILABILITY_CATEGORY.TEMPORARY] ?? [],
+    },
+  ].filter((section) => section.keys.length > 0);
 
   return (
     <>
@@ -419,6 +460,26 @@ export function AccountDetailSheet({
                 AND no decision has already been persisted for it. */}
             {rowNeedsReview(row, source) && !isProcessed && buttons.length > 0 && (
               <Section title="Take action">
+                {identityBlocked && (
+                  <div className="mb-3 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-300 leading-relaxed">
+                      <span className="font-medium">Email and LinkedIn outreach:</span>{" "}
+                      {IDENTIFIED_CONTACT_REQUIRED_REASON}
+                    </p>
+                  </div>
+                )}
+
+                {prospectingNotApplicable && (
+                  <div className="mb-3 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/30 border border-border">
+                    <Info className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      <span className="font-medium text-foreground/80">Email and LinkedIn outreach:</span>{" "}
+                      {PROSPECTING_NOT_APPLICABLE_REASON}
+                    </p>
+                  </div>
+                )}
+
                 {activeActionButtons.length > 0 && (
                   <div className="flex flex-col gap-2">
                     {activeActionButtons.map((btnKey) => {
@@ -458,19 +519,28 @@ export function AccountDetailSheet({
                   </div>
                 )}
 
-                {unavailableActivationButtons.length > 0 && (
+                {unavailableSections.map((section, i) => (
                   <div
+                    key={section.category}
                     className={cn(
-                      activeActionButtons.length > 0 && "mt-4 pt-4 border-t border-border/60",
+                      (activeActionButtons.length > 0 || i > 0) && "mt-4 pt-4 border-t border-border/60",
                     )}
                   >
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                      Coming later — not enabled yet
+                      {section.heading}
                     </p>
                     <div className="flex flex-col gap-2">
-                      {unavailableActivationButtons.map((btnKey) => {
+                      {section.keys.map((btnKey) => {
                         const btn = BUTTONS[btnKey];
                         if (!btn) return null;
+                        // Voice's reason comes from its category directly, not the
+                        // per-row getDisabled() text. Every other reason uses the real
+                        // per-row explanation (e.g. "Engine is paused"), since that
+                        // reflects current, changeable state.
+                        const reason =
+                          section.category === UNAVAILABILITY_CATEGORY.VOICE_NOT_ENABLED
+                            ? VOICE_UNAVAILABLE_REASON
+                            : getDisabled(btnKey).reason || ACTIVATION_UNAVAILABLE_COPY[btnKey];
                         return (
                           <div key={btnKey}>
                             <Button
@@ -481,18 +551,14 @@ export function AccountDetailSheet({
                               {btn.label}
                             </Button>
                             <p className="text-[11px] text-muted-foreground mt-1 px-1 leading-snug">
-                              {/* Prefer the real per-row/per-button reason (e.g. voice's
-                                  permanent unavailability, or "Engine is paused") over the
-                                  static fallback copy, so this never shows a stale or
-                                  inaccurate "Gate B" explanation for why the button is off. */}
-                              {getDisabled(btnKey).reason || ACTIVATION_UNAVAILABLE_COPY[btnKey]}
+                              {reason}
                             </p>
                           </div>
                         );
                       })}
                     </div>
                   </div>
-                )}
+                ))}
               </Section>
             )}
           </div>

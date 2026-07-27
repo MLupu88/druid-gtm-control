@@ -60,9 +60,10 @@ export function ActionModal({
   const [phase, setPhase] = useState<Phase>("confirm");
   const [resultMessage, setResultMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [draft, setDraft] = useState<ComposedDraft & { blocked?: boolean }>({ message_draft: "", subject: "" });
+  const [draft, setDraft] = useState<ComposedDraft & { blocked?: boolean; edited?: boolean }>({ message_draft: "", subject: "" });
   const [artifact, setArtifact] = useState<ArtifactState | null>(null);
   const [copied, setCopied] = useState(false);
+  const [pendingClose, setPendingClose] = useState(false);
 
   const btn = BUTTONS[buttonKey];
   if (!btn) return null;
@@ -78,7 +79,19 @@ export function ActionModal({
     setErrorMessage("");
     setArtifact(null);
     setCopied(false);
+    setPendingClose(false);
     onClose();
+  }
+
+  // Only the confirm phase can have an edited-but-unsubmitted draft worth protecting —
+  // once a submission has been attempted (loading/success/artifact_ready/pending/error),
+  // the draft's fate is already decided and closing needs no further confirmation.
+  function requestClose() {
+    if (phase === "confirm" && composerChannel && draft.edited) {
+      setPendingClose(true);
+      return;
+    }
+    handleClose();
   }
 
   async function handleConfirm() {
@@ -215,7 +228,7 @@ export function ActionModal({
   const showResultPhase = phase === "success" || phase === "artifact_ready" || phase === "pending";
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
+    <Dialog open={open} onOpenChange={(v) => !v && requestClose()}>
       <DialogContent className="max-w-md rounded-2xl border border-border bg-background">
         <DialogHeader className="border-b border-border pb-4">
           <DialogTitle className="text-base font-semibold font-display">
@@ -224,7 +237,19 @@ export function ActionModal({
         </DialogHeader>
 
         <div className="px-0 py-4 space-y-4">
-          {phase === "confirm" && (
+          {pendingClose && (
+            <div className="flex items-start gap-3 rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-300">Discard this draft?</p>
+                <p className="text-xs text-amber-300/70 mt-1 leading-relaxed">
+                  You've edited this message. Closing now will discard your changes.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!pendingClose && phase === "confirm" && (
             <>
               {/* Sample data banner */}
               {previewOnly && (
@@ -275,14 +300,14 @@ export function ActionModal({
             </>
           )}
 
-          {phase === "loading" && (
+          {!pendingClose && phase === "loading" && (
             <div className="flex items-center justify-center py-8">
               <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
               <span className="ml-3 text-sm text-muted-foreground">Sending…</span>
             </div>
           )}
 
-          {showResultPhase && (
+          {!pendingClose && showResultPhase && (
             <div className="flex flex-col items-center py-6 text-center gap-3">
               <div
                 className={
@@ -341,7 +366,7 @@ export function ActionModal({
             </div>
           )}
 
-          {phase === "error" && (
+          {!pendingClose && phase === "error" && (
             <div className="flex items-start gap-3 rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <p className="text-sm text-red-300">{errorMessage}</p>
@@ -350,9 +375,20 @@ export function ActionModal({
         </div>
 
         <DialogFooter className="border-t border-border pt-4 gap-2">
-          {(phase === "confirm" || phase === "error") && (
+          {pendingClose && (
             <>
-              <Button variant="outline" onClick={handleClose} className="flex-1">
+              <Button variant="outline" onClick={() => setPendingClose(false)} className="flex-1">
+                Keep editing
+              </Button>
+              <Button variant="destructive" onClick={handleClose} className="flex-1">
+                Discard changes
+              </Button>
+            </>
+          )}
+
+          {!pendingClose && (phase === "confirm" || phase === "error") && (
+            <>
+              <Button variant="outline" onClick={requestClose} className="flex-1">
                 Cancel
               </Button>
               {phase === "confirm" && (
@@ -378,7 +414,8 @@ export function ActionModal({
               )}
             </>
           )}
-          {(showResultPhase || phase === "loading") && (
+
+          {!pendingClose && (showResultPhase || phase === "loading") && (
             <Button
               onClick={handleClose}
               disabled={phase === "loading"}
