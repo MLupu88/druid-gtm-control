@@ -50,6 +50,32 @@ type DbErrorExpectation = {
   messageIncludes?: string;
 };
 
+/**
+ * Drizzle wraps the underlying `pg` driver error in `cause` (sometimes
+ * more than one level deep). Postgres-specific fields like `constraint`
+ * and `code` live on that inner error, not on the outer Drizzle
+ * QueryError — so assertions must unwrap before reading them.
+ *
+ * Walks the `cause` chain defensively: handles non-object/unknown values
+ * at every step, and tracks visited objects in a Set to guarantee
+ * termination even if something were to form a cyclical `cause` chain.
+ * Falls back to returning the original error unchanged when there is no
+ * `cause` at all (or it isn't a followable object).
+ */
+function unwrapDatabaseError(err: unknown): any {
+  const visited = new Set<unknown>();
+  let current = err;
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current);
+    const cause = (current as { cause?: unknown }).cause;
+    if (!cause || typeof cause !== "object" || visited.has(cause)) {
+      break;
+    }
+    current = cause;
+  }
+  return current;
+}
+
 async function assertDbRejects(
   promise: Promise<unknown>,
   expectation: DbErrorExpectation,
@@ -74,27 +100,32 @@ async function assertDbRejects(
       "expected the database to reject this operation, but it succeeded",
     );
   }
+  // Drizzle's outer error rarely carries `constraint`/`code` itself —
+  // those live on the wrapped `pg` driver error, reachable via `cause`.
+  const dbError = unwrapDatabaseError(caught);
+  const diagnostic = () =>
+    `outer message=${caught?.message} | unwrapped: code=${dbError?.code} constraint=${dbError?.constraint} message=${dbError?.message}`;
   // Every expectation field the caller supplied must match — not "at
   // least one of them". If both `code` and `messageIncludes` are given,
   // both have to be true.
   if (expectation.constraint !== undefined) {
     assert.equal(
-      caught.constraint,
+      dbError?.constraint,
       expectation.constraint,
-      `expected constraint "${expectation.constraint}", got constraint=${caught.constraint} code=${caught.code} message=${caught.message}`,
+      `expected constraint "${expectation.constraint}", got ${diagnostic()}`,
     );
   }
   if (expectation.code !== undefined) {
     assert.equal(
-      caught.code,
+      dbError?.code,
       expectation.code,
-      `expected code "${expectation.code}", got constraint=${caught.constraint} code=${caught.code} message=${caught.message}`,
+      `expected code "${expectation.code}", got ${diagnostic()}`,
     );
   }
   if (expectation.messageIncludes !== undefined) {
     assert.ok(
-      String(caught.message ?? "").includes(expectation.messageIncludes),
-      `expected message to include "${expectation.messageIncludes}", got constraint=${caught.constraint} code=${caught.code} message=${caught.message}`,
+      String(dbError?.message ?? "").includes(expectation.messageIncludes),
+      `expected message to include "${expectation.messageIncludes}", got ${diagnostic()}`,
     );
   }
 }
