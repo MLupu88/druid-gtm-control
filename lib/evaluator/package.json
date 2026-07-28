@@ -1,0 +1,19 @@
+{
+  "name": "@workspace/evaluator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "tsx --test src/conditions.test.ts src/types.test.ts src/profileConfig.test.ts src/rules/identity.test.ts src/rules/fit.test.ts src/rules/intent.test.ts src/rules/actionability.test.ts src/rules/eligibility.test.ts src/evaluate.test.ts src/registry.test.ts"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  }
+}

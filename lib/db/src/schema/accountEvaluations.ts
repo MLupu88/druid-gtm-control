@@ -29,6 +29,19 @@
 // an evaluation could accidentally combine one account with another
 // account's snapshot.
 //
+// profileConfigSnapshot exists because profileVersionId alone is not
+// enough to replay an evaluation: a 'preview' evaluation may reference a
+// DRAFT profile version, and drafts are mutable (that's the whole point
+// of a draft). If the draft is edited after a preview evaluation was
+// persisted, profileVersionId would silently point at content the
+// evaluation was never actually run against. profileConfigSnapshot
+// freezes the exact, already-parsed config object the evaluator
+// consumed, at the moment it consumed it — required on every row
+// (completed or failed), for both preview and production. Note this is
+// NOT normalized_input duplication: account_snapshots already preserves
+// that immutably; this column is the profile-config half of
+// replayability, which nothing else captures.
+//
 // status is intentionally two-valued (completed | failed), not
 // three-valued with a "pending": this table is insert-only (a trigger,
 // account_evaluations_immutable, rejects UPDATE and DELETE), so a row is
@@ -86,6 +99,11 @@ export const accountEvaluations = pgTable(
     profileVersionId: uuid("profile_version_id")
       .notNull()
       .references(() => icpProfileVersions.id),
+    // The exact, already-parsed profile config object the evaluator ran
+    // against — required for every row regardless of status or mode. See
+    // the module comment above for why profileVersionId alone can't
+    // stand in for this (draft mutability).
+    profileConfigSnapshot: jsonb("profile_config_snapshot").notNull(),
     evaluatorVersionId: uuid("evaluator_version_id")
       .notNull()
       .references(() => evaluatorVersions.id),
@@ -168,6 +186,10 @@ export const accountEvaluations = pgTable(
       "account_evaluations_missing_inputs_is_array",
       sql`jsonb_typeof(${t.missingInputs}) = 'array'`,
     ),
+    check(
+      "account_evaluations_profile_config_snapshot_is_object",
+      sql`jsonb_typeof(${t.profileConfigSnapshot}) = 'object'`,
+    ),
 
     // No ambiguous half-finished evaluations: a 'completed' row must
     // carry every core canonical-evaluator output, non-blank where
@@ -217,6 +239,9 @@ export const insertAccountEvaluationSchema = createInsertSchema(
     scoreComponents: z.array(z.unknown()).default([]),
     matchedRules: z.array(z.unknown()).default([]),
     missingInputs: z.array(z.unknown()).default([]),
+    // No DB default (NOT NULL, no default) — stays required, unlike the
+    // arrays above.
+    profileConfigSnapshot: z.record(z.string(), z.unknown()),
   },
 ).omit({
   id: true,
