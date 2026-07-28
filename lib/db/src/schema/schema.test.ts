@@ -131,7 +131,7 @@ test("accountSnapshots exports the expected columns", () => {
   ]);
 });
 
-test("accountEvaluations exports the expected columns, including evaluationMode", () => {
+test("accountEvaluations exports the expected columns, including evaluationMode and profileConfigSnapshot", () => {
   assert.deepEqual(columnNames(accountEvaluations), [
     "accountId",
     "actionabilityScore",
@@ -152,6 +152,7 @@ test("accountEvaluations exports the expected columns, including evaluationMode"
     "intentTier",
     "matchedRules",
     "missingInputs",
+    "profileConfigSnapshot",
     "profileVersionId",
     "scoreComponents",
     "snapshotId",
@@ -181,6 +182,7 @@ test("accountEvaluations insert schema rejects non-array jsonb collection fields
     accountId: "00000000-0000-0000-0000-000000000000",
     snapshotId: "00000000-0000-0000-0000-000000000000",
     profileVersionId: "00000000-0000-0000-0000-000000000000",
+    profileConfigSnapshot: { configSchemaVersion: "v1" },
     evaluatorVersionId: "00000000-0000-0000-0000-000000000000",
     evaluationMode: "production" as const,
     status: "failed" as const,
@@ -197,6 +199,34 @@ test("accountEvaluations insert schema rejects non-array jsonb collection fields
     eligibilityRestrictions: [],
   });
   assert.deepEqual(parsed.eligibilityRestrictions, []);
+});
+
+test("accountEvaluations insert schema requires profileConfigSnapshot to be an object", () => {
+  const base = {
+    accountId: "00000000-0000-0000-0000-000000000000",
+    snapshotId: "00000000-0000-0000-0000-000000000000",
+    profileVersionId: "00000000-0000-0000-0000-000000000000",
+    evaluatorVersionId: "00000000-0000-0000-0000-000000000000",
+    evaluationMode: "production" as const,
+    status: "failed" as const,
+    errorDetail: "evaluator threw",
+  };
+  assert.throws(() =>
+    insertAccountEvaluationSchema.parse({
+      ...base,
+      profileConfigSnapshot: ["not", "an", "object"],
+    }),
+  );
+  assert.throws(() =>
+    // profileConfigSnapshot has no DB default — omitting it must fail,
+    // unlike the jsonb array fields above which default to [].
+    insertAccountEvaluationSchema.parse(base),
+  );
+  const parsed = insertAccountEvaluationSchema.parse({
+    ...base,
+    profileConfigSnapshot: { configSchemaVersion: "v1" },
+  });
+  assert.deepEqual(parsed.profileConfigSnapshot, { configSchemaVersion: "v1" });
 });
 
 test("accountDecisions exports the expected columns", () => {

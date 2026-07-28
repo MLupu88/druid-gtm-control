@@ -204,15 +204,25 @@ async function makeSnapshot(accountId: string) {
   return snapshot;
 }
 
+// profile_config_snapshot has no DB default (NOT NULL, required on every
+// row regardless of status/mode) — a fixed fixture value for tests that
+// aren't specifically exercising that column.
+const PROFILE_CONFIG_SNAPSHOT_FIXTURE = {
+  configSchemaVersion: "v1",
+  fit: { rules: [] },
+};
+
 async function makeCompletedProductionEvaluation(overrides: {
   accountId: string;
   snapshotId: string;
   profileVersionId: string;
   evaluatorVersionId: string;
+  profileConfigSnapshot?: Record<string, unknown>;
 }) {
   const [evaluation] = await db!
     .insert(schema.accountEvaluations)
     .values({
+      profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
       ...overrides,
       evaluationMode: "production",
       status: "completed",
@@ -730,6 +740,7 @@ test(
         accountId: accountA.id,
         snapshotId: snapshotOfB.id,
         profileVersionId: publishedVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "production",
         status: "failed",
@@ -755,6 +766,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: draftVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "production",
         status: "failed",
@@ -784,6 +796,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: draftVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "preview",
         status: "failed",
@@ -805,6 +818,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: publishedVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "production",
         status: "completed",
@@ -826,6 +840,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: publishedVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "production",
         status: "completed",
@@ -855,6 +870,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: publishedVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "production",
         status: "failed",
@@ -876,6 +892,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: publishedVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "production",
         status: "failed",
@@ -883,6 +900,28 @@ test(
         eligibilityRestrictions: { not: "an array" } as any,
       }),
       { constraint: "account_evaluations_eligibility_restrictions_is_array" },
+    );
+  },
+);
+
+test(
+  "account_evaluations.profile_config_snapshot must be a JSON object",
+  { skip },
+  async () => {
+    const { account, snapshot, publishedVersion, evaluatorVersion } =
+      await makeEvaluationPrereqs();
+    await assertDbRejects(
+      db!.insert(schema.accountEvaluations).values({
+        accountId: account.id,
+        snapshotId: snapshot.id,
+        profileVersionId: publishedVersion.id,
+        profileConfigSnapshot: ["not", "an", "object"] as any,
+        evaluatorVersionId: evaluatorVersion.id,
+        evaluationMode: "production",
+        status: "failed",
+        errorDetail: "testing malformed profile_config_snapshot",
+      }),
+      { constraint: "account_evaluations_profile_config_snapshot_is_object" },
     );
   },
 );
@@ -941,6 +980,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: draftVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "preview",
         status: "completed",
@@ -982,6 +1022,7 @@ test(
         accountId: account.id,
         snapshotId: snapshot.id,
         profileVersionId: publishedVersion.id,
+        profileConfigSnapshot: PROFILE_CONFIG_SNAPSHOT_FIXTURE,
         evaluatorVersionId: evaluatorVersion.id,
         evaluationMode: "production",
         status: "failed",
