@@ -10,6 +10,9 @@
       "path": "./lib/evaluator"
     },
     {
+      "path": "./lib/evaluator-persistence"
+    },
+    {
       "path": "./lib/api-client-react"
     },
     {
