@@ -5,6 +5,7 @@ import authRouter from "./auth";
 import n8nRouter from "./n8n";
 import sheetsRouter from "./sheets";
 import { createAccountEvaluationsRouter } from "./accountEvaluations";
+import { createIcpProfilesRouter } from "./icpProfiles";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -20,6 +21,11 @@ router.use(
   "/internal/account-evaluations",
   requireAuth,
   createAccountEvaluationsRouter({ db }),
+);
+router.use(
+  "/internal/icp-profiles",
+  requireAuth,
+  createIcpProfilesRouter({ db }),
 );
 
 export default router;
