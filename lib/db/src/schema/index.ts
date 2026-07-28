@@ -1,20 +1,14 @@
-// Export your models here. Add one export per file
-// export * from "./posts";
-//
-// Each model/table should ideally be split into different files.
-// Each model/table should define a Drizzle table, insert schema, and types:
-//
-//   import { pgTable, text, serial } from "drizzle-orm/pg-core";
-//   import { createInsertSchema } from "drizzle-zod";
-//   import { z } from "zod/v4";
-//
-//   export const postsTable = pgTable("posts", {
-//     id: serial("id").primaryKey(),
-//     title: text("title").notNull(),
-//   });
-//
-//   export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true });
-//   export type InsertPost = z.infer<typeof insertPostSchema>;
-//   export type Post = typeof postsTable.$inferSelect;
+// Package 2, Phase 1 — ICP profile and evaluation persistence foundation.
+// See docs/icp-rule-discovery.md for the Phase 0 discovery this schema is
+// built on, and ROADMAP.md Package 2 for the phase plan this belongs to.
 
-export {}
+export * from "./enums";
+export * from "./icpProfiles";
+export * from "./icpProfileVersions";
+export * from "./icpProfileActivationEvents";
+export * from "./evaluatorVersions";
+export * from "./decisionPolicyVersions";
+export * from "./accounts";
+export * from "./accountSnapshots";
+export * from "./accountEvaluations";
+export * from "./accountDecisions";

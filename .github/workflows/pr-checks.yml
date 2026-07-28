@@ -11,6 +11,28 @@ permissions:
 jobs:
   test-and-typecheck:
     runs-on: ubuntu-latest
+
+    # Postgres service for @workspace/db's integration test suite
+    # (lib/db/src/schema/integrity.integration.test.ts). That suite skips
+    # itself when DATABASE_URL is unset — setting it here for the whole
+    # job means it is never skipped in CI, only in local dev where no
+    # Postgres instance is provisioned (see lib/db/README.md).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,6 +53,15 @@ jobs:
 
       - name: Run gtm-shared test suite
         run: node --test lib/gtm-shared/src/gtmContract.test.js lib/gtm-shared/src/messageComposer.test.js lib/gtm-shared/src/researchEligibility.test.js lib/gtm-shared/src/scenarios.test.js
+
+      - name: Apply @workspace/db migrations
+        run: pnpm --filter @workspace/db run migrate
+
+      - name: Run @workspace/db test suite (structural + integration; DATABASE_URL is set above, so integration tests cannot silently skip here)
+        run: pnpm --filter @workspace/db run test
+
+      - name: Typecheck libs (includes @workspace/db)
+        run: pnpm run typecheck:libs
 
       - name: Typecheck druid-gtm
         run: pnpm --filter @workspace/druid-gtm run typecheck
