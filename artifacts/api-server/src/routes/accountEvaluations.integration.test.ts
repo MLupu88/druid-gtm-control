@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express, { type Express } from "express";
-import { count, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
@@ -163,13 +163,6 @@ async function getOrCreateCanonicalEvaluatorVersion() {
       "getOrCreateCanonicalEvaluatorVersion: insert conflicted but no existing row was found",
     );
   return existing;
-}
-
-async function countAccountDecisions(): Promise<number> {
-  const [row] = await db!
-    .select({ value: count() })
-    .from(schema.accountDecisions);
-  return Number(row?.value ?? 0);
 }
 
 async function readJson(res: Response): Promise<Record<string, unknown>> {
@@ -320,7 +313,7 @@ test(
     const draftVersion = await makeDraftVersion(profile.id);
     const evaluatorVersion = await getOrCreateCanonicalEvaluatorVersion();
 
-    const before = await countAccountDecisions();
+    let createdEvaluationId: string | undefined;
 
     await withServer(async (baseUrl) => {
       const res = await fetch(`${baseUrl}/`, {
@@ -334,10 +327,37 @@ test(
         }),
       });
       assert.equal(res.status, 201);
+      const body = await readJson(res);
+      assert.equal(typeof body.id, "string");
+      // assert.equal above is a runtime check only — it doesn't narrow
+      // body.id's TS type, so a plain control-flow guard does that here
+      // instead of an `as string` cast.
+      if (typeof body.id !== "string") {
+        throw new Error(
+          "unreachable: the typeof assertion above already passed",
+        );
+      }
+      createdEvaluationId = body.id;
     });
 
-    const after = await countAccountDecisions();
-    assert.equal(after, before);
+    if (!createdEvaluationId) {
+      throw new Error(
+        "unreachable: withServer's callback must set createdEvaluationId before returning",
+      );
+    }
+
+    // Scoped to the evaluation this test itself just created — not a
+    // global account_decisions count, which would be polluted by
+    // legitimate rows created concurrently by other integration-test
+    // files (e.g. accountDecisions.integration.test.ts) running in the
+    // same suite.
+    const decisionsForThisEvaluation = await db!
+      .select()
+      .from(schema.accountDecisions)
+      .where(
+        eq(schema.accountDecisions.accountEvaluationId, createdEvaluationId),
+      );
+    assert.equal(decisionsForThisEvaluation.length, 0);
   },
 );
 
