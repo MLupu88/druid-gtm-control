@@ -8,8 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/routes/accountEvaluations.integration.test.ts src/routes/icpProfiles.integration.test.ts",
-    "test:unit": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts"
+    "test": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/routes/accountEvaluations.integration.test.ts src/routes/icpProfiles.integration.test.ts src/routes/accounts.integration.test.ts",
+    "test:unit": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
