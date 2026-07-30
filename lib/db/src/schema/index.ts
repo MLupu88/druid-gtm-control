@@ -12,3 +12,4 @@ export * from "./accounts";
 export * from "./accountSnapshots";
 export * from "./accountEvaluations";
 export * from "./accountDecisions";
+export * from "./clientRadarResearchRuns";

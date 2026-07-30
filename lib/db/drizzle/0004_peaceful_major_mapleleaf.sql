@@ -1,0 +1,1 @@
+ALTER TYPE "public"."client_radar_research_status" ADD VALUE 'cancelled';

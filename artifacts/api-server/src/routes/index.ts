@@ -8,6 +8,7 @@ import { createAccountEvaluationsRouter } from "./accountEvaluations";
 import { createIcpProfilesRouter } from "./icpProfiles";
 import { createAccountsRouter } from "./accounts";
 import { createAccountDecisionsRouter } from "./accountDecisions";
+import { createClientRadarResearchRunsRouter } from "./clientRadarResearchRuns";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -34,6 +35,11 @@ router.use(
   "/internal/account-decisions",
   requireAuth,
   createAccountDecisionsRouter({ db }),
+);
+router.use(
+  "/internal",
+  requireAuth,
+  createClientRadarResearchRunsRouter({ db }),
 );
 
 export default router;
