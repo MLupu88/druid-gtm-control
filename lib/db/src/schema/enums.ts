@@ -107,3 +107,16 @@ export const decisionGate = pgEnum("decision_gate", [
   "restricted",
   "blocked",
 ]);
+
+// client_radar_research_runs.status
+// The absence of a research-run row means the account has never been
+// researched — there is no "not_created" value here because that state is
+// represented by no row existing at all. "submitting" is the local state
+// before Client Radar has returned a run ID; "queued", "running",
+// "completed", and "failed" mirror Client Radar's own run states exactly.
+// Deliberately excludes "created", "scanning", and "stale" — those are not
+// states Client Radar's API reports.
+export const clientRadarResearchStatusEnum = pgEnum(
+  "client_radar_research_status",
+  ["submitting", "queued", "running", "completed", "failed"],
+);
