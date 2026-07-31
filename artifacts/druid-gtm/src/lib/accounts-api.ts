@@ -114,6 +114,12 @@ export interface AccountDetail {
 const DEFAULT_LIMIT = 50;
 const DEFAULT_OFFSET = 0;
 
+// Mirrors MAX_LIMIT in artifacts/api-server/src/routes/accounts.ts. The API
+// rejects any `limit` above this with a 400 — every frontend call site that
+// wants "as many as we can get in one page" (no pagination UI exists yet)
+// must ask for exactly this, not some larger number.
+export const ACCOUNTS_LIST_MAX_LIMIT = 100;
+
 // Mirrors the existing frontend convention for turning a non-2xx JSON
 // error body into a thrown Error — see ../hooks/use-auth.ts's
 // loginMutation and ../components/action-modal.tsx's handleConfirm: a
