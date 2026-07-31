@@ -1,9 +1,13 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useSearchParams } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, ArrowRight, Building2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AlertCircle, ArrowRight, Building2, Search } from "lucide-react";
 import {
   fetchAccounts,
   accountsListQueryKey,
@@ -11,6 +15,10 @@ import {
   type AccountEvaluationSummary,
   type AccountListItem,
 } from "@/lib/accounts-api";
+import { NeedsAttentionView } from "@/components/needs-attention-view";
+
+type View = "attention" | "all";
+type SortKey = "updated" | "name";
 
 // Company name first, then domain, then the always-present accountKey —
 // every account must render *some* identity, never a blank row.
@@ -29,24 +37,128 @@ function capitalize(value: string): string {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
+// Single top-level Accounts entry point: "Needs attention" (the former
+// standalone /queue experience, unmodified — see
+// ../components/needs-attention-view.tsx) is the default view, "All
+// accounts" is the existing canonical PostgreSQL list. Both are plain
+// query-string-driven views of the same page, not separate routes, so
+// /accounts?view=attention and /accounts?view=all are both directly
+// linkable/bookmarkable.
 export default function AccountsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view: View = searchParams.get("view") === "all" ? "all" : "attention";
+
+  function setView(next: string) {
+    setSearchParams({ view: next }, { replace: true });
+  }
+
+  return (
+    <div className="p-6 max-w-4xl space-y-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
+            Accounts
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {view === "attention"
+              ? "Signals that still need a human decision before anything happens."
+              : "Canonical accounts and their most recent evaluations."}
+          </p>
+        </div>
+        <Tabs value={view} onValueChange={setView}>
+          <TabsList>
+            <TabsTrigger value="attention">Needs attention</TabsTrigger>
+            <TabsTrigger value="all">All accounts</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {view === "attention" ? <NeedsAttentionView /> : <AllAccountsList />}
+    </div>
+  );
+}
+
+// ─── All accounts ───────────────────────────────────────────────────────────
+function AllAccountsList() {
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("updated");
+
   const accountsQ = useQuery({
-    queryKey: accountsListQueryKey(),
-    queryFn: () => fetchAccounts(),
+    queryKey: accountsListQueryKey({ limit: 500 }),
+    queryFn: () => fetchAccounts({ limit: 500 }),
     staleTime: 30_000,
   });
 
   const items = accountsQ.data?.items ?? [];
 
+  const visibleItems = useMemo(() => {
+    let result = items;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(
+        (item) =>
+          item.account.companyName?.toLowerCase().includes(q) ||
+          item.account.companyDomain?.toLowerCase().includes(q) ||
+          item.account.accountKey.toLowerCase().includes(q),
+      );
+    }
+
+    const sorted = [...result];
+    if (sortKey === "name") {
+      sorted.sort((a, b) => {
+        const nameA = (
+          a.account.companyName ||
+          a.account.companyDomain ||
+          a.account.accountKey
+        ).toLowerCase();
+        const nameB = (
+          b.account.companyName ||
+          b.account.companyDomain ||
+          b.account.accountKey
+        ).toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+    } else {
+      sorted.sort(
+        (a, b) =>
+          new Date(b.account.updatedAt).getTime() -
+          new Date(a.account.updatedAt).getTime(),
+      );
+    }
+    return sorted;
+  }, [items, search, sortKey]);
+
   return (
-    <div className="p-6 max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-          Accounts
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Canonical accounts and their most recent evaluations.
-        </p>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative flex-1 sm:max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, domain, or account key…"
+            className="pl-9 h-10 bg-input border-border text-sm"
+          />
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-xs text-muted-foreground">Sort:</span>
+          <Button
+            size="sm"
+            variant={sortKey === "updated" ? "default" : "outline"}
+            className="h-7 text-xs px-2.5"
+            onClick={() => setSortKey("updated")}
+          >
+            Recently updated
+          </Button>
+          <Button
+            size="sm"
+            variant={sortKey === "name" ? "default" : "outline"}
+            className="h-7 text-xs px-2.5"
+            onClick={() => setSortKey("name")}
+          >
+            Company name
+          </Button>
+        </div>
       </div>
 
       {accountsQ.isLoading && (
@@ -74,9 +186,18 @@ export default function AccountsPage() {
         </div>
       )}
 
-      {items.length > 0 && (
+      {!accountsQ.isLoading &&
+        !accountsQ.isError &&
+        items.length > 0 &&
+        visibleItems.length === 0 && (
+          <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
+            <p className="text-sm text-muted-foreground">No accounts match that search.</p>
+          </div>
+        )}
+
+      {visibleItems.length > 0 && (
         <div className="space-y-2">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <AccountRow key={item.account.id} item={item} />
           ))}
         </div>

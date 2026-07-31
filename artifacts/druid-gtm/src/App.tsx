@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/sidebar";
 import {
   LayoutDashboard,
-  LayoutList,
   Building2,
   Settings,
   BarChart3,
@@ -29,7 +28,6 @@ import logoWhite from "@/assets/new_logo_white.png";
 import logoBlack from "@/assets/new-druid-logo-black.png";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
-import QueuePage from "@/pages/queue";
 import AccountsPage from "@/pages/accounts";
 import AccountDetailPage from "@/pages/account-detail";
 import SampleLeadPage from "@/pages/sample-lead";
@@ -51,7 +49,6 @@ function AppSidebar() {
   const navItems = [
     { path: "/dashboard", label: "Overview", icon: LayoutDashboard },
     { path: "/accounts", label: "Accounts", icon: Building2 },
-    { path: "/queue", label: "Needs Your Attention", icon: LayoutList },
     { path: "/reports", label: "Reports", icon: BarChart3 },
     { path: "/settings", label: "Settings", icon: Settings },
   ] as const;
@@ -188,7 +185,7 @@ function AppShell() {
             <Route path="/dashboard" component={DashboardPage} />
             <Route path="/accounts" component={AccountsPage} />
             <Route path="/accounts/:accountId" component={AccountDetailPage} />
-            <Route path="/queue" component={QueuePage} />
+            <Route path="/queue" component={() => <Redirect to="/accounts?view=attention" />} />
             <Route path="/reports" component={ReportsPage} />
             <Route path="/sample-lead" component={SampleLeadPage} />
             <Route path="/settings" component={SettingsPage} />

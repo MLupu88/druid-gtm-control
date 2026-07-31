@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import {
   Sheet,
   SheetContent,
@@ -50,7 +51,7 @@ import {
   unavailabilityCategory,
   identityBlocksProspecting,
 } from "@workspace/gtm-shared";
-import { Building2, User, Phone, Mail, Globe, AlertTriangle, Info } from "lucide-react";
+import { Building2, User, Phone, Mail, Globe, AlertTriangle, Info, ArrowRight } from "lucide-react";
 
 // Activation-style buttons — split into an active section vs. an unavailable section
 // below based on getDisabled(). approve_email/approve_linkedin are active once the
@@ -81,6 +82,11 @@ interface AccountDetailSheetProps {
   onClose: () => void;
   onAction?: () => void;
   previewOnly?: boolean;
+  // The canonical PostgreSQL account this queue row resolved to (by exact
+  // account_key, then by normalized domain — never by company name), or
+  // null when no canonical account could be matched. See
+  // resolveCanonicalAccount in ../components/needs-attention-view.tsx.
+  canonicalAccountId: string | null;
 }
 
 export function AccountDetailSheet({
@@ -91,6 +97,7 @@ export function AccountDetailSheet({
   onClose,
   onAction,
   previewOnly = false,
+  canonicalAccountId,
 }: AccountDetailSheetProps) {
   const [activeButton, setActiveButton] = useState<ButtonKey | null>(null);
 
@@ -222,6 +229,25 @@ export function AccountDetailSheet({
                 ? "This is sample data. You can preview the workflow, but no action will be sent."
                 : "This page explains why the account received this recommendation and what would happen if you act."}
             </p>
+          </div>
+
+          {/* Canonical account link — honest either way: a real link when
+              resolved, or a plain statement that no match was found. Never
+              fabricates an ID. */}
+          <div className="px-6 py-2.5 border-b border-border">
+            {canonicalAccountId ? (
+              <Link
+                href={`/accounts/${canonicalAccountId}`}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              >
+                Open full account
+                <ArrowRight className="w-3 h-3" />
+              </Link>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                This signal is not linked to a canonical account yet.
+              </p>
+            )}
           </div>
 
           <div className="px-6 py-5 space-y-6">

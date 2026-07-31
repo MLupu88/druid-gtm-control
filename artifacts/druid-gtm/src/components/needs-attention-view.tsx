@@ -25,8 +25,23 @@ import {
   rowIdentityLabel,
   blockReasonText,
 } from "@/lib/queue-helpers";
+import {
+  fetchAccounts,
+  accountsListQueryKey,
+  type Account,
+} from "@/lib/accounts-api";
 import { cn } from "@/lib/utils";
 import { Search, AlertCircle, ArrowRight, Filter, Info } from "lucide-react";
+
+// This is the extracted body of the former top-level "Needs Your
+// Attention" page (pages/queue.tsx), mounted inside Accounts' "Needs
+// attention" tab. All Sheet-backed data/queries and every existing n8n
+// action are unchanged — see ../components/account-detail-sheet.tsx and
+// ../components/action-modal.tsx for the unmodified action layer this
+// view still drives. The only addition here is best-effort canonical
+// account resolution (see resolveCanonicalAccount below) so a row can
+// optionally link into its canonical PostgreSQL account page — this
+// never changes what the queue itself shows or does.
 
 interface ConfigResponse {
   config: Record<string, string>;
@@ -52,9 +67,80 @@ const SAMPLE_ROWS: Row[] = (
 );
 const SAMPLE_SOURCE = "account_queue";
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-export default function QueuePage() {
-  const [selectedRow, setSelectedRow] = useState<Row | null>(null);
+// ─── Canonical account resolution ──────────────────────────────────────────────
+// Never by company name — only an exact queue account_key match against
+// the canonical accountKey, or (failing that) a normalized-domain match.
+// Same domain-normalization convention as the production bootstrap
+// importer (trim, lowercase, strip protocol, strip leading www., strip
+// trailing slash) so a domain that round-tripped through that importer
+// resolves here too.
+interface CanonicalLookup {
+  byAccountKey: Map<string, Account>;
+  byNormalizedDomain: Map<string, Account>;
+}
+
+function normalizeDomainForLinking(raw: string | null | undefined): string | null {
+  let value = (raw ?? "").trim().toLowerCase();
+  if (!value) return null;
+  value = value.replace(/^https?:\/\//, "");
+  value = value.replace(/^www\./, "");
+  value = value.replace(/\/+$/, "");
+  return value === "" ? null : value;
+}
+
+function buildCanonicalLookup(accounts: Account[]): CanonicalLookup {
+  const byAccountKey = new Map<string, Account>();
+  const domainCandidates = new Map<string, Account[]>();
+
+  for (const account of accounts) {
+    const key = account.accountKey?.trim();
+    if (key) byAccountKey.set(key, account);
+
+    const normalizedDomain = normalizeDomainForLinking(account.companyDomain);
+    if (normalizedDomain) {
+      const candidates = domainCandidates.get(normalizedDomain) ?? [];
+      candidates.push(account);
+      domainCandidates.set(normalizedDomain, candidates);
+    }
+  }
+
+  // The domain fallback may only resolve when a normalized domain maps to
+  // exactly one canonical account. companyDomain carries no uniqueness
+  // guarantee at the backend, so a domain shared by two or more distinct
+  // accounts is genuinely ambiguous — it must be left out of this map
+  // entirely (never resolved to whichever account happened to come
+  // first), so resolveCanonicalAccount falls through to "unresolved" for
+  // it, exactly like a domain with no match at all.
+  const byNormalizedDomain = new Map<string, Account>();
+  for (const [domain, candidates] of domainCandidates) {
+    if (candidates.length === 1) {
+      byNormalizedDomain.set(domain, candidates[0]!);
+    }
+  }
+
+  return { byAccountKey, byNormalizedDomain };
+}
+
+function resolveCanonicalAccount(row: Row, lookup: CanonicalLookup): Account | null {
+  const rawAccountKey = (row.account_key ?? "").trim();
+  if (rawAccountKey) {
+    const byKey = lookup.byAccountKey.get(rawAccountKey);
+    if (byKey) return byKey;
+  }
+  const normalizedDomain = normalizeDomainForLinking(row.company_domain);
+  if (normalizedDomain) {
+    const byDomain = lookup.byNormalizedDomain.get(normalizedDomain);
+    if (byDomain) return byDomain;
+  }
+  return null;
+}
+
+// ─── View ─────────────────────────────────────────────────────────────────────
+export function NeedsAttentionView() {
+  const [selected, setSelected] = useState<{
+    row: Row;
+    canonicalAccountId: string | null;
+  } | null>(null);
   const [search, setSearch] = useState("");
   // Default to the unresolved-only view — a row that already has a persisted decision
   // is not something that "needs your attention," so it must not be the default sight.
@@ -80,6 +166,23 @@ export default function QueuePage() {
       ) as Promise<QueueResponse>,
     staleTime: 30_000,
   });
+
+  // Best-effort canonical linking only — never a second queue/account
+  // store. Reuses the exact same fetch + query key the "All accounts"
+  // tab uses, so React Query dedupes the request rather than issuing a
+  // parallel one when both tabs have been visited.
+  const canonicalAccountsQ = useQuery({
+    queryKey: accountsListQueryKey({ limit: 500 }),
+    queryFn: () => fetchAccounts({ limit: 500 }),
+    staleTime: 30_000,
+  });
+  const canonicalLookup = useMemo(
+    () =>
+      buildCanonicalLookup(
+        (canonicalAccountsQ.data?.items ?? []).map((item) => item.account),
+      ),
+    [canonicalAccountsQ.data],
+  );
 
   const config = configQ.data?.config ?? {};
   const liveRows = queueQ.data?.rows ?? [];
@@ -127,27 +230,27 @@ export default function QueuePage() {
       );
     }
     return result;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, source, filter, search]);
 
   const loading = queueQ.isLoading;
 
+  function openRow(row: Row) {
+    const canonicalAccount = resolveCanonicalAccount(row, canonicalLookup);
+    setSelected({ row, canonicalAccountId: canonicalAccount?.id ?? null });
+  }
+
   return (
-    <div className="p-6 max-w-4xl space-y-5">
-      {/* Header + view mode toggle */}
+    <div className="space-y-5">
+      {/* Subtitle + view mode toggle */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-            Needs your attention
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {loading
-              ? "Loading…"
-              : isSampleMode
-              ? `${unresolvedCount} sample signal${unresolvedCount !== 1 ? "s" : ""} — not from the live review list`
-              : `${unresolvedCount} signal${unresolvedCount !== 1 ? "s" : ""} need review`}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {loading
+            ? "Loading…"
+            : isSampleMode
+            ? `${unresolvedCount} sample signal${unresolvedCount !== 1 ? "s" : ""} — not from the live review list`
+            : `${unresolvedCount} signal${unresolvedCount !== 1 ? "s" : ""} need review`}
+        </p>
         <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
       </div>
 
@@ -295,23 +398,24 @@ export default function QueuePage() {
               row={row}
               source={source}
               isSampleMode={isSampleMode}
-              onClick={() => setSelectedRow(row)}
+              onClick={() => openRow(row)}
             />
           ))}
         </div>
       )}
 
       {/* Account detail sheet */}
-      {selectedRow && (
+      {selected && (
         <AccountDetailSheet
-          row={selectedRow}
+          row={selected.row}
           source={source}
           config={config}
-          open={!!selectedRow}
-          onClose={() => setSelectedRow(null)}
+          canonicalAccountId={selected.canonicalAccountId}
+          open={!!selected}
+          onClose={() => setSelected(null)}
           previewOnly={isSampleMode}
           onAction={() => {
-            setSelectedRow(null);
+            setSelected(null);
             // Invalidate (not just refetch this one hook instance) so the persisted
             // decision/final status appears immediately everywhere this query is used.
             // Also invalidate the action-log query — a persisted activation/decision
