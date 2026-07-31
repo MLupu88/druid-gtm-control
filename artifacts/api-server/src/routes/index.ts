@@ -9,6 +9,7 @@ import { createIcpProfilesRouter } from "./icpProfiles";
 import { createAccountsRouter } from "./accounts";
 import { createAccountDecisionsRouter } from "./accountDecisions";
 import { createClientRadarResearchRunsRouter } from "./clientRadarResearchRuns";
+import { createAccountIcpEvaluationsRouter } from "./accountIcpEvaluations";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -40,6 +41,11 @@ router.use(
   "/internal",
   requireAuth,
   createClientRadarResearchRunsRouter({ db }),
+);
+router.use(
+  "/internal",
+  requireAuth,
+  createAccountIcpEvaluationsRouter({ db }),
 );
 
 export default router;

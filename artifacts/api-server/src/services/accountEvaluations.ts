@@ -19,6 +19,13 @@ import {
 } from "@workspace/db/schema";
 import type * as schema from "@workspace/db/schema";
 import { evaluateAndPersist as realEvaluateAndPersist } from "@workspace/evaluator-persistence";
+import {
+  resolveProfileVersionForEvaluation,
+  createCurrentAccountSnapshot,
+  resolveCanonicalEvaluatorVersion,
+} from "./icpEvaluationResolvers.js";
+
+type Db = NodePgDatabase<typeof schema>;
 
 export type EvaluateAndPersistFn = typeof realEvaluateAndPersist;
 
@@ -76,3 +83,43 @@ export const getAccountEvaluationById: GetAccountEvaluationByIdFn = async (
     .limit(1);
   return row;
 };
+
+export interface RunPreviewIcpEvaluationForAccountArgs {
+  db: Db;
+  accountId: string;
+  profileId: string;
+}
+
+/**
+ * Orchestrates one preview ICP evaluation for a canonical account,
+ * starting from nothing but an accountId + profileId: resolves the
+ * profile's preview version (draft, falling back to its active version),
+ * creates a fresh sparse account snapshot, resolves the canonical
+ * evaluator version, and persists the evaluation. evaluationMode is not a
+ * parameter here — "preview" is hardcoded at both the resolver call and
+ * the createAccountEvaluation call below. There is no production branch,
+ * override, or generic mode parameter this function could ever take. See
+ * ./icpEvaluationResolvers.ts's module comment for why a sparse,
+ * account-row-only snapshot must never feed a production evaluation.
+ */
+export async function runPreviewIcpEvaluationForAccount(
+  args: RunPreviewIcpEvaluationForAccountArgs,
+): Promise<AccountEvaluation> {
+  const { db, accountId, profileId } = args;
+
+  const profileVersion = await resolveProfileVersionForEvaluation(
+    db,
+    profileId,
+    "preview",
+  );
+  const snapshot = await createCurrentAccountSnapshot(db, accountId);
+  const evaluatorVersion = await resolveCanonicalEvaluatorVersion(db);
+
+  return createAccountEvaluation({
+    db,
+    snapshotId: snapshot.id,
+    profileVersionId: profileVersion.id,
+    evaluatorVersionId: evaluatorVersion.id,
+    evaluationMode: "preview",
+  });
+}
