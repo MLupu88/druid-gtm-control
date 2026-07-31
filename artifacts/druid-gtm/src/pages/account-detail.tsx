@@ -14,6 +14,7 @@ import { EvaluationSummaryLine } from "@/pages/accounts";
 import { DecisionControls } from "@/components/decision-controls";
 import { DecisionHistory } from "@/components/decision-history";
 import { ClientRadarResearchPanel } from "@/components/client-radar-research-panel";
+import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
 
 function accountIdentity(account: Account): { primary: string; secondary: string | null } {
   if (account.companyName) {
@@ -158,6 +159,8 @@ function AccountDetailContent({
           )}
         </CardContent>
       </Card>
+
+      <AccountIcpPreviewPanel accountId={account.id} />
 
       <ClientRadarResearchPanel accountId={account.id} />
 
