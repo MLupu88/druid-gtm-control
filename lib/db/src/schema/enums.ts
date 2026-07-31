@@ -79,10 +79,14 @@ export const eligibilityOutcome = pgEnum("eligibility_outcome", [
 ]);
 
 // account_decisions.routing_output
-// Mirrors the seven-value OUTPUT_TYPES enum already established in the
-// frontend contract (lib/gtm-shared/src/gtmContract.js) so the eventual
-// Phase 3 decision/routing policy has a stable, already-familiar target
-// shape to write into — this table does not yet compute these values.
+// The first seven values mirror the OUTPUT_TYPES enum already established
+// in the frontend contract (lib/gtm-shared/src/gtmContract.js) so the
+// eventual Phase 3 decision/routing policy has a stable, already-familiar
+// target shape to write into — this table does not yet compute those
+// values. "dismissed" is the one value with no OUTPUT_TYPES counterpart:
+// it represents an operator's local "Dismiss" action in the queue UI
+// (gtmContract.js's BUTTONS.dismiss), added so that action can persist a
+// real, queryable canonical decision instead of only a local UI toggle.
 export const routingOutput = pgEnum("routing_output", [
   "mql",
   "sales_review",
@@ -91,6 +95,7 @@ export const routingOutput = pgEnum("routing_output", [
   "retarget",
   "nurture",
   "suppressed",
+  "dismissed",
 ]);
 
 // account_decisions.overall_decision_gate

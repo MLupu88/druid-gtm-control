@@ -206,6 +206,35 @@ test("POST with a valid request and created:true returns 201 with the persisted 
   });
 });
 
+test("POST accepts routingOutput \"dismissed\" and returns 201 with the persisted decision", async () => {
+  const decision = syntheticDecision({ routingOutput: "dismissed" });
+  const createAccountDecisionFn = mock.fn<CreateAccountDecisionFn>(
+    async () => ({
+      decision,
+      accountId: VALID_ACCOUNT_ID,
+      created: true,
+    }),
+  );
+  const app = buildTestApp({ createAccountDecisionFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postDecision(
+      baseUrl,
+      validPostBody({ routingOutput: "dismissed" }),
+      VALID_IDEMPOTENCY_KEY,
+    );
+    const body = await readJson(res, "POST / dismissed response body");
+
+    assert.equal(res.status, 201);
+    assert.deepEqual(body.decision, JSON.parse(JSON.stringify(decision)));
+    assert.equal(createAccountDecisionFn.mock.calls.length, 1);
+    assert.equal(
+      createAccountDecisionFn.mock.calls[0]?.arguments[0].routingOutput,
+      "dismissed",
+    );
+  });
+});
+
 test("POST with created:false (idempotent replay) returns 200 with the existing persisted decision", async () => {
   const decision = syntheticDecision();
   const createAccountDecisionFn = mock.fn<CreateAccountDecisionFn>(

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "wouter";
 import {
   ENGINE_MODE_LABELS,
   OUTPUT_TYPE_LABELS,
@@ -339,18 +340,31 @@ export default function DashboardPage() {
 
       {/* Needs your attention */}
       <div>
-        <div className="mb-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-primary">
-            Needs your attention
-            {isSampleMode && (
-              <span className="ml-2 normal-case font-normal text-muted-foreground text-[11px]">
-                — sample data
-              </span>
-            )}
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            These are the signals that still need a human decision before anything happens.
-          </p>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-primary">
+              Needs your attention
+              {isSampleMode && (
+                <span className="ml-2 normal-case font-normal text-muted-foreground text-[11px]">
+                  — sample data
+                </span>
+              )}
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              These are the signals that still need a human decision before anything happens.
+            </p>
+          </div>
+          {/* Compact preview only — the full searchable/filterable
+              experience (with search, filter chips, and canonical account
+              linking) now lives under Accounts; this dashboard section is
+              deliberately not a second full implementation of it. */}
+          <Link
+            href="/accounts?view=attention"
+            className="text-xs text-primary hover:underline inline-flex items-center gap-1 shrink-0 mt-0.5"
+          >
+            View all
+            <ArrowRight className="w-3 h-3" />
+          </Link>
         </div>
         {queueLoading ? (
           <div className="space-y-2">
@@ -428,6 +442,7 @@ export default function DashboardPage() {
           row={selectedRow}
           source={source}
           config={config}
+          canonicalAccountId={null}
           open={!!selectedRow}
           onClose={() => setSelectedRow(null)}
           previewOnly={isSampleMode}

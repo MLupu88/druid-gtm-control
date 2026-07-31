@@ -12,11 +12,10 @@
 
 // The full routingOutput enum a persisted row can carry (see
 // lib/db/src/schema/enums.ts) — history may in principle contain values
-// beyond the two this UI can create, so reads are typed against the full
-// enum. CreatableRoutingOutput below is the (currently identical, but
-// intentionally separate) subset this UI's POST is allowed to send —
-// mirrors the backend's own RoutingOutput = Extract<...> split in
-// services/accountDecisions.ts.
+// beyond the ones this UI can create, so reads are typed against the full
+// enum. CreatableRoutingOutput below is the (intentionally separate)
+// subset this UI's POST is allowed to send — mirrors the backend's own
+// RoutingOutput = Extract<...> split in services/accountDecisions.ts.
 export type RoutingOutput =
   | "mql"
   | "sales_review"
@@ -24,9 +23,10 @@ export type RoutingOutput =
   | "owner_alert"
   | "retarget"
   | "nurture"
-  | "suppressed";
+  | "suppressed"
+  | "dismissed";
 
-export type CreatableRoutingOutput = "mql" | "sales_review";
+export type CreatableRoutingOutput = "mql" | "sales_review" | "dismissed";
 
 export type OverallDecisionGate = "actionable" | "restricted" | "blocked";
 

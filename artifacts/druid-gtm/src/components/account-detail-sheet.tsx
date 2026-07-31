@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import {
   Sheet,
   SheetContent,
@@ -50,7 +52,19 @@ import {
   unavailabilityCategory,
   identityBlocksProspecting,
 } from "@workspace/gtm-shared";
-import { Building2, User, Phone, Mail, Globe, AlertTriangle, Info } from "lucide-react";
+import { fetchAccountDetail, accountDetailQueryKey } from "@/lib/accounts-api";
+import { Building2, User, Phone, Mail, Globe, AlertTriangle, Info, ArrowRight } from "lucide-react";
+
+// promote_mql/promote_mql_owner/dismiss — the three buttons that persist a
+// real canonical account_decisions row (see ../components/action-modal.tsx)
+// — require a resolved canonical account AND that account's latest
+// completed, production evaluation. Every other button's availability is
+// unaffected by this.
+const CANONICAL_DECISION_BUTTON_KEYS: ReadonlySet<ButtonKey> = new Set([
+  "promote_mql",
+  "promote_mql_owner",
+  "dismiss",
+]);
 
 // Activation-style buttons — split into an active section vs. an unavailable section
 // below based on getDisabled(). approve_email/approve_linkedin are active once the
@@ -81,6 +95,19 @@ interface AccountDetailSheetProps {
   onClose: () => void;
   onAction?: () => void;
   previewOnly?: boolean;
+  // The canonical PostgreSQL account this queue row resolved to (by exact
+  // account_key, then by normalized domain — never by company name), or
+  // null when no canonical account could be matched. See
+  // resolveCanonicalAccount in ../components/needs-attention-view.tsx.
+  canonicalAccountId: string | null;
+  // Fired the instant promote_mql/promote_mql_owner/dismiss actually
+  // persists a canonical account_decisions row — see
+  // ../components/action-modal.tsx's onDecisionPersisted. Distinct from
+  // onAction (which already covers every button, including local no-ops
+  // and pending n8n requests): this fires even when the action flow does
+  // NOT close (e.g. promote_mql_owner's owner-notification step fails
+  // after the decision itself already saved).
+  onDecisionPersisted?: () => void;
 }
 
 export function AccountDetailSheet({
@@ -91,8 +118,34 @@ export function AccountDetailSheet({
   onClose,
   onAction,
   previewOnly = false,
+  canonicalAccountId,
+  onDecisionPersisted,
 }: AccountDetailSheetProps) {
   const [activeButton, setActiveButton] = useState<ButtonKey | null>(null);
+
+  // Only fetched while this sheet is open AND the row resolved to a
+  // canonical account — needed to find the account's latest completed,
+  // production evaluation, which promote_mql/promote_mql_owner/dismiss
+  // must reference (see CANONICAL_DECISION_BUTTON_KEYS/getDisabled below
+  // and ../components/action-modal.tsx). Reuses the exact same fetch +
+  // query key the account-detail page uses, so React Query dedupes rather
+  // than issuing a parallel request when both have been visited.
+  const canonicalDetailQ = useQuery({
+    queryKey: accountDetailQueryKey(canonicalAccountId ?? ""),
+    queryFn: () => fetchAccountDetail(canonicalAccountId as string),
+    enabled: open && !!canonicalAccountId,
+    staleTime: 30_000,
+  });
+  // account_evaluations rows arrive ordered createdAt desc, id desc (see
+  // services/accounts.ts's getAccountById), so the first completed +
+  // production match is genuinely the latest one.
+  const eligibleAccountEvaluationId = useMemo(() => {
+    const evaluations = canonicalDetailQ.data?.evaluations ?? [];
+    const match = evaluations.find(
+      (e) => e.status === "completed" && e.evaluationMode === "production",
+    );
+    return match?.id ?? null;
+  }, [canonicalDetailQ.data]);
 
   const outputType = rowOutputType(row, source);
   const outputMeta = OUTPUT_TYPE_LABELS[outputType];
@@ -123,18 +176,68 @@ export function AccountDetailSheet({
     if (btnKey === "approve_call") {
       return { disabled: true, reason: VOICE_UNAVAILABLE_REASON };
     }
+
+    // The existing per-queue guardrail — evaluated for every button,
+    // including promote_mql/promote_mql_owner/dismiss, exactly as before
+    // this slice. Nothing below ever bypasses it: a button the existing
+    // rule already disables stays disabled, with its existing reason.
+    let existing: { disabled: boolean; reason: string };
     if (isAccountQueue) {
       const d = isButtonDisabledAccount(btnKey, row, config, previewOnly);
-      if (d) {
-        // Surface a plain reason where possible
-        const blockedReason = row.block_reason
-          ? blockReasonText(row.block_reason)
-          : "This action isn't available right now.";
-        return { disabled: true, reason: blockedReason };
-      }
-      return { disabled: false, reason: "" };
+      existing = d
+        ? {
+            disabled: true,
+            reason: row.block_reason
+              ? blockReasonText(row.block_reason)
+              : "This action isn't available right now.",
+          }
+        : { disabled: false, reason: "" };
+    } else {
+      existing = isButtonDisabled(btnKey, row);
     }
-    return isButtonDisabled(btnKey, row);
+    if (existing.disabled) return existing;
+
+    // Only once the existing guardrail passes do promote_mql/
+    // promote_mql_owner/dismiss additionally require a resolved canonical
+    // account with a completed, production evaluation to reference — see
+    // ../components/action-modal.tsx's createAccountDecision call.
+    if (CANONICAL_DECISION_BUTTON_KEYS.has(btnKey)) {
+      if (previewOnly) {
+        return {
+          disabled: true,
+          reason: "Sample data — no decision will be recorded.",
+        };
+      }
+      if (!canonicalAccountId) {
+        return {
+          disabled: true,
+          reason:
+            "This signal is not linked to a canonical account yet, so a decision cannot be recorded.",
+        };
+      }
+      if (canonicalDetailQ.isLoading) {
+        return {
+          disabled: true,
+          reason: "Checking this account's evaluation history…",
+        };
+      }
+      if (canonicalDetailQ.isError) {
+        return {
+          disabled: true,
+          reason:
+            "Could not load this account's evaluation history, so a decision cannot be recorded right now.",
+        };
+      }
+      if (!eligibleAccountEvaluationId) {
+        return {
+          disabled: true,
+          reason:
+            "This account has no completed production evaluation yet, so a decision cannot be recorded.",
+        };
+      }
+    }
+
+    return existing;
   }
 
   // Never zero-fill a missing score: firstValidNumber picks the first VALID numeric
@@ -222,6 +325,25 @@ export function AccountDetailSheet({
                 ? "This is sample data. You can preview the workflow, but no action will be sent."
                 : "This page explains why the account received this recommendation and what would happen if you act."}
             </p>
+          </div>
+
+          {/* Canonical account link — honest either way: a real link when
+              resolved, or a plain statement that no match was found. Never
+              fabricates an ID. */}
+          <div className="px-6 py-2.5 border-b border-border">
+            {canonicalAccountId ? (
+              <Link
+                href={`/accounts/${canonicalAccountId}`}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              >
+                Open full account
+                <ArrowRight className="w-3 h-3" />
+              </Link>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                This signal is not linked to a canonical account yet.
+              </p>
+            )}
           </div>
 
           <div className="px-6 py-5 space-y-6">
@@ -573,6 +695,8 @@ export function AccountDetailSheet({
           buttonKey={activeButton}
           row={row}
           previewOnly={previewOnly}
+          accountEvaluationId={eligibleAccountEvaluationId}
+          onDecisionPersisted={onDecisionPersisted}
           onSuccess={() => {
             setActiveButton(null);
             onAction?.();

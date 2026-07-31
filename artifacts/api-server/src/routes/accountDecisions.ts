@@ -94,7 +94,7 @@ const DecisionIdParamsSchema = z
 const CreateAccountDecisionRequestSchema = z
   .object({
     accountEvaluationId: z.string().uuid(),
-    routingOutput: z.enum(["mql", "sales_review"]),
+    routingOutput: z.enum(["mql", "sales_review", "dismissed"]),
     routingReason: z.string().nullable().optional(),
   })
   .strict();

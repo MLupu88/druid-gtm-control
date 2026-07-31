@@ -24,6 +24,8 @@
 // components; this module only exports plain fetch functions and stable
 // query-key helpers, so it has no framework dependency of its own.
 
+import type { RoutingOutput } from "@/lib/account-decisions-api";
+
 export interface Account {
   id: string;
   accountKey: string;
@@ -81,10 +83,21 @@ export interface AccountEvaluation extends AccountEvaluationSummary {
   missingInputs: unknown;
 }
 
+// Compact summary of an account's most recent canonical decision — see
+// services/accounts.ts's AccountDecisionSummary, which this mirrors
+// field-for-field. Just enough for NeedsAttentionView to decide whether a
+// resolved queue row still needs attention, without a per-row fetch.
+export interface AccountDecisionSummary {
+  id: string;
+  routingOutput: RoutingOutput;
+  createdAt: string;
+}
+
 export interface AccountListItem {
   account: Account;
   latestEvaluation: AccountEvaluationSummary | null;
   latestProductionEvaluation: AccountEvaluationSummary | null;
+  latestDecision: AccountDecisionSummary | null;
 }
 
 export interface AccountsListResponse {

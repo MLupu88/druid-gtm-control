@@ -91,7 +91,7 @@ function makeFakeDb(queue: unknown[]) {
 
   function chain(): any {
     const obj: any = {};
-    for (const method of ["from", "where", "orderBy", "limit", "offset"]) {
+    for (const method of ["from", "innerJoin", "where", "orderBy", "limit", "offset"]) {
       obj[method] = (...args: unknown[]) => {
         calls.push({ method, args });
         return obj;
@@ -136,7 +136,7 @@ test("listAccounts shapes total and returns [] items without querying evaluation
 
 test("listAccounts orders accounts deterministically (updatedAt desc, id desc)", async () => {
   const a1 = syntheticAccount({ id: "a1" });
-  const { db, calls } = makeFakeDb([[{ value: 1 }], [a1], [], []]);
+  const { db, calls } = makeFakeDb([[{ value: 1 }], [a1], [], [], []]);
 
   await listAccounts({ db, limit: 50, offset: 0 });
 
@@ -150,15 +150,16 @@ test("listAccounts orders accounts deterministically (updatedAt desc, id desc)",
   assert.equal(accountsOrderByCall!.args.length, 2);
 });
 
-test("listAccounts returns null latestEvaluation/latestProductionEvaluation for an account with no evaluations", async () => {
+test("listAccounts returns null latestEvaluation/latestProductionEvaluation/latestDecision for an account with no evaluations or decisions", async () => {
   const account = syntheticAccount();
-  const { db } = makeFakeDb([[{ value: 1 }], [account], [], []]);
+  const { db } = makeFakeDb([[{ value: 1 }], [account], [], [], []]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]?.latestEvaluation, null);
   assert.equal(result.items[0]?.latestProductionEvaluation, null);
+  assert.equal(result.items[0]?.latestDecision, null);
 });
 
 test("listAccounts maps latestEvaluation and latestProductionEvaluation independently per account", async () => {
@@ -177,6 +178,7 @@ test("listAccounts maps latestEvaluation and latestProductionEvaluation independ
     [accountA, accountB],
     [latestA], // latestEvaluation query: only account A has a row
     [latestProductionB], // latestProductionEvaluation query: only account B has a row
+    [], // latestDecision query: neither account has a decision
   ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
@@ -206,6 +208,7 @@ test("listAccounts: a preview evaluation newer than the latest production evalua
     [account],
     [previewLatest], // unfiltered DISTINCT ON picks the newest overall: the preview row
     [productionOlder], // production-filtered DISTINCT ON picks the newest production row
+    [], // latestDecision query: no decision yet
   ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
@@ -225,6 +228,7 @@ test("listAccounts: when the latest evaluation is itself the latest production e
     [account],
     [evaluation],
     [evaluation],
+    [],
   ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
@@ -233,18 +237,48 @@ test("listAccounts: when the latest evaluation is itself the latest production e
   assert.equal(result.items[0]?.latestProductionEvaluation, evaluation);
 });
 
-test("listAccounts issues exactly four queries total regardless of how many accounts are on the page (no N+1)", async () => {
+test("listAccounts maps latestDecision per account, independently of latestEvaluation/latestProductionEvaluation", async () => {
+  const accountA = syntheticAccount({ id: "acc-a" });
+  const accountB = syntheticAccount({ id: "acc-b" });
+  const decisionA = {
+    id: "88888888-8888-4888-8888-888888888888",
+    routingOutput: "dismissed" as const,
+    createdAt: new Date("2026-03-01T00:00:00Z"),
+  };
+  const { db } = makeFakeDb([
+    [{ value: 2 }],
+    [accountA, accountB],
+    [],
+    [],
+    [{ accountId: "acc-a", ...decisionA }], // only account A has a decision
+  ]);
+
+  const result = await listAccounts({ db, limit: 50, offset: 0 });
+
+  const itemA = result.items.find((i) => i.account.id === "acc-a");
+  const itemB = result.items.find((i) => i.account.id === "acc-b");
+  assert.deepEqual(itemA?.latestDecision, decisionA);
+  assert.equal(itemB?.latestDecision, null);
+});
+
+test("listAccounts issues exactly five queries total regardless of how many accounts are on the page (no N+1)", async () => {
   const manyAccounts = Array.from({ length: 25 }, (_, i) =>
     syntheticAccount({ id: `acc-${i}` }),
   );
-  const { db, calls } = makeFakeDb([[{ value: 25 }], manyAccounts, [], []]);
+  const { db, calls } = makeFakeDb([
+    [{ value: 25 }],
+    manyAccounts,
+    [],
+    [],
+    [],
+  ]);
 
   await listAccounts({ db, limit: 100, offset: 0 });
 
   const rootCalls = calls.filter(
     (c) => c.method === "select" || c.method === "selectDistinctOn",
   );
-  assert.equal(rootCalls.length, 4);
+  assert.equal(rootCalls.length, 5);
 });
 
 // ---------------------------------------------------------------------

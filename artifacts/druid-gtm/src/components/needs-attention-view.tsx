@@ -25,8 +25,24 @@ import {
   rowIdentityLabel,
   blockReasonText,
 } from "@/lib/queue-helpers";
+import {
+  fetchAccounts,
+  accountsListQueryKey,
+  type Account,
+  type AccountListItem,
+} from "@/lib/accounts-api";
 import { cn } from "@/lib/utils";
 import { Search, AlertCircle, ArrowRight, Filter, Info } from "lucide-react";
+
+// This is the extracted body of the former top-level "Needs Your
+// Attention" page (pages/queue.tsx), mounted inside Accounts' "Needs
+// attention" tab. All Sheet-backed data/queries and every existing n8n
+// action are unchanged — see ../components/account-detail-sheet.tsx and
+// ../components/action-modal.tsx for the unmodified action layer this
+// view still drives. The only addition here is best-effort canonical
+// account resolution (see resolveCanonicalAccount below) so a row can
+// optionally link into its canonical PostgreSQL account page — this
+// never changes what the queue itself shows or does.
 
 interface ConfigResponse {
   config: Record<string, string>;
@@ -52,9 +68,80 @@ const SAMPLE_ROWS: Row[] = (
 );
 const SAMPLE_SOURCE = "account_queue";
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-export default function QueuePage() {
-  const [selectedRow, setSelectedRow] = useState<Row | null>(null);
+// ─── Canonical account resolution ──────────────────────────────────────────────
+// Never by company name — only an exact queue account_key match against
+// the canonical accountKey, or (failing that) a normalized-domain match.
+// Same domain-normalization convention as the production bootstrap
+// importer (trim, lowercase, strip protocol, strip leading www., strip
+// trailing slash) so a domain that round-tripped through that importer
+// resolves here too.
+interface CanonicalLookup {
+  byAccountKey: Map<string, Account>;
+  byNormalizedDomain: Map<string, Account>;
+}
+
+function normalizeDomainForLinking(raw: string | null | undefined): string | null {
+  let value = (raw ?? "").trim().toLowerCase();
+  if (!value) return null;
+  value = value.replace(/^https?:\/\//, "");
+  value = value.replace(/^www\./, "");
+  value = value.replace(/\/+$/, "");
+  return value === "" ? null : value;
+}
+
+function buildCanonicalLookup(accounts: Account[]): CanonicalLookup {
+  const byAccountKey = new Map<string, Account>();
+  const domainCandidates = new Map<string, Account[]>();
+
+  for (const account of accounts) {
+    const key = account.accountKey?.trim();
+    if (key) byAccountKey.set(key, account);
+
+    const normalizedDomain = normalizeDomainForLinking(account.companyDomain);
+    if (normalizedDomain) {
+      const candidates = domainCandidates.get(normalizedDomain) ?? [];
+      candidates.push(account);
+      domainCandidates.set(normalizedDomain, candidates);
+    }
+  }
+
+  // The domain fallback may only resolve when a normalized domain maps to
+  // exactly one canonical account. companyDomain carries no uniqueness
+  // guarantee at the backend, so a domain shared by two or more distinct
+  // accounts is genuinely ambiguous — it must be left out of this map
+  // entirely (never resolved to whichever account happened to come
+  // first), so resolveCanonicalAccount falls through to "unresolved" for
+  // it, exactly like a domain with no match at all.
+  const byNormalizedDomain = new Map<string, Account>();
+  for (const [domain, candidates] of domainCandidates) {
+    if (candidates.length === 1) {
+      byNormalizedDomain.set(domain, candidates[0]!);
+    }
+  }
+
+  return { byAccountKey, byNormalizedDomain };
+}
+
+function resolveCanonicalAccount(row: Row, lookup: CanonicalLookup): Account | null {
+  const rawAccountKey = (row.account_key ?? "").trim();
+  if (rawAccountKey) {
+    const byKey = lookup.byAccountKey.get(rawAccountKey);
+    if (byKey) return byKey;
+  }
+  const normalizedDomain = normalizeDomainForLinking(row.company_domain);
+  if (normalizedDomain) {
+    const byDomain = lookup.byNormalizedDomain.get(normalizedDomain);
+    if (byDomain) return byDomain;
+  }
+  return null;
+}
+
+// ─── View ─────────────────────────────────────────────────────────────────────
+export function NeedsAttentionView() {
+  const [selected, setSelected] = useState<{
+    row: Row;
+    canonicalAccountId: string | null;
+  } | null>(null);
   const [search, setSearch] = useState("");
   // Default to the unresolved-only view — a row that already has a persisted decision
   // is not something that "needs your attention," so it must not be the default sight.
@@ -81,6 +168,35 @@ export default function QueuePage() {
     staleTime: 30_000,
   });
 
+  // Best-effort canonical linking only — never a second queue/account
+  // store. Reuses the exact same fetch + query key the "All accounts"
+  // tab uses, so React Query dedupes the request rather than issuing a
+  // parallel one when both tabs have been visited.
+  const canonicalAccountsQ = useQuery({
+    queryKey: accountsListQueryKey({ limit: 500 }),
+    queryFn: () => fetchAccounts({ limit: 500 }),
+    staleTime: 30_000,
+  });
+  const canonicalLookup = useMemo(
+    () =>
+      buildCanonicalLookup(
+        (canonicalAccountsQ.data?.items ?? []).map((item) => item.account),
+      ),
+    [canonicalAccountsQ.data],
+  );
+  // Per-account latest canonical decision summary (id/routingOutput/
+  // createdAt), keyed by account id — see AccountListItem.latestDecision
+  // in ../lib/accounts-api.ts. Used below to exclude resolved rows whose
+  // latest decision is "dismissed" or "mql" from the active view, without
+  // a per-row decisions fetch.
+  const latestDecisionByAccountId = useMemo(() => {
+    const map = new Map<string, AccountListItem["latestDecision"]>();
+    for (const item of canonicalAccountsQ.data?.items ?? []) {
+      map.set(item.account.id, item.latestDecision);
+    }
+    return map;
+  }, [canonicalAccountsQ.data]);
+
   const config = configQ.data?.config ?? {};
   const liveRows = queueQ.data?.rows ?? [];
   const liveSource = queueQ.data?.source ?? "signal_queue";
@@ -89,18 +205,43 @@ export default function QueuePage() {
   const rows = isSampleMode ? SAMPLE_ROWS : liveRows;
   const source = isSampleMode ? SAMPLE_SOURCE : liveSource;
 
+  // Canonically active rows — the single source every Needs Attention
+  // count, chip, filter, search result, and rendered row below derives
+  // from. A row drops out here (and only here) once it resolved to a
+  // canonical account whose latest persisted decision is "dismissed" or
+  // "mql": that is a real, durable decision, so the row must not keep
+  // counting or reappearing after refresh. An unresolved row (no
+  // canonical match, or no decision recorded yet) is preserved untouched.
+  // This predicate must not be reimplemented anywhere else — every
+  // downstream count/list reads activeRows, never rows, directly.
+  const activeRows = useMemo(
+    () =>
+      rows.filter((r) => {
+        const canonicalAccount = resolveCanonicalAccount(r, canonicalLookup);
+        if (!canonicalAccount) return true;
+        const latestDecision = latestDecisionByAccountId.get(canonicalAccount.id);
+        if (!latestDecision) return true;
+        return (
+          latestDecision.routingOutput !== "dismissed" &&
+          latestDecision.routingOutput !== "mql"
+        );
+      }),
+    [rows, canonicalLookup, latestDecisionByAccountId],
+  );
+
   // The headline, orientation panel, and "Needs attention" chip must all reflect rows
-  // that still need a decision — never rows.length, which counts already-processed rows.
+  // that still need a decision — never activeRows.length, which counts every active row
+  // regardless of review state.
   const unresolvedCount = useMemo(
-    () => countUnresolvedRows(rows, source),
-    [rows, source],
+    () => countUnresolvedRows(activeRows, source),
+    [activeRows, source],
   );
 
   const presentTypes = useMemo(() => {
     const set = new Set<OutputTypeKey>();
-    for (const row of rows) set.add(rowOutputType(row, source));
+    for (const row of activeRows) set.add(rowOutputType(row, source));
     return Array.from(set);
-  }, [rows, source]);
+  }, [activeRows, source]);
 
   const isMqlReady = (r: Row) => {
     const t = rowOutputType(r, source);
@@ -108,7 +249,7 @@ export default function QueuePage() {
   };
 
   const filteredRows = useMemo(() => {
-    let result = rows;
+    let result = activeRows;
     if (filter === "attention") {
       result = result.filter((r) => rowNeedsReview(r, source));
     } else if (filter === "mql_ready") {
@@ -127,27 +268,27 @@ export default function QueuePage() {
       );
     }
     return result;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, source, filter, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRows, source, filter, search]);
 
   const loading = queueQ.isLoading;
 
+  function openRow(row: Row) {
+    const canonicalAccount = resolveCanonicalAccount(row, canonicalLookup);
+    setSelected({ row, canonicalAccountId: canonicalAccount?.id ?? null });
+  }
+
   return (
-    <div className="p-6 max-w-4xl space-y-5">
-      {/* Header + view mode toggle */}
+    <div className="space-y-5">
+      {/* Subtitle + view mode toggle */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-            Needs your attention
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {loading
-              ? "Loading…"
-              : isSampleMode
-              ? `${unresolvedCount} sample signal${unresolvedCount !== 1 ? "s" : ""} — not from the live review list`
-              : `${unresolvedCount} signal${unresolvedCount !== 1 ? "s" : ""} need review`}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {loading
+            ? "Loading…"
+            : isSampleMode
+            ? `${unresolvedCount} sample signal${unresolvedCount !== 1 ? "s" : ""} — not from the live review list`
+            : `${unresolvedCount} signal${unresolvedCount !== 1 ? "s" : ""} need review`}
+        </p>
         <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
       </div>
 
@@ -233,7 +374,7 @@ export default function QueuePage() {
           <FilterChip
             label="All"
             active={filter === "all"}
-            count={rows.length}
+            count={activeRows.length}
             onClick={() => setFilter("all")}
           />
           <FilterChip
@@ -245,7 +386,7 @@ export default function QueuePage() {
           <FilterChip
             label="MQL / Ready for Sales"
             active={filter === "mql_ready"}
-            count={rows.filter(isMqlReady).length}
+            count={activeRows.filter(isMqlReady).length}
             onClick={() => setFilter("mql_ready")}
           />
           {presentTypes
@@ -255,7 +396,7 @@ export default function QueuePage() {
                 key={type}
                 label={OUTPUT_TYPE_LABELS[type].label}
                 active={filter === type}
-                count={rows.filter((r) => rowOutputType(r, source) === type).length}
+                count={activeRows.filter((r) => rowOutputType(r, source) === type).length}
                 onClick={() => setFilter(type)}
               />
             ))}
@@ -278,7 +419,7 @@ export default function QueuePage() {
         </div>
       ) : filteredRows.length === 0 ? (
         <EmptyState
-          hasRows={rows.length > 0}
+          hasRows={activeRows.length > 0}
           hasFilter={filter !== "all" || !!search.trim()}
           // On the default "attention" view with no active search, an empty result
           // means everything has been actioned — that's a good outcome, not "try a
@@ -295,23 +436,24 @@ export default function QueuePage() {
               row={row}
               source={source}
               isSampleMode={isSampleMode}
-              onClick={() => setSelectedRow(row)}
+              onClick={() => openRow(row)}
             />
           ))}
         </div>
       )}
 
       {/* Account detail sheet */}
-      {selectedRow && (
+      {selected && (
         <AccountDetailSheet
-          row={selectedRow}
+          row={selected.row}
           source={source}
           config={config}
-          open={!!selectedRow}
-          onClose={() => setSelectedRow(null)}
+          canonicalAccountId={selected.canonicalAccountId}
+          open={!!selected}
+          onClose={() => setSelected(null)}
           previewOnly={isSampleMode}
           onAction={() => {
-            setSelectedRow(null);
+            setSelected(null);
             // Invalidate (not just refetch this one hook instance) so the persisted
             // decision/final status appears immediately everywhere this query is used.
             // Also invalidate the action-log query — a persisted activation/decision
@@ -319,6 +461,23 @@ export default function QueuePage() {
             if (!isSampleMode) {
               void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
               void queryClient.invalidateQueries({ queryKey: ACTION_LOG_QUERY_KEY });
+            }
+          }}
+          onDecisionPersisted={() => {
+            // Fires the instant promote_mql/promote_mql_owner/dismiss actually
+            // persists a canonical decision — independent of onAction above, so
+            // the canonical accounts/decisions caches refresh even when the
+            // action flow does NOT close the sheet (promote_mql_owner's owner
+            // notification failing after the decision itself already saved).
+            if (isSampleMode) return;
+            void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
+            void queryClient.invalidateQueries({
+              queryKey: accountsListQueryKey({ limit: 500 }),
+            });
+            if (selected.canonicalAccountId) {
+              void queryClient.invalidateQueries({
+                queryKey: ["account-decisions", selected.canonicalAccountId],
+              });
             }
           }}
         />

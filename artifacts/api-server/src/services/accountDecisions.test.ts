@@ -475,6 +475,38 @@ test("createAccountDecision inserts exactly the expected row and returns created
   });
 });
 
+test("createAccountDecision accepts routingOutput \"dismissed\" and inserts exactly that value", async () => {
+  const evaluation = syntheticEvaluation();
+  const policyVersion = syntheticDecisionPolicyVersion();
+  const insertedDecision = syntheticDecision({
+    accountEvaluationId: evaluation.id,
+    routingOutput: "dismissed",
+    routingReason: "Not a fit right now",
+  });
+  const { db, calls } = makeFakeDb([
+    [evaluation],
+    [policyVersion],
+    [insertedDecision],
+  ]);
+
+  const result = await createAccountDecision({
+    db,
+    idempotencyKey: insertedDecision.id,
+    accountEvaluationId: evaluation.id,
+    routingOutput: "dismissed",
+    routingReason: "Not a fit right now",
+    createdBy: "operator@example.test",
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(result.decision, insertedDecision);
+
+  const valuesCalls = calls.filter((c) => c.method === "values");
+  const decisionValuesCall = valuesCalls[valuesCalls.length - 1];
+  assertIsRecord(decisionValuesCall?.args[0], "decision insert values()");
+  assert.equal(decisionValuesCall.args[0].routingOutput, "dismissed");
+});
+
 test("createAccountDecision normalizes an omitted routingReason to null on insert", async () => {
   const evaluation = syntheticEvaluation();
   const policyVersion = syntheticDecisionPolicyVersion();

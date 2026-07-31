@@ -74,6 +74,7 @@ function syntheticListItem(
     account: syntheticAccount(),
     latestEvaluation: null,
     latestProductionEvaluation: null,
+    latestDecision: null,
     ...overrides,
   };
 }
