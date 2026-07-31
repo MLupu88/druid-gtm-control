@@ -1,10 +1,20 @@
-// One-off production data bootstrap for the new GTM PostgreSQL database:
-// imports real legacy accounts from the configured Google Sheet's
-// ICP_Account_Records tab, and seeds exactly one starter ICP draft
-// profile if none exists yet. Safely re-runnable — account import is
-// idempotent via accounts.accountKey's unique constraint
-// (onConflictDoNothing), and the profile seed is skipped entirely once
-// any icp_profiles row already exists.
+// One-off production data bootstrap for the GTM PostgreSQL database:
+// imports the curated operational target accounts from the configured
+// Google Sheet's ICP_Target_Accounts tab, seeds exactly one starter ICP
+// draft profile if none exists yet, and removes the synthetic
+// write-validation account once real target data has been confirmed.
+// Safely re-runnable — account import is idempotent via
+// accounts.accountKey's unique constraint (onConflictDoNothing), and the
+// profile seed is skipped entirely once any icp_profiles row already
+// exists.
+//
+// ICP_Target_Accounts (15 curated operational accounts) is the only
+// source read here. "Candidate Accounts" (2,010 draft enrichment/ads
+// candidates) must NEVER be read or imported by this script — those are
+// not operational accounts and have no place in the canonical accounts
+// table. ICP_Account_Records is no longer read at all: production
+// confirmed it contains only a single synthetic validation row, not real
+// account data.
 //
 // Explicitly out of scope, by design: legacy signals, evaluations,
 // decisions, queues, recommendations, campaign data, and action-log
@@ -15,6 +25,7 @@
 // Run via: pnpm --filter @workspace/api-server run bootstrap:production-data
 
 import { google } from "googleapis";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
@@ -22,10 +33,17 @@ import { createProfile } from "../services/icpProfiles.js";
 
 const { Pool } = pg;
 
-const ACCOUNT_RECORDS_TAB = "ICP_Account_Records";
+const TARGET_ACCOUNTS_TAB = "ICP_Target_Accounts";
 const STARTER_PROFILE_NAME = "Starter ICP";
 const STARTER_PROFILE_DESCRIPTION =
   "Initial draft profile created during the PostgreSQL production cutover. Review and customize before production activation.";
+
+// The single synthetic row ICP_Account_Records was seeded with to prove
+// this script's write path worked, back before ICP_Target_Accounts was
+// confirmed as the real source. Removed once real target data has been
+// successfully imported — see the cleanup step below.
+const SYNTHETIC_VALIDATION_ACCOUNT_KEY =
+  "dom:unit-d-write-validation-20260710.com";
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -78,14 +96,14 @@ function buildSheetsAuth(serviceAccountJson: string) {
   });
 }
 
-async function readAccountRecordsTab(
+async function readTargetAccountsTab(
   sheetId: string,
   auth: ReturnType<typeof buildSheetsAuth>,
 ): Promise<Record<string, string>[]> {
   const sheets = google.sheets({ version: "v4", auth });
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: ACCOUNT_RECORDS_TAB,
+    range: TARGET_ACCOUNTS_TAB,
   });
 
   const [headers, ...dataRows] = response.data.values ?? [];
@@ -103,44 +121,52 @@ function toNullableTrimmed(value: string | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+// Domain normalization, exactly as specified: trim, lowercase, strip a
+// leading http(s):// scheme, strip a leading www., strip trailing
+// slashes, and reject an empty result (null, not "").
+function normalizeDomain(value: string | undefined): string | null {
+  let normalized = (value ?? "").trim().toLowerCase();
+  normalized = normalized.replace(/^https?:\/\//, "");
+  normalized = normalized.replace(/^www\./, "");
+  normalized = normalized.replace(/\/+$/, "");
+  return normalized === "" ? null : normalized;
+}
+
 const pool = new Pool({ connectionString: databaseUrl });
 const db = drizzle(pool, { schema });
 
 try {
   // ---------------------------------------------------------------------
-  // 1. Import legacy accounts from ICP_Account_Records only. No other
-  // column, and no other tab (signals, queues, action log, campaigns), is
-  // ever read here.
+  // 1. Import curated target accounts from ICP_Target_Accounts only.
+  // account_name -> companyName, domain -> normalized companyDomain, and
+  // the normalized domain also derives accountKey ("dom:<domain>") —
+  // there is no separate account-key column on this tab. No other column
+  // on this tab, and no other tab (Candidate Accounts, signals, queues,
+  // action log, campaigns), is ever read here.
   // ---------------------------------------------------------------------
   const auth = buildSheetsAuth(googleServiceAccountJson);
-  const rows = await readAccountRecordsTab(googleSheetId, auth);
-  console.log(`Read ${rows.length} row(s) from "${ACCOUNT_RECORDS_TAB}".`);
+  const rows = await readTargetAccountsTab(googleSheetId, auth);
+  console.log(`Read ${rows.length} row(s) from "${TARGET_ACCOUNTS_TAB}".`);
 
-  let skippedBlankKey = 0;
+  let skippedInvalidDomain = 0;
   let inserted = 0;
   let alreadyPresent = 0;
-  const domainToAccountKeys = new Map<string, Set<string>>();
+  let validRowCount = 0;
 
   for (const row of rows) {
-    const accountKey = (row.account_key ?? "").trim();
-    if (!accountKey) {
-      skippedBlankKey += 1;
+    const normalizedDomain = normalizeDomain(row.domain);
+    if (!normalizedDomain) {
+      skippedInvalidDomain += 1;
       continue;
     }
 
-    const companyDomain = toNullableTrimmed(row.company_domain);
-    const companyName = toNullableTrimmed(row.company_name);
-
-    if (companyDomain) {
-      const normalizedDomain = companyDomain.toLowerCase();
-      const keys = domainToAccountKeys.get(normalizedDomain) ?? new Set<string>();
-      keys.add(accountKey);
-      domainToAccountKeys.set(normalizedDomain, keys);
-    }
+    validRowCount += 1;
+    const accountKey = `dom:${normalizedDomain}`;
+    const companyName = toNullableTrimmed(row.account_name);
 
     const [insertedRow] = await db
       .insert(schema.accounts)
-      .values({ accountKey, companyDomain, companyName })
+      .values({ accountKey, companyDomain: normalizedDomain, companyName })
       .onConflictDoNothing({ target: schema.accounts.accountKey })
       .returning();
 
@@ -151,22 +177,43 @@ try {
     }
   }
 
-  console.log(`Skipped ${skippedBlankKey} row(s) with a blank account_key.`);
+  console.log(
+    `Skipped ${skippedInvalidDomain} row(s) with a blank or invalid domain.`,
+  );
   console.log(`Inserted ${inserted} new account(s).`);
   console.log(
     `${alreadyPresent} account(s) were already present (accountKey conflict).`,
   );
 
-  for (const [domain, keys] of domainToAccountKeys) {
-    if (keys.size > 1) {
-      console.warn(
-        `WARNING: domain "${domain}" is associated with ${keys.size} distinct accountKeys (${[...keys].join(", ")}) — not deduplicated, review manually.`,
+  // ---------------------------------------------------------------------
+  // 2. Remove the synthetic write-validation account, but only once the
+  // target tab was read without error (guaranteed simply by reaching this
+  // point) AND at least one valid target row was actually produced from
+  // it — never delete this on the strength of an empty or entirely
+  // invalid tab read.
+  // ---------------------------------------------------------------------
+  if (validRowCount > 0) {
+    const [deletedRow] = await db
+      .delete(schema.accounts)
+      .where(eq(schema.accounts.accountKey, SYNTHETIC_VALIDATION_ACCOUNT_KEY))
+      .returning();
+    if (deletedRow) {
+      console.log(
+        `Deleted synthetic validation account "${SYNTHETIC_VALIDATION_ACCOUNT_KEY}".`,
+      );
+    } else {
+      console.log(
+        `Synthetic validation account "${SYNTHETIC_VALIDATION_ACCOUNT_KEY}" was already absent.`,
       );
     }
+  } else {
+    console.log(
+      `Skipping synthetic validation account cleanup — no valid target row was produced from "${TARGET_ACCOUNTS_TAB}".`,
+    );
   }
 
   // ---------------------------------------------------------------------
-  // 2. Seed exactly one starter ICP draft profile, only if none exists.
+  // 3. Seed exactly one starter ICP draft profile, only if none exists.
   // Never published, never activated — the preview resolver already
   // prefers a draft, so this alone is enough to make the Analysis lens
   // selector usable.
