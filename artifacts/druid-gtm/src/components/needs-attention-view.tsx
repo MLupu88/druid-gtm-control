@@ -28,6 +28,7 @@ import {
 import {
   fetchAccounts,
   accountsListQueryKey,
+  ACCOUNTS_LIST_MAX_LIMIT,
   type Account,
   type AccountListItem,
 } from "@/lib/accounts-api";
@@ -173,8 +174,8 @@ export function NeedsAttentionView() {
   // tab uses, so React Query dedupes the request rather than issuing a
   // parallel one when both tabs have been visited.
   const canonicalAccountsQ = useQuery({
-    queryKey: accountsListQueryKey({ limit: 500 }),
-    queryFn: () => fetchAccounts({ limit: 500 }),
+    queryKey: accountsListQueryKey({ limit: ACCOUNTS_LIST_MAX_LIMIT }),
+    queryFn: () => fetchAccounts({ limit: ACCOUNTS_LIST_MAX_LIMIT }),
     staleTime: 30_000,
   });
   const canonicalLookup = useMemo(
@@ -472,7 +473,7 @@ export function NeedsAttentionView() {
             if (isSampleMode) return;
             void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
             void queryClient.invalidateQueries({
-              queryKey: accountsListQueryKey({ limit: 500 }),
+              queryKey: accountsListQueryKey({ limit: ACCOUNTS_LIST_MAX_LIMIT }),
             });
             if (selected.canonicalAccountId) {
               void queryClient.invalidateQueries({

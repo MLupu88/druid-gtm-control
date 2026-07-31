@@ -11,6 +11,7 @@ import { AlertCircle, ArrowRight, Building2, Search } from "lucide-react";
 import {
   fetchAccounts,
   accountsListQueryKey,
+  ACCOUNTS_LIST_MAX_LIMIT,
   type Account,
   type AccountEvaluationSummary,
   type AccountListItem,
@@ -84,8 +85,8 @@ function AllAccountsList() {
   const [sortKey, setSortKey] = useState<SortKey>("updated");
 
   const accountsQ = useQuery({
-    queryKey: accountsListQueryKey({ limit: 500 }),
-    queryFn: () => fetchAccounts({ limit: 500 }),
+    queryKey: accountsListQueryKey({ limit: ACCOUNTS_LIST_MAX_LIMIT }),
+    queryFn: () => fetchAccounts({ limit: ACCOUNTS_LIST_MAX_LIMIT }),
     staleTime: 30_000,
   });
 
