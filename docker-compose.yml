@@ -38,6 +38,26 @@ services:
     networks:
       - gtm_db_network
 
+  gtm-control-bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${GTM_POSTGRES_USER}:${GTM_POSTGRES_PASSWORD}@gtm-db:5432/${GTM_POSTGRES_DB}
+    command: ["pnpm", "--filter", "@workspace/api-server", "run", "bootstrap:production-data"]
+    depends_on:
+      gtm-db:
+        condition: service_healthy
+      gtm-control-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    networks:
+      - n8n_network
+      - gtm_db_network
+
   gtm-control:
     build:
       context: .
