@@ -13,6 +13,7 @@ import {
 import { EvaluationSummaryLine } from "@/pages/accounts";
 import { DecisionControls } from "@/components/decision-controls";
 import { DecisionHistory } from "@/components/decision-history";
+import { ClientRadarResearchPanel } from "@/components/client-radar-research-panel";
 
 function accountIdentity(account: Account): { primary: string; secondary: string | null } {
   if (account.companyName) {
@@ -157,6 +158,8 @@ function AccountDetailContent({
           )}
         </CardContent>
       </Card>
+
+      <ClientRadarResearchPanel accountId={account.id} />
 
       <DecisionControls
         accountId={account.id}
