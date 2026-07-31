@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,11 @@ import {
 } from "@/lib/queue-helpers";
 import { MessageComposer } from "@/components/message-composer";
 import { copyText, downloadText } from "@/lib/clipboard";
+import {
+  createAccountDecision,
+  AccountDecisionsApiError,
+  type CreatableRoutingOutput,
+} from "@/lib/account-decisions-api";
 
 interface ActionModalProps {
   open: boolean;
@@ -29,7 +34,34 @@ interface ActionModalProps {
   row: Row;
   onSuccess?: () => void;
   previewOnly?: boolean;
+  // The canonical account_evaluations row a promote_mql/promote_mql_owner/
+  // dismiss decision must reference (must be completed + production), or
+  // null when this row has no canonical account / eligible evaluation yet
+  // — see ../components/account-detail-sheet.tsx, which computes this and
+  // disables those buttons whenever it's null. Ignored by every other
+  // button.
+  accountEvaluationId?: string | null;
+  // Fired the instant a canonical account_decisions row is actually
+  // persisted (mql or dismissed) — separate from onSuccess, which already
+  // fires for every button kind (including local no-ops and pending n8n
+  // requests) to refresh Sheet-backed queue/action-log state. This lets
+  // the canonical accounts/decisions caches refresh even in a partial
+  // failure (decision saved, owner notification failed), independent of
+  // whether the modal/sheet ends up closing.
+  onDecisionPersisted?: () => void;
 }
+
+// The three buttons this modal can turn into a real, persisted canonical
+// account_decisions row, and the routingOutput each one records. Every
+// other button keeps its existing kind:"ui"/kind:"server" behavior
+// untouched below.
+const CANONICAL_DECISION_BUTTONS: Partial<
+  Record<ButtonKey, CreatableRoutingOutput>
+> = {
+  promote_mql: "mql",
+  promote_mql_owner: "mql",
+  dismiss: "dismissed",
+};
 
 type Phase = "confirm" | "loading" | "success" | "artifact_ready" | "pending" | "error";
 
@@ -55,6 +87,8 @@ export function ActionModal({
   row,
   onSuccess,
   previewOnly = false,
+  accountEvaluationId = null,
+  onDecisionPersisted,
 }: ActionModalProps) {
   const [reason, setReason] = useState("");
   const [phase, setPhase] = useState<Phase>("confirm");
@@ -64,6 +98,33 @@ export function ActionModal({
   const [artifact, setArtifact] = useState<ArtifactState | null>(null);
   const [copied, setCopied] = useState(false);
   const [pendingClose, setPendingClose] = useState(false);
+
+  // Idempotency key for promote_mql/promote_mql_owner/dismiss's
+  // createAccountDecision call, keyed to "this specific open action" (row
+  // + buttonKey + accountEvaluationId), not to component lifetime: it
+  // must stay the same across retries of the same open action (so a retry
+  // after a partial failure replays instead of duplicating the decision),
+  // but must be regenerated whenever the logical action differs — either
+  // because row/buttonKey/accountEvaluationId changed, or because the
+  // modal was closed and reopened for the same one.
+  const rowIdentityKey = row.queue_key ?? row.account_key ?? "";
+  const actionIdentity = `${buttonKey}:${rowIdentityKey}:${accountEvaluationId ?? ""}`;
+  const decisionIdempotencyKeyRef = useRef<{
+    identity: string;
+    key: string;
+  } | null>(null);
+  useEffect(() => {
+    if (!open) {
+      decisionIdempotencyKeyRef.current = null;
+      return;
+    }
+    if (decisionIdempotencyKeyRef.current?.identity !== actionIdentity) {
+      decisionIdempotencyKeyRef.current = {
+        identity: actionIdentity,
+        key: crypto.randomUUID(),
+      };
+    }
+  }, [open, actionIdentity]);
 
   const btn = BUTTONS[buttonKey];
   if (!btn) return null;
@@ -117,6 +178,111 @@ export function ActionModal({
       // the modal stays open on a neutral state until the operator clicks Done.
       setPhase("pending");
       setResultMessage("Preview complete — no action was sent or recorded.");
+      return;
+    }
+
+    // promote_mql / promote_mql_owner / dismiss: persist a real canonical
+    // account_decisions row via the existing account-decisions service/API
+    // (never a local-only kind:"ui" success) before falling through to the
+    // generic kind:"ui"/kind:"server" handling below, which these three
+    // buttons never reach.
+    const canonicalRoutingOutput = CANONICAL_DECISION_BUTTONS[buttonKey];
+    if (canonicalRoutingOutput) {
+      if (!accountEvaluationId) {
+        setErrorMessage(
+          "This account has no eligible evaluation to record a decision against yet.",
+        );
+        setPhase("error");
+        return;
+      }
+      const idempotencyKey = decisionIdempotencyKeyRef.current?.key;
+      if (!idempotencyKey) {
+        setErrorMessage("Could not prepare this action. Please close and try again.");
+        setPhase("error");
+        return;
+      }
+
+      setPhase("loading");
+      try {
+        await createAccountDecision({
+          idempotencyKey,
+          accountEvaluationId,
+          routingOutput: canonicalRoutingOutput,
+          routingReason: reason.trim(),
+        });
+      } catch (err) {
+        setErrorMessage(
+          err instanceof AccountDecisionsApiError
+            ? err.message
+            : "Could not record this decision. Please try again.",
+        );
+        setPhase("error");
+        return;
+      }
+
+      // The decision is now genuinely persisted — refresh canonical
+      // accounts/decisions caches regardless of what happens next below
+      // (never rolled back by an owner-notification failure).
+      onDecisionPersisted?.();
+
+      if (buttonKey === "promote_mql_owner") {
+        const ownerAlertRoute = buttonEndpointRoute("notify_owner");
+        let ownerAlertRecorded = false;
+        let ownerErrorDetail = "the owner-alert request is not connected.";
+        if (ownerAlertRoute) {
+          try {
+            const ownerRes = await fetch(ownerAlertRoute, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(
+                buttonPostBody("notify_owner", row, reason.trim()),
+              ),
+            });
+            const ownerData = (await ownerRes.json().catch(() => ({}))) as {
+              error?: string;
+            };
+            if (ownerRes.ok && !ownerData.error) {
+              ownerAlertRecorded = true;
+            } else {
+              ownerErrorDetail = ownerData.error ?? "the request failed.";
+            }
+          } catch {
+            ownerErrorDetail = "could not reach the server.";
+          }
+        }
+
+        if (ownerAlertRecorded) {
+          onSuccess?.();
+          setPhase("success");
+          setResultMessage(
+            "Promoted to MQL — the decision was saved and an owner-alert request was recorded. No external owner notification was confirmed.",
+          );
+        } else {
+          // Truthful partial-failure state: the MQL decision is real and
+          // already saved (never rolled back — onDecisionPersisted() above
+          // already fired) — only the owner-alert request failed. Deliberately
+          // does NOT call onSuccess(): unlike the full-success case, this
+          // must not cascade into closing the sheet, so the operator can
+          // read what happened and either retry (which safely replays the
+          // same idempotency key — no duplicate decision — and only retries
+          // the owner-alert step) or close manually knowing the decision itself
+          // already stuck.
+          setErrorMessage(
+            `Promoted to MQL — the decision was saved, but the owner-alert request could not be recorded: ${ownerErrorDetail}`,
+          );
+          setPhase("error");
+        }
+        return;
+      }
+
+      onSuccess?.();
+      setPhase("success");
+      setResultMessage(
+        buttonKey === "dismiss"
+          ? "Dismissed — recorded and removed from your attention list. The account itself is unaffected and still appears in All accounts."
+          : "Promoted to MQL — recorded.",
+      );
       return;
     }
 

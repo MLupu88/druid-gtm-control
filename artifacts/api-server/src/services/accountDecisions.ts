@@ -20,10 +20,10 @@
 // reinterprets, blocks, or silently turns that choice into an executable
 // external action — it only records both facts honestly, side by side.
 //
-// "Dismiss" is deliberately NOT representable here — it has no
-// corresponding routingOutput value, and the existing cockpit contract
-// (gtmContract.js's BUTTONS.dismiss) already treats it as a local,
-// non-persisted attention toggle rather than a business decision.
+// "dismiss" (the cockpit's local queue-attention toggle, gtmContract.js's
+// BUTTONS.dismiss) is represented here as routingOutput "dismissed" — a
+// real, persisted human decision like any other, not a separate
+// mechanism.
 
 import { count, desc, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -177,13 +177,14 @@ export class IdempotencyKeyConflictError extends Error {
 // return the already-persisted row instead of inserting a second one.
 // ---------------------------------------------------------------------
 
-// Restricted to the two explicit human decisions this slice supports —
+// Restricted to the three explicit human decisions this slice supports —
 // tied structurally to the real routingOutput enum via Extract (not a
-// hand-declared parallel union), so a future rename of either literal in
-// the schema surfaces as a type error here rather than silently drifting.
+// hand-declared parallel union), so a future rename of any of these
+// literals in the schema surfaces as a type error here rather than
+// silently drifting.
 export type RoutingOutput = Extract<
   AccountDecision["routingOutput"],
-  "mql" | "sales_review"
+  "mql" | "sales_review" | "dismissed"
 >;
 
 export interface CreateAccountDecisionArgs {

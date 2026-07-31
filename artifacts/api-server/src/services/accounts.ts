@@ -16,8 +16,10 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   accounts,
   accountEvaluations,
+  accountDecisions,
   type Account,
   type AccountEvaluation,
+  type AccountDecision,
 } from "@workspace/db/schema";
 import type * as schema from "@workspace/db/schema";
 
@@ -76,10 +78,23 @@ const EVALUATION_SUMMARY_COLUMNS = {
   createdBy: accountEvaluations.createdBy,
 } as const;
 
+// Compact summary of an account's most recent canonical decision (any
+// routingOutput, any referenced evaluation) — just enough for the
+// frontend to decide whether a resolved queue row should still count as
+// "needs attention" (see NeedsAttentionView) without a per-row decisions
+// fetch. The full decision row (routingReason, gate, etc.) is still only
+// available via the decision-history endpoint.
+export type AccountDecisionSummary = Pick<
+  AccountDecision,
+  "id" | "routingOutput" | "createdAt"
+>;
+
 export interface AccountListItem {
   account: Account;
   latestEvaluation: AccountEvaluationSummary | null;
   latestProductionEvaluation: AccountEvaluationSummary | null;
+  /** The account's most recent decision across all of its evaluations, or null if none exists yet. */
+  latestDecision: AccountDecisionSummary | null;
 }
 
 export interface ListAccountsArgs {
@@ -95,11 +110,12 @@ export interface AccountListResult {
 
 /**
  * Lists canonical accounts, deterministically ordered (updatedAt desc,
- * id desc), each paired with its newest evaluation (any mode) and its
- * newest production evaluation, if any. Runs exactly four queries total
- * regardless of how many accounts are on the page — one count, one page
- * of accounts, and one DISTINCT ON query each for "latest" and "latest
- * production" evaluations, both scoped to just this page's account ids.
+ * id desc), each paired with its newest evaluation (any mode), its newest
+ * production evaluation (if any), and its newest decision (if any). Runs
+ * exactly five queries total regardless of how many accounts are on the
+ * page — one count, one page of accounts, one DISTINCT ON query each for
+ * "latest" and "latest production" evaluations, and one DISTINCT ON query
+ * for the latest decision — all scoped to just this page's account ids.
  * No per-account querying (no N+1).
  */
 export async function listAccounts(
@@ -126,43 +142,72 @@ export async function listAccounts(
   // DISTINCT ON (account_id) — combined with the matching ORDER BY, this
   // is Postgres's native "one row per account_id, the newest by
   // createdAt/id" — no application-side grouping needed.
-  const [latestRows, latestProductionRows] = await Promise.all([
-    db
-      .selectDistinctOn(
-        [accountEvaluations.accountId],
-        EVALUATION_SUMMARY_COLUMNS,
-      )
-      .from(accountEvaluations)
-      .where(inArray(accountEvaluations.accountId, accountIds))
-      .orderBy(
-        accountEvaluations.accountId,
-        desc(accountEvaluations.createdAt),
-        desc(accountEvaluations.id),
-      ),
-    db
-      .selectDistinctOn(
-        [accountEvaluations.accountId],
-        EVALUATION_SUMMARY_COLUMNS,
-      )
-      .from(accountEvaluations)
-      .where(
-        and(
-          inArray(accountEvaluations.accountId, accountIds),
-          eq(accountEvaluations.evaluationMode, "production"),
+  const [latestRows, latestProductionRows, latestDecisionRows] =
+    await Promise.all([
+      db
+        .selectDistinctOn(
+          [accountEvaluations.accountId],
+          EVALUATION_SUMMARY_COLUMNS,
+        )
+        .from(accountEvaluations)
+        .where(inArray(accountEvaluations.accountId, accountIds))
+        .orderBy(
+          accountEvaluations.accountId,
+          desc(accountEvaluations.createdAt),
+          desc(accountEvaluations.id),
         ),
-      )
-      .orderBy(
-        accountEvaluations.accountId,
-        desc(accountEvaluations.createdAt),
-        desc(accountEvaluations.id),
-      ),
-  ]);
+      db
+        .selectDistinctOn(
+          [accountEvaluations.accountId],
+          EVALUATION_SUMMARY_COLUMNS,
+        )
+        .from(accountEvaluations)
+        .where(
+          and(
+            inArray(accountEvaluations.accountId, accountIds),
+            eq(accountEvaluations.evaluationMode, "production"),
+          ),
+        )
+        .orderBy(
+          accountEvaluations.accountId,
+          desc(accountEvaluations.createdAt),
+          desc(accountEvaluations.id),
+        ),
+      // account_decisions carries no direct account_id column, only
+      // accountEvaluationId — the join to account_evaluations is required
+      // to scope this by account, same as listAccountDecisions in
+      // ../services/accountDecisions.ts.
+      db
+        .selectDistinctOn([accountEvaluations.accountId], {
+          accountId: accountEvaluations.accountId,
+          id: accountDecisions.id,
+          routingOutput: accountDecisions.routingOutput,
+          createdAt: accountDecisions.createdAt,
+        })
+        .from(accountDecisions)
+        .innerJoin(
+          accountEvaluations,
+          eq(accountDecisions.accountEvaluationId, accountEvaluations.id),
+        )
+        .where(inArray(accountEvaluations.accountId, accountIds))
+        .orderBy(
+          accountEvaluations.accountId,
+          desc(accountDecisions.createdAt),
+          desc(accountDecisions.id),
+        ),
+    ]);
 
   const latestByAccountId = new Map(
     latestRows.map((row) => [row.accountId, row]),
   );
   const latestProductionByAccountId = new Map(
     latestProductionRows.map((row) => [row.accountId, row]),
+  );
+  const latestDecisionByAccountId = new Map(
+    latestDecisionRows.map(({ accountId, ...decision }) => [
+      accountId,
+      decision,
+    ]),
   );
 
   const items: AccountListItem[] = accountRows.map((account) => ({
@@ -172,6 +217,7 @@ export async function listAccounts(
     // normally, with no deduplication/nulling special-case.
     latestProductionEvaluation:
       latestProductionByAccountId.get(account.id) ?? null,
+    latestDecision: latestDecisionByAccountId.get(account.id) ?? null,
   }));
 
   return { items, total };

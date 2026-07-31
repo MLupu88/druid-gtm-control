@@ -29,6 +29,7 @@ import {
   fetchAccounts,
   accountsListQueryKey,
   type Account,
+  type AccountListItem,
 } from "@/lib/accounts-api";
 import { cn } from "@/lib/utils";
 import { Search, AlertCircle, ArrowRight, Filter, Info } from "lucide-react";
@@ -183,6 +184,18 @@ export function NeedsAttentionView() {
       ),
     [canonicalAccountsQ.data],
   );
+  // Per-account latest canonical decision summary (id/routingOutput/
+  // createdAt), keyed by account id — see AccountListItem.latestDecision
+  // in ../lib/accounts-api.ts. Used below to exclude resolved rows whose
+  // latest decision is "dismissed" or "mql" from the active view, without
+  // a per-row decisions fetch.
+  const latestDecisionByAccountId = useMemo(() => {
+    const map = new Map<string, AccountListItem["latestDecision"]>();
+    for (const item of canonicalAccountsQ.data?.items ?? []) {
+      map.set(item.account.id, item.latestDecision);
+    }
+    return map;
+  }, [canonicalAccountsQ.data]);
 
   const config = configQ.data?.config ?? {};
   const liveRows = queueQ.data?.rows ?? [];
@@ -192,18 +205,43 @@ export function NeedsAttentionView() {
   const rows = isSampleMode ? SAMPLE_ROWS : liveRows;
   const source = isSampleMode ? SAMPLE_SOURCE : liveSource;
 
+  // Canonically active rows — the single source every Needs Attention
+  // count, chip, filter, search result, and rendered row below derives
+  // from. A row drops out here (and only here) once it resolved to a
+  // canonical account whose latest persisted decision is "dismissed" or
+  // "mql": that is a real, durable decision, so the row must not keep
+  // counting or reappearing after refresh. An unresolved row (no
+  // canonical match, or no decision recorded yet) is preserved untouched.
+  // This predicate must not be reimplemented anywhere else — every
+  // downstream count/list reads activeRows, never rows, directly.
+  const activeRows = useMemo(
+    () =>
+      rows.filter((r) => {
+        const canonicalAccount = resolveCanonicalAccount(r, canonicalLookup);
+        if (!canonicalAccount) return true;
+        const latestDecision = latestDecisionByAccountId.get(canonicalAccount.id);
+        if (!latestDecision) return true;
+        return (
+          latestDecision.routingOutput !== "dismissed" &&
+          latestDecision.routingOutput !== "mql"
+        );
+      }),
+    [rows, canonicalLookup, latestDecisionByAccountId],
+  );
+
   // The headline, orientation panel, and "Needs attention" chip must all reflect rows
-  // that still need a decision — never rows.length, which counts already-processed rows.
+  // that still need a decision — never activeRows.length, which counts every active row
+  // regardless of review state.
   const unresolvedCount = useMemo(
-    () => countUnresolvedRows(rows, source),
-    [rows, source],
+    () => countUnresolvedRows(activeRows, source),
+    [activeRows, source],
   );
 
   const presentTypes = useMemo(() => {
     const set = new Set<OutputTypeKey>();
-    for (const row of rows) set.add(rowOutputType(row, source));
+    for (const row of activeRows) set.add(rowOutputType(row, source));
     return Array.from(set);
-  }, [rows, source]);
+  }, [activeRows, source]);
 
   const isMqlReady = (r: Row) => {
     const t = rowOutputType(r, source);
@@ -211,7 +249,7 @@ export function NeedsAttentionView() {
   };
 
   const filteredRows = useMemo(() => {
-    let result = rows;
+    let result = activeRows;
     if (filter === "attention") {
       result = result.filter((r) => rowNeedsReview(r, source));
     } else if (filter === "mql_ready") {
@@ -231,7 +269,7 @@ export function NeedsAttentionView() {
     }
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, source, filter, search]);
+  }, [activeRows, source, filter, search]);
 
   const loading = queueQ.isLoading;
 
@@ -336,7 +374,7 @@ export function NeedsAttentionView() {
           <FilterChip
             label="All"
             active={filter === "all"}
-            count={rows.length}
+            count={activeRows.length}
             onClick={() => setFilter("all")}
           />
           <FilterChip
@@ -348,7 +386,7 @@ export function NeedsAttentionView() {
           <FilterChip
             label="MQL / Ready for Sales"
             active={filter === "mql_ready"}
-            count={rows.filter(isMqlReady).length}
+            count={activeRows.filter(isMqlReady).length}
             onClick={() => setFilter("mql_ready")}
           />
           {presentTypes
@@ -358,7 +396,7 @@ export function NeedsAttentionView() {
                 key={type}
                 label={OUTPUT_TYPE_LABELS[type].label}
                 active={filter === type}
-                count={rows.filter((r) => rowOutputType(r, source) === type).length}
+                count={activeRows.filter((r) => rowOutputType(r, source) === type).length}
                 onClick={() => setFilter(type)}
               />
             ))}
@@ -381,7 +419,7 @@ export function NeedsAttentionView() {
         </div>
       ) : filteredRows.length === 0 ? (
         <EmptyState
-          hasRows={rows.length > 0}
+          hasRows={activeRows.length > 0}
           hasFilter={filter !== "all" || !!search.trim()}
           // On the default "attention" view with no active search, an empty result
           // means everything has been actioned — that's a good outcome, not "try a
@@ -423,6 +461,23 @@ export function NeedsAttentionView() {
             if (!isSampleMode) {
               void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
               void queryClient.invalidateQueries({ queryKey: ACTION_LOG_QUERY_KEY });
+            }
+          }}
+          onDecisionPersisted={() => {
+            // Fires the instant promote_mql/promote_mql_owner/dismiss actually
+            // persists a canonical decision — independent of onAction above, so
+            // the canonical accounts/decisions caches refresh even when the
+            // action flow does NOT close the sheet (promote_mql_owner's owner
+            // notification failing after the decision itself already saved).
+            if (isSampleMode) return;
+            void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
+            void queryClient.invalidateQueries({
+              queryKey: accountsListQueryKey({ limit: 500 }),
+            });
+            if (selected.canonicalAccountId) {
+              void queryClient.invalidateQueries({
+                queryKey: ["account-decisions", selected.canonicalAccountId],
+              });
             }
           }}
         />

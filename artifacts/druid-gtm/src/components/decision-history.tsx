@@ -9,14 +9,15 @@ import {
   type AccountDecision,
 } from "@/lib/account-decisions-api";
 
-// The only two routing outputs this UI can create — see
-// CreatableRoutingOutput in ../lib/account-decisions-api.ts. History may
-// in principle contain other values (a real, non-guessed possibility per
-// the full RoutingOutput enum) — those fall back to a humanized raw
-// value rather than a blank label.
+// The routing outputs this UI can create — see CreatableRoutingOutput in
+// ../lib/account-decisions-api.ts. History may in principle contain other
+// values (a real, non-guessed possibility per the full RoutingOutput
+// enum) — those fall back to a humanized raw value rather than a blank
+// label.
 const ROUTING_OUTPUT_LABELS: Partial<Record<string, string>> = {
   mql: "Promote to MQL",
   sales_review: "Keep for review",
+  dismissed: "Dismissed",
 };
 
 const GATE_BADGE_CLASSES: Record<string, string> = {
