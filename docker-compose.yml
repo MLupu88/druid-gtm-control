@@ -1,4 +1,43 @@
 services:
+  gtm-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${GTM_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${GTM_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${GTM_POSTGRES_DB}
+    volumes:
+      - gtm_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${GTM_POSTGRES_USER} -d ${GTM_POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - gtm_db_network
+
+  gtm-control-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${GTM_POSTGRES_USER}:${GTM_POSTGRES_PASSWORD}@gtm-db:5432/${GTM_POSTGRES_DB}
+    command: ["pnpm", "--filter", "@workspace/db", "run", "migrate"]
+    depends_on:
+      gtm-db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - gtm_db_network
+
   gtm-control:
     build:
       context: .
@@ -7,10 +46,18 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgres://${GTM_POSTGRES_USER}:${GTM_POSTGRES_PASSWORD}@gtm-db:5432/${GTM_POSTGRES_DB}
+    depends_on:
+      gtm-db:
+        condition: service_healthy
+      gtm-control-migrate:
+        condition: service_completed_successfully
     ports:
       - "5000:5000"
     networks:
       - n8n_network
+      - gtm_db_network
 
   gtm-action-web:
     image: ghcr.io/mlupu88/druid-gtm-control/gtm-action-web:latest
@@ -21,3 +68,8 @@ services:
 networks:
   n8n_network:
     external: true
+  gtm_db_network:
+    internal: true
+
+volumes:
+  gtm_db_data:
