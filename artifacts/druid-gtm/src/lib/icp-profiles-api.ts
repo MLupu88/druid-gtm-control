@@ -247,3 +247,113 @@ export async function updateIcpProfileDraft(
   }
   return res.json() as Promise<IcpProfileVersion>;
 }
+
+// ---------------------------------------------------------------------
+// Publish (POST /api/internal/icp-profiles/:profileId/publish) — acts on
+// "the profile's current draft" implicitly (see the route's own
+// comment); no body fields are accepted or sent. Does NOT activate the
+// published version — routes/icpProfiles.ts's publishDraft never touches
+// activeVersionId. Returns the now-published IcpProfileVersion row
+// (status: "published", publishedAt set).
+// ---------------------------------------------------------------------
+
+export async function publishIcpProfileDraft(
+  profileId: string,
+): Promise<IcpProfileVersion> {
+  const res = await fetch(
+    `/api/internal/icp-profiles/${encodeURIComponent(profileId)}/publish`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok) {
+    await throwForResponse(res, "Could not publish this draft.");
+  }
+  return res.json() as Promise<IcpProfileVersion>;
+}
+
+// ---------------------------------------------------------------------
+// Activate (POST /api/internal/icp-profiles/:profileId/activate) — body
+// is `{ versionId }` only (VersionIdRequestSchema). Mirrors the exact
+// shape activateVersion (icpProfiles.ts service) returns:
+// `{ profile, event, alreadyActive }` — not a bare profile.
+// Re-activating the already-active version is NOT an error server-side
+// (a deterministic no-op returning alreadyActive: true, event: null) —
+// the frontend disables the action for an already-active version as a
+// UX courtesy, not because the backend would reject it.
+// ---------------------------------------------------------------------
+
+// Mirrors lib/db/src/schema/icpProfileActivationEvents.ts's
+// IcpProfileActivationEvent exactly (this slice never lists activation
+// history — see the module comment — but the /activate response embeds
+// one event row, so its shape must still be typed accurately here).
+export interface IcpProfileActivationEvent {
+  id: string;
+  profileId: string;
+  eventType: "activated" | "deactivated";
+  versionId: string | null;
+  previousActiveVersionId: string | null;
+  performedBy: string | null;
+  performedAt: string;
+  reason: string | null;
+}
+
+export interface ActivateIcpProfileVersionResult {
+  profile: IcpProfile;
+  event: IcpProfileActivationEvent | null;
+  alreadyActive: boolean;
+}
+
+export async function activateIcpProfileVersion(
+  profileId: string,
+  versionId: string,
+): Promise<ActivateIcpProfileVersionResult> {
+  const res = await fetch(
+    `/api/internal/icp-profiles/${encodeURIComponent(profileId)}/activate`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ versionId }),
+    },
+  );
+  if (!res.ok) {
+    await throwForResponse(res, "Could not activate this version.");
+  }
+  return res.json() as Promise<ActivateIcpProfileVersionResult>;
+}
+
+// ---------------------------------------------------------------------
+// Clone (POST /api/internal/icp-profiles/:profileId/clone) — body is
+// `{ versionId }` (the SOURCE version to clone, named `versionId` on the
+// wire per VersionIdRequestSchema — renamed to `sourceVersionId` in this
+// function's own signature purely for local clarity, since the request
+// already has an unrelated `:profileId` path param). Fails with
+// "draft_already_exists" (409) if the profile already has a draft — the
+// service enforces at most one draft per profile; callers must not
+// invoke this when a draft already exists (see
+// ../components/icp-profile-lifecycle-actions.tsx, which only ever
+// renders this action when there is none).
+// ---------------------------------------------------------------------
+
+export async function cloneIcpProfileVersionIntoDraft(
+  profileId: string,
+  sourceVersionId: string,
+): Promise<IcpProfileVersion> {
+  const res = await fetch(
+    `/api/internal/icp-profiles/${encodeURIComponent(profileId)}/clone`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ versionId: sourceVersionId }),
+    },
+  );
+  if (!res.ok) {
+    await throwForResponse(res, "Could not clone this version into a new draft.");
+  }
+  return res.json() as Promise<IcpProfileVersion>;
+}

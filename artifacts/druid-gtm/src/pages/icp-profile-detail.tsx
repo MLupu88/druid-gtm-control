@@ -9,6 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { TechnicalDetails } from "@/components/technical-details";
 import { IcpProfileDraftEditor } from "@/components/icp-profile-draft-editor";
+import { ActivateVersionAction, CloneVersionAction } from "@/components/icp-profile-lifecycle-actions";
+import { DraftVsActiveComparison } from "@/components/icp-profile-comparison";
 import { cn } from "@/lib/utils";
 import {
   fetchIcpProfileDetail,
@@ -130,11 +132,15 @@ function VersionHistoryList({
 
 // ─── Selected version's read-only configuration summary ─────────────────────
 function VersionSummaryCard({
+  profileId,
   version,
   isActive,
+  hasDraft,
 }: {
+  profileId: string;
   version: IcpProfileVersion;
   isActive: boolean;
+  hasDraft: boolean;
 }) {
   const summary = summarizeVersionConfig(version.config);
 
@@ -152,6 +158,20 @@ function VersionSummaryCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
+        {version.status === "published" && (
+          <div className="flex flex-wrap items-center gap-3 pb-1 border-b border-border/60">
+            <ActivateVersionAction profileId={profileId} version={version} isActive={isActive} />
+            {hasDraft ? (
+              <p className="text-[11px] text-muted-foreground">
+                Only one draft can exist at a time — publish or continue the
+                current draft before cloning another version.
+              </p>
+            ) : (
+              <CloneVersionAction profileId={profileId} version={version} />
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3 text-xs">
           <MetaField label="Created" value={formatDateTime(version.createdAt)} />
           <MetaField label="Created by" value={version.createdBy} />
@@ -208,9 +228,11 @@ function VersionSummaryCard({
 }
 
 // ─── No-editable-draft message ───────────────────────────────────────────────
-// Truthful, not a fake Edit action: clone-into-new-draft (the only way to
-// start editing a profile that's already been published with no draft
-// left) isn't implemented yet.
+// Truthful: cloning a published version into a new draft is the way to
+// start editing again once nothing is left in draft — that action lives
+// on each published version's card below (Version history → select a
+// published version → "Clone into new draft"), not here, since the
+// source version must be explicit.
 function NoDraftMessage() {
   return (
     <Card className="border-border bg-card">
@@ -221,8 +243,8 @@ function NoDraftMessage() {
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">
-          This profile has no editable draft. Creating a new draft from a
-          published version will be available in the next step.
+          This profile has no editable draft. Select a published version below
+          and clone it into a new draft to start editing again.
         </p>
       </CardContent>
     </Card>
@@ -327,6 +349,10 @@ function ProfileDetailContent({
         <NoDraftMessage />
       )}
 
+      {draftVersion && (
+        <DraftVsActiveComparison draftVersion={draftVersion} activeVersion={activeVersion} />
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
         {versions.length > 0 ? (
           <>
@@ -338,8 +364,10 @@ function ProfileDetailContent({
             />
             {selectedVersion && (
               <VersionSummaryCard
+                profileId={profile.id}
                 version={selectedVersion}
                 isActive={selectedVersion.id === profile.activeVersionId}
+                hasDraft={draftVersion !== null}
               />
             )}
           </>

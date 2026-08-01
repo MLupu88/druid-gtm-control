@@ -119,3 +119,30 @@ test("a failed save preserves the user's edits — the mutation error path never
   const source = readSource();
   assert.ok(!source.includes("onError"));
 });
+
+// ---------------------------------------------------------------------
+// Slice 3 — publish
+// ---------------------------------------------------------------------
+
+test("the Publish action is wired in, disabled whenever the draft is invalid, unsaved, or currently saving — never auto-saving first", () => {
+  const source = readSource();
+  assert.ok(source.includes("<PublishDraftAction"));
+  assert.ok(source.includes("!validation.valid"));
+  assert.ok(source.includes("publishDisabledReason"));
+  const disabledBlock = source.slice(
+    source.indexOf("const publishDisabledReason"),
+    source.indexOf("const fitAllowlist"),
+  );
+  assert.ok(disabledBlock.includes("dirty"));
+  assert.ok(disabledBlock.includes("saveMutation.isPending"));
+  // Load-bearing: publish is never preceded by an automatic save call —
+  // saveMutation.mutate() is only ever invoked from the Save button's
+  // own onClick, never from anywhere in the publish-gating logic.
+  assert.ok(!disabledBlock.includes("saveMutation.mutate()"));
+});
+
+test("publish disabled reasons are explained, not just a silently disabled button", () => {
+  const source = readSource();
+  assert.ok(source.includes("Fix the issues listed below before publishing."));
+  assert.ok(source.includes("Save your changes before publishing."));
+});

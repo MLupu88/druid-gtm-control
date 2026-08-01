@@ -88,10 +88,7 @@ test("the draft editor is shown when a draft exists, and a truthful no-draft mes
   // this checks the phrase in two pieces rather than one continuous
   // string — same approach as the re-evaluation disclosure test above.
   assert.ok(source.includes("This profile has no editable draft."));
-  assert.ok(source.includes("available in the next step."));
-  // Load-bearing: no clone wiring in this slice.
-  assert.ok(!source.includes("cloneVersionIntoDraft"));
-  assert.ok(!/\/clone/.test(source));
+  assert.ok(source.includes("clone it into a new draft"));
 });
 
 test("unsaved draft changes are guarded before navigating back via the shared Link + preventDefault pattern", () => {
@@ -100,4 +97,39 @@ test("unsaved draft changes are guarded before navigating back via the shared Li
   assert.ok(source.includes("onDirtyChange={onDraftDirtyChange}") || source.includes("onDraftDirtyChange"));
   assert.ok(source.includes("window.confirm"));
   assert.ok(source.includes("e.preventDefault()"));
+});
+
+// ---------------------------------------------------------------------
+// Slice 3 — publish / activate / clone / comparison
+// ---------------------------------------------------------------------
+
+test("activate and clone actions are wired onto each published version's summary card, using the shared lifecycle-action components", () => {
+  const source = readSource();
+  assert.ok(source.includes("<ActivateVersionAction"));
+  assert.ok(source.includes("<CloneVersionAction"));
+  assert.ok(source.includes('version.status === "published"'));
+});
+
+test("activation is disabled for the already-active version by passing isActive through, not by hiding the action", () => {
+  const source = readSource();
+  assert.ok(source.includes("isActive={isActive}"));
+});
+
+test("clone is only offered when the profile has no current draft — never a misleading action the backend would reject", () => {
+  const source = readSource();
+  assert.ok(source.includes("hasDraft ?"));
+  assert.ok(source.includes("Only one draft can exist at a time"));
+});
+
+test("the draft-vs-active comparison is shown only when a draft exists, and never fabricated when there is none", () => {
+  const source = readSource();
+  assert.ok(source.includes("<DraftVsActiveComparison"));
+  assert.ok(source.includes("{draftVersion && ("));
+});
+
+test("no archive, deactivate, or activation-history capability is implemented on this page", () => {
+  const source = readSource();
+  for (const term of ["archiveProfile", "deactivateVersion", "activation-events", "activationEvents", "activation history"]) {
+    assert.ok(!source.toLowerCase().includes(term.toLowerCase()), `must not reference "${term}"`);
+  }
 });

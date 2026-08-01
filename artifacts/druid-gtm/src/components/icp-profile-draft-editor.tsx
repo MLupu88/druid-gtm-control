@@ -33,6 +33,7 @@ import {
 } from "@/lib/icp-profile-config-editing";
 import { RuleListSection, WeightedRuleRow, ConditionRuleRow } from "@/components/icp-rule-list-section";
 import { TierEditor } from "@/components/icp-tier-editor";
+import { PublishDraftAction } from "@/components/icp-profile-lifecycle-actions";
 import type { IcpProfileConfigV1, WeightedRule, ConditionRule } from "@workspace/evaluator";
 import { MAX_RULES_PER_DIMENSION } from "@workspace/evaluator";
 
@@ -134,6 +135,17 @@ export function IcpProfileDraftEditor({
 
   const canSave = dirty && !saveMutation.isPending && validation.valid;
 
+  // Publish never auto-saves first — it is disabled outright (never
+  // silently saves-then-publishes) whenever there's something that would
+  // make publishing act on stale or invalid data.
+  const publishDisabledReason = !validation.valid
+    ? "Fix the issues listed below before publishing."
+    : dirty
+      ? "Save your changes before publishing."
+      : saveMutation.isPending
+        ? "Save in progress — please wait."
+        : null;
+
   const fitAllowlist = fieldAllowlistFor("fit");
   const intentAllowlist = fieldAllowlistFor("intent");
   const actionabilityAllowlist = fieldAllowlistFor("actionability");
@@ -149,11 +161,19 @@ export function IcpProfileDraftEditor({
             Draft — Version {draftVersion.versionNumber}
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Changes here are saved as this draft. They only take effect once the
-            draft is published and activated (available in a later step).
+            Changes here are saved as this draft. Publish when it&apos;s ready to
+            create an immutable version, then activate that version to put it
+            into use for new evaluations.
           </p>
         </div>
-        <SaveControls status={saveStatus} savedAt={savedAt} onSave={() => saveMutation.mutate()} canSave={canSave} />
+        <div className="flex flex-col items-end gap-3 shrink-0">
+          <SaveControls status={saveStatus} savedAt={savedAt} onSave={() => saveMutation.mutate()} canSave={canSave} />
+          <PublishDraftAction
+            profileId={profile.id}
+            disabled={publishDisabledReason !== null}
+            disabledReason={publishDisabledReason}
+          />
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-6">
