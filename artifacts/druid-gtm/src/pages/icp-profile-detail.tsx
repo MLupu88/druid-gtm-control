@@ -11,6 +11,8 @@ import { TechnicalDetails } from "@/components/technical-details";
 import { IcpProfileDraftEditor } from "@/components/icp-profile-draft-editor";
 import { ActivateVersionAction, CloneVersionAction } from "@/components/icp-profile-lifecycle-actions";
 import { DraftVsActiveComparison } from "@/components/icp-profile-comparison";
+import { LegacyStarterWarning } from "@/components/legacy-starter-warning";
+import { isLegacyStarterIcpConfig } from "@/lib/icp-legacy-starter-detection";
 import { cn } from "@/lib/utils";
 import {
   fetchIcpProfileDetail,
@@ -158,6 +160,8 @@ function VersionSummaryCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
+        {isLegacyStarterIcpConfig(version.config) && <LegacyStarterWarning />}
+
         {version.status === "published" && (
           <div className="flex flex-wrap items-center gap-3 pb-1 border-b border-border/60">
             <ActivateVersionAction profileId={profileId} version={version} isActive={isActive} />
@@ -189,9 +193,9 @@ function VersionSummaryCard({
           {summary ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               <SummaryCount label="Fit rules" value={summary.fitRuleCount} />
-              <SummaryCount label="Fit tiers" value={summary.fitTierCount} />
+              <SummaryCount label="Fit bands" value={summary.fitTierCount} />
               <SummaryCount label="Intent rules" value={summary.intentRuleCount} />
-              <SummaryCount label="Intent tiers" value={summary.intentTierCount} />
+              <SummaryCount label="Intent bands" value={summary.intentTierCount} />
               <SummaryCount
                 label="Actionability rules"
                 value={summary.actionabilityRuleCount}

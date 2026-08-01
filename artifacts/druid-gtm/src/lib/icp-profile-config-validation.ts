@@ -150,7 +150,7 @@ const DIMENSION_LABELS: Record<string, string> = {
 
 const SECTION_LABELS: Record<string, string> = {
   rules: "rule",
-  tiers: "tier",
+  tiers: "band",
   hardDisqualifiers: "hard disqualifier",
   restrictions: "restriction",
 };

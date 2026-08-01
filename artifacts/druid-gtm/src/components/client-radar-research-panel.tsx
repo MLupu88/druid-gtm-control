@@ -67,7 +67,15 @@ function describeMutationError(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-function statusLabel(status: ClientRadarResearchRun["status"]): string {
+// "not_configured" gets its own neutral label/variant entirely distinct
+// from "Failed" — an unconfigured environment is not a failure of
+// anything that was actually attempted, so it must never share the red
+// destructive badge with a genuine runtime failure.
+function statusLabel(
+  status: ClientRadarResearchRun["status"],
+  failureReason: ClientRadarResearchRun["failureReason"],
+): string {
+  if (status === "failed" && failureReason === "not_configured") return "Unavailable";
   switch (status) {
     case "submitting":
       return "Submitting";
@@ -86,7 +94,9 @@ function statusLabel(status: ClientRadarResearchRun["status"]): string {
 
 function statusBadgeVariant(
   status: ClientRadarResearchRun["status"],
+  failureReason: ClientRadarResearchRun["failureReason"],
 ): "default" | "secondary" | "destructive" | "outline" {
+  if (status === "failed" && failureReason === "not_configured") return "secondary";
   switch (status) {
     case "completed":
       return "default";
@@ -99,8 +109,12 @@ function statusBadgeVariant(
   }
 }
 
-function StatusBadge({ status }: { status: ClientRadarResearchRun["status"] }) {
-  return <Badge variant={statusBadgeVariant(status)}>{statusLabel(status)}</Badge>;
+function StatusBadge({ run }: { run: ClientRadarResearchRun }) {
+  return (
+    <Badge variant={statusBadgeVariant(run.status, run.failureReason)}>
+      {statusLabel(run.status, run.failureReason)}
+    </Badge>
+  );
 }
 
 function InfoNotice({ children }: { children: ReactNode }) {
@@ -216,6 +230,24 @@ function AccountFindings({ payload }: { payload: ClientRadarAccountPayload }) {
   );
 }
 
+// Not configured — a deployment fact, not a failed attempt. No Retry (a
+// retry would fail identically until an operator configures the
+// environment), no failure timestamp (nothing was actually attempted and
+// failed at a point in time), no red styling.
+function UnavailableResult({ run }: { run: ClientRadarResearchRun }) {
+  const failure = describeClientRadarFailure(run.lastError, "failed", "not_configured");
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-muted-foreground leading-relaxed">{failure.primary}</p>
+      {failure.technical && (
+        <TechnicalDetails>
+          <p className="font-mono text-[11px] text-muted-foreground/80">{failure.technical}</p>
+        </TechnicalDetails>
+      )}
+    </div>
+  );
+}
+
 function FailedOrCancelledResult({
   run,
   onRetry,
@@ -228,6 +260,7 @@ function FailedOrCancelledResult({
   const failure = describeClientRadarFailure(
     run.lastError,
     run.status as "failed" | "cancelled",
+    run.failureReason,
   );
   return (
     <div className="space-y-2">
@@ -339,7 +372,7 @@ export function ClientRadarResearchPanel({ accountId }: { accountId: string }) {
         <CardTitle className="text-xs font-semibold uppercase tracking-wider text-primary">
           Client Radar research
         </CardTitle>
-        {run && <StatusBadge status={run.status} />}
+        {run && <StatusBadge run={run} />}
       </CardHeader>
       <CardContent className="space-y-4">
         {researchQ.isLoading && (
@@ -414,13 +447,19 @@ export function ClientRadarResearchPanel({ accountId }: { accountId: string }) {
           </div>
         )}
 
-        {run && (run.status === "failed" || run.status === "cancelled") && (
-          <FailedOrCancelledResult
-            run={run}
-            onRetry={() => startMutation.mutate()}
-            retryPending={startMutation.isPending}
-          />
+        {run && run.status === "failed" && run.failureReason === "not_configured" && (
+          <UnavailableResult run={run} />
         )}
+
+        {run &&
+          ((run.status === "failed" && run.failureReason !== "not_configured") ||
+            run.status === "cancelled") && (
+            <FailedOrCancelledResult
+              run={run}
+              onRetry={() => startMutation.mutate()}
+              retryPending={startMutation.isPending}
+            />
+          )}
 
         {run && run.status === "completed" && <CompletedResult run={run} />}
 

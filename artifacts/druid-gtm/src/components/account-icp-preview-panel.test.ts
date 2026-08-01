@@ -137,7 +137,7 @@ test("double submission is prevented — the action and the dialog's confirm but
 test("eligibility is derived from the profile's real active-version data, not guessed — disabled when no active published version exists", () => {
   const source = readSource();
   assert.ok(source.includes("selectedProfile?.activeVersion"));
-  assert.ok(source.includes("This profile has no active, published version yet."));
+  assert.ok(source.includes("Publish and activate a version of this profile to run an official evaluation."));
   // Never blocked merely because the preview is stale/absent — the
   // disabled-reason derivation must not reference previewMutation at all.
   const reasonBlock = source.slice(
@@ -145,6 +145,13 @@ test("eligibility is derived from the profile's real active-version data, not gu
     source.indexOf("const canRunOfficial"),
   );
   assert.ok(!reasonBlock.includes("previewMutation"));
+});
+
+test("the blocked-official-evaluation state includes a direct CTA to that profile's settings page, only when the block is specifically the missing-active-version case", () => {
+  const source = readSource();
+  assert.ok(source.includes("officialBlockedByMissingActiveVersion"));
+  assert.ok(source.includes("Open ICP profile"));
+  assert.ok(source.includes("`/settings/icp-profiles/${selectedProfile.id}`"));
 });
 
 test("on success, account detail and decision queries are both invalidated — evaluation history and decision availability both flow from account detail", () => {
@@ -211,4 +218,82 @@ test("the official evaluation reuses the exact same result-rendering components 
   const block = functionBlock(readSource(), "OfficialEvaluationResult");
   assert.ok(block.includes("<CompletedEvaluationDetails"));
   assert.ok(block.includes("<FailedEvaluationState"));
+});
+
+// ---------------------------------------------------------------------
+// Hotfix: truthful preview copy — a preview IS persisted (evaluationMode
+// "preview" in account_evaluations) and appears in evaluation runs; it
+// only can't back a decision. The old "not saved"/"NOT SAVED" claims
+// were false and must be fully gone.
+// ---------------------------------------------------------------------
+
+test("no false 'not saved' claim remains anywhere in this file, before or after running a preview", () => {
+  const source = readSource();
+  for (const falseClaim of ["not saved", "NOT SAVED", "This result is not saved"]) {
+    assert.ok(
+      !source.toLowerCase().includes(falseClaim.toLowerCase()),
+      `must not claim "${falseClaim}" — a preview IS persisted`,
+    );
+  }
+});
+
+test("the post-run preview copy is truthful: recorded for reference, cannot back a decision, only an official evaluation can", () => {
+  const block = functionBlock(readSource(), "PreviewResult");
+  assert.ok(block.includes("recorded in the account&apos;s evaluation runs"));
+  assert.ok(block.includes("cannot be used to record a decision"));
+  assert.ok(block.includes("Only an official evaluation"));
+});
+
+test("the pre-run intro copy states the same truth as the post-run copy — recorded but never a decision", () => {
+  const source = readSource();
+  const introEnd = source.indexOf("{profilesQ.isLoading");
+  const intro = source.slice(0, introEnd);
+  assert.ok(intro.includes("recorded in the account&apos;s evaluation runs"));
+  assert.ok(intro.includes("can never be used"));
+});
+
+// ---------------------------------------------------------------------
+// Hotfix: presentation hierarchy — band is the primary business outcome,
+// the weighted score is secondary metadata.
+// ---------------------------------------------------------------------
+
+test("fit and intent bands are the primary rendered outcome; the numeric score is shown as secondary, explicitly labeled a weighted score", () => {
+  const block = functionBlock(readSource(), "CompletedEvaluationDetails");
+  assert.ok(block.includes("fitBand.label"));
+  assert.ok(block.includes("intentBand.label"));
+  assert.ok(block.includes("formatScorePoints(evaluation.fitScore)"));
+  assert.ok(block.includes("formatScorePoints(evaluation.intentScore)"));
+});
+
+test("ability to act shows a derived user-facing state, never a bare '0 points' as the conclusion", () => {
+  const block = functionBlock(readSource(), "CompletedEvaluationDetails");
+  assert.ok(block.includes("deriveActionabilityState"));
+  assert.ok(block.includes("ACTIONABILITY_STATE_LABELS[actionabilityState]"));
+});
+
+// ---------------------------------------------------------------------
+// Hotfix: identity-not-person-addressable restriction clarification
+// ---------------------------------------------------------------------
+
+test("shows the clarified 'Restricted for automated outreach' explanation specifically when the identity-not-person-addressable rule fired", () => {
+  const block = functionBlock(readSource(), "CompletedEvaluationDetails");
+  assert.ok(block.includes("hasIdentityNotPersonAddressableRestriction"));
+  assert.ok(block.includes("Restricted for automated outreach"));
+  assert.ok(block.includes("No person-addressable contact is available yet"));
+});
+
+test("the eligibility badge always reflects the real eligibilityOutcome — never hardcoded to Eligible", () => {
+  const block = functionBlock(readSource(), "CompletedEvaluationDetails");
+  assert.ok(block.includes("eligibilityLabel(evaluation.eligibilityOutcome)"));
+  assert.ok(block.includes("eligibilityBadgeVariant(evaluation.eligibilityOutcome)"));
+});
+
+// ---------------------------------------------------------------------
+// Hotfix: legacy Starter ICP warning surfaces on preview/official results
+// ---------------------------------------------------------------------
+
+test("shows the legacy starter warning when the evaluation's own profileConfigSnapshot matches the legacy signature", () => {
+  const block = functionBlock(readSource(), "CompletedEvaluationDetails");
+  assert.ok(block.includes("isLegacyStarterIcpConfig(evaluation.profileConfigSnapshot)"));
+  assert.ok(block.includes("<LegacyStarterWarning"));
 });

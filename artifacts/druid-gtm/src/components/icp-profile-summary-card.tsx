@@ -1,5 +1,6 @@
 import { Info, AlertTriangle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import type { IcpProfileConfigV1 } from "@workspace/evaluator";
 import { buildIcpProfileSummary, deriveConfigWarnings } from "@/lib/icp-profile-business-summary";
 import {
@@ -157,20 +158,21 @@ export function IcpProfileSummaryCard({ config }: { config: IcpProfileConfigV1 }
         <WeightPresetExplanation />
 
         {warnings.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-medium text-amber-400">Configuration guidance</p>
-            <ul className="space-y-1">
-              {warnings.map((warning) => (
-                <li
-                  key={warning.id}
-                  className="flex items-start gap-1.5 text-[11px] text-amber-300/90"
-                >
-                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                  {warning.message}
-                </li>
-              ))}
-            </ul>
-          </div>
+          <Alert className="border-amber-500/30 bg-amber-500/10">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            <AlertTitle className="text-amber-800 dark:text-amber-300">
+              Configuration guidance
+            </AlertTitle>
+            <AlertDescription>
+              <ul className="space-y-1">
+                {warnings.map((warning) => (
+                  <li key={warning.id} className="text-xs text-amber-900/90 dark:text-amber-200/90">
+                    {warning.message}
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
         )}
       </CardContent>
     </Card>

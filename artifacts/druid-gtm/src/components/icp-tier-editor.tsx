@@ -62,7 +62,7 @@ export function TierEditor({
           onClick={handleAdd}
           disabled={tiers.length >= MAX_TIERS_PER_DIMENSION}
         >
-          <Plus className="w-3.5 h-3.5 mr-1" /> Add tier
+          <Plus className="w-3.5 h-3.5 mr-1" /> Add band
         </Button>
       </div>
 
@@ -136,7 +136,7 @@ export function TierEditor({
                 className="h-7 w-7"
                 onClick={() => onChange(moveItem(tiers, index, -1))}
                 disabled={index === 0}
-                aria-label="Move tier up"
+                aria-label="Move band up"
               >
                 <ChevronUp className="w-3.5 h-3.5" />
               </Button>
@@ -147,7 +147,7 @@ export function TierEditor({
                 className="h-7 w-7"
                 onClick={() => onChange(moveItem(tiers, index, 1))}
                 disabled={index === tiers.length - 1}
-                aria-label="Move tier down"
+                aria-label="Move band down"
               >
                 <ChevronDown className="w-3.5 h-3.5" />
               </Button>
@@ -158,7 +158,7 @@ export function TierEditor({
                 className="h-7 w-7 text-red-400 hover:text-red-300"
                 onClick={() => onChange(removeItemAt(tiers, index))}
                 disabled={tiers.length <= 1}
-                aria-label="Remove tier"
+                aria-label="Remove band"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </Button>

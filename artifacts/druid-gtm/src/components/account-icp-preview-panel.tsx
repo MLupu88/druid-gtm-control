@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, Info } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,6 +35,7 @@ import {
   AccordionContent,
 } from "@/components/ui/accordion";
 import { TechnicalDetails } from "@/components/technical-details";
+import { LegacyStarterWarning } from "@/components/legacy-starter-warning";
 import { accountDetailQueryKey, type AccountEvaluation } from "@/lib/accounts-api";
 import { accountDecisionsQueryKey } from "@/lib/account-decisions-api";
 import {
@@ -46,12 +48,18 @@ import {
   runAccountIcpOfficialEvaluation,
   AccountIcpEvaluationApiError,
 } from "@/lib/account-icp-evaluations-api";
+import { isLegacyStarterIcpConfig } from "@/lib/icp-legacy-starter-detection";
 import {
   describeReasonEntry,
   categorizeMissingInputs,
   humanizeTierLabel,
   formatScorePoints,
   TIER_EXPLANATION,
+  eligibilityLabel,
+  eligibilityBadgeVariant,
+  hasIdentityNotPersonAddressableRestriction,
+  deriveActionabilityState,
+  ACTIONABILITY_STATE_LABELS,
   type MissingInputCategory,
   type ReasonEntry,
 } from "@/lib/icp-preview-presentation";
@@ -94,34 +102,6 @@ function describeProfileVersion(
     return `Active version · v${profile.activeVersion.versionNumber}`;
   }
   return `Profile version ${shortId(evaluation.profileVersionId)}`;
-}
-
-function eligibilityLabel(outcome: AccountEvaluation["eligibilityOutcome"]): string {
-  switch (outcome) {
-    case "eligible":
-      return "Eligible";
-    case "restricted":
-      return "Restricted";
-    case "ineligible":
-      return "Disqualified";
-    default:
-      return "Unknown";
-  }
-}
-
-function eligibilityBadgeVariant(
-  outcome: AccountEvaluation["eligibilityOutcome"],
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (outcome) {
-    case "eligible":
-      return "default";
-    case "restricted":
-      return "outline";
-    case "ineligible":
-      return "destructive";
-    default:
-      return "secondary";
-  }
 }
 
 // Only ever says "no issues" when both arrays are verifiably present and
@@ -289,8 +269,16 @@ function FailedEvaluationState({ evaluation }: { evaluation: AccountEvaluation }
 }
 
 function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluation }) {
-  const fitTier = humanizeTierLabel(evaluation.fitTier);
-  const intentTier = humanizeTierLabel(evaluation.intentTier);
+  const fitBand = humanizeTierLabel(evaluation.fitTier);
+  const intentBand = humanizeTierLabel(evaluation.intentTier);
+  const actionabilityState = deriveActionabilityState(
+    evaluation.actionabilityScore,
+    evaluation.missingInputs,
+  );
+  const isIdentityRestricted =
+    evaluation.eligibilityOutcome === "restricted" &&
+    hasIdentityNotPersonAddressableRestriction(evaluation.eligibilityRestrictions);
+  const isLegacyStarter = isLegacyStarterIcpConfig(evaluation.profileConfigSnapshot);
 
   const matchedRuleEntries = reasonEntries(evaluation.matchedRules);
   const hardDisqualifierEntries = reasonEntries(evaluation.hardDisqualifiers);
@@ -302,8 +290,8 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
   // than inline, so the primary content above stays plain language while
   // nothing is actually discarded — see ../lib/icp-preview-presentation.ts.
   const technicalLines: { label: string; value: string }[] = [];
-  if (fitTier) technicalLines.push({ label: "ICP fit tier code", value: fitTier.raw });
-  if (intentTier) technicalLines.push({ label: "Buying intent tier code", value: intentTier.raw });
+  if (fitBand) technicalLines.push({ label: "ICP fit band code", value: fitBand.raw });
+  if (intentBand) technicalLines.push({ label: "Buying intent band code", value: intentBand.raw });
   for (const entry of matchedRuleEntries) {
     if (entry.technical) technicalLines.push({ label: "Matched rule", value: entry.technical });
   }
@@ -323,19 +311,17 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
 
   return (
     <div className="space-y-5">
+      {/* Company fit — the humanized band is the primary business
+          outcome; the weighted numeric score is secondary metadata,
+          explicitly labeled as a weight, never a percentage or an
+          out-of-100 score (see formatScorePoints). */}
       <div>
         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">ICP fit</p>
-        <div className="flex items-baseline gap-2 mt-0.5">
-          <span className="text-4xl font-bold tracking-tight text-foreground">
-            {formatScorePoints(evaluation.fitScore)}
-          </span>
-        </div>
-        {fitTier && (
-          <p className="text-xs text-foreground mt-1">
-            {fitTier.label}
-            <span className="text-muted-foreground"> · {TIER_EXPLANATION}</span>
-          </p>
-        )}
+        <p className="text-3xl font-bold tracking-tight text-foreground mt-0.5">
+          {fitBand ? fitBand.label : "No band resolved"}
+        </p>
+        {fitBand && <p className="text-[11px] text-muted-foreground mt-0.5">{TIER_EXPLANATION}</p>}
+        <p className="text-xs text-muted-foreground mt-1.5">{formatScorePoints(evaluation.fitScore)}</p>
         <MetricExplanation>
           How closely this account matches the ICP profile&apos;s target criteria — industry,
           size, region, and similar company attributes.
@@ -347,12 +333,12 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Buying intent
           </p>
-          <p className="text-sm font-medium text-foreground mt-0.5">
+          <p className="text-lg font-semibold text-foreground mt-0.5">
+            {intentBand ? intentBand.label : "No band resolved"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
             {formatScorePoints(evaluation.intentScore)}
           </p>
-          {intentTier && (
-            <p className="text-xs text-foreground mt-1">{intentTier.label}</p>
-          )}
           <MetricExplanation>
             How much recent engagement — site visits, repeat activity — suggests active
             buying interest right now.
@@ -362,7 +348,10 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
             Ability to act
           </p>
-          <p className="text-sm font-medium text-foreground mt-0.5">
+          <p className="text-lg font-semibold text-foreground mt-0.5">
+            {ACTIONABILITY_STATE_LABELS[actionabilityState]}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
             {formatScorePoints(evaluation.actionabilityScore)}
           </p>
           <MetricExplanation>
@@ -379,12 +368,25 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
               {eligibilityLabel(evaluation.eligibilityOutcome)}
             </Badge>
           </div>
+          {isIdentityRestricted && (
+            <div className="mt-1.5 space-y-0.5 max-w-xs">
+              <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                Restricted for automated outreach
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                No person-addressable contact is available yet. Enrich a qualified contact
+                before outreach.
+              </p>
+            </div>
+          )}
           <MetricExplanation>
             Whether policy restrictions — disqualifiers, do-not-contact, or an unresolved
             identity — allow this account to be contacted at all.
           </MetricExplanation>
         </div>
       </div>
+
+      {isLegacyStarter && <LegacyStarterWarning />}
 
       <p className="text-xs text-muted-foreground">{summarizeEligibilityCounts(evaluation)}</p>
 
@@ -452,7 +454,9 @@ function PreviewResult({
           {describeProfileVersion(evaluation, profile)} · {formatDateTime(evaluation.createdAt)}
         </p>
         <p className="text-[11px] text-muted-foreground/70">
-          This result is not saved — it&apos;s a test only, not a recorded decision.
+          This preview is recorded in the account&apos;s evaluation runs for reference. It
+          cannot be used to record a decision. Only an official evaluation using the active
+          published profile can support a decision.
         </p>
       </div>
 
@@ -539,7 +543,7 @@ function OfficialEvaluationResult({
           {describeProfileVersion(evaluation, profile)} · {formatDateTime(evaluation.createdAt)}
         </p>
         <p className="text-[11px] text-primary/80">
-          This is now recorded in the account&apos;s evaluation history.
+          This is now recorded in the account&apos;s evaluation runs.
         </p>
         {hasComparablePreview && (
           <p className="text-[11px] text-muted-foreground/70">
@@ -595,7 +599,7 @@ function ConfirmOfficialEvaluationDialog({
             published version and the account&apos;s current canonical data.
           </p>
           <p className="text-muted-foreground">
-            The result is saved permanently to this account&apos;s evaluation history.
+            The result is saved permanently to this account&apos;s evaluation runs.
             If you&apos;ve run a preview, this official result may differ from it —
             previews can use a draft version of the profile; this always uses the
             active published version.
@@ -698,10 +702,15 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
   const officialDisabledReason = !selectedProfileId
     ? "Choose an ICP profile first."
     : !selectedProfile?.activeVersion
-      ? "This profile has no active, published version yet."
+      ? "Publish and activate a version of this profile to run an official evaluation."
       : officialMutation.isPending
         ? "An official evaluation is already running for this account."
         : null;
+  // Only truthful when the reason is specifically the missing-active-
+  // version case — "Choose an ICP profile first" and "already running"
+  // have no ICP profile settings page to link to.
+  const officialBlockedByMissingActiveVersion =
+    !!selectedProfileId && !!selectedProfile && !selectedProfile.activeVersion;
   const canRunOfficial = officialDisabledReason === null;
 
   function handleConfirmOfficial() {
@@ -727,12 +736,13 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
               ICP preview
             </h2>
             <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-              Not saved
+              Preview
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            Test this account against an ICP profile to see how it would score — nothing
-            here is saved as a decision or a permanent assignment.
+            Test this account against an ICP profile to see how it would score. Every test
+            run is recorded in the account&apos;s evaluation runs, but it can never be used
+            to record a decision — only an official evaluation can.
           </p>
         </div>
 
@@ -811,7 +821,7 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
                 <h3 className="text-sm font-semibold text-foreground">Official evaluation</h3>
                 <p className="text-xs text-muted-foreground">
                   Runs a fresh evaluation on the server and saves it to this account&apos;s
-                  evaluation history — separate from the preview above.
+                  evaluation runs — separate from the preview above.
                 </p>
               </div>
 
@@ -824,7 +834,16 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
                   Run and save official evaluation
                 </Button>
                 {officialDisabledReason && (
-                  <p className="text-[11px] text-muted-foreground">{officialDisabledReason}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[11px] text-muted-foreground">{officialDisabledReason}</p>
+                    {officialBlockedByMissingActiveVersion && selectedProfile && (
+                      <Button asChild size="sm" variant="link" className="h-auto p-0 text-[11px]">
+                        <Link href={`/settings/icp-profiles/${selectedProfile.id}`}>
+                          Open ICP profile
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
 

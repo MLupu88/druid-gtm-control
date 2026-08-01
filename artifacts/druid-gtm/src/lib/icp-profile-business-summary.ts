@@ -75,7 +75,7 @@ export function allBandsCollapseToFallback(tiers: Tier[], configuredMaximumPoint
 
 // ---------------------------------------------------------------------
 // Band (tier) display — the tier `code` IS the label an author sees
-// (icp-tier-editor.tsx's "Tier name" field), so humanizing it for prose
+// (icp-tier-editor.tsx's "Band name" field), so humanizing it for prose
 // contexts (the summary card, warning text) is safe the same way
 // ../lib/icp-preview-presentation.ts's humanizeTierLabel already treats
 // tier codes as free-text author-chosen names, never a fixed vocabulary.

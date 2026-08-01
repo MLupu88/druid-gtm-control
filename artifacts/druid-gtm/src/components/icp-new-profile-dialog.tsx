@@ -24,7 +24,7 @@ import { buildStarterProfileConfig } from "@/lib/icp-profile-config-editing";
 // Creation flow for a brand-new ICP profile: name + description only —
 // the initial draft's config is always buildStarterProfileConfig() (see
 // that function's own comment: empty rule collections, one required
-// floor/starting tier each for fit and intent). Nothing about fit/intent/
+// fallback band each for fit and intent). Nothing about fit/intent/
 // actionability/eligibility criteria is ever guessed here; the author
 // adds real rules afterward in the draft editor. On success, navigates
 // straight to the new profile's detail page so the draft editor is the

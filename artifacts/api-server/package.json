@@ -9,8 +9,8 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bootstrap:production-data": "tsx src/scripts/bootstrapProductionData.ts",
-    "test": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/accountDecisions.test.ts src/routes/accountDecisions.route.test.ts src/routes/accountEvaluations.integration.test.ts src/routes/icpProfiles.integration.test.ts src/routes/accounts.integration.test.ts src/routes/accountDecisions.integration.test.ts",
-    "test:unit": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/accountDecisions.test.ts src/routes/accountDecisions.route.test.ts"
+    "test": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/accountDecisions.test.ts src/routes/accountDecisions.route.test.ts src/lib/clientRadarClient.test.ts src/routes/clientRadarResearchRuns.route.test.ts src/routes/accountEvaluations.integration.test.ts src/routes/icpProfiles.integration.test.ts src/routes/accounts.integration.test.ts src/routes/accountDecisions.integration.test.ts",
+    "test:unit": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/accountDecisions.test.ts src/routes/accountDecisions.route.test.ts src/lib/clientRadarClient.test.ts src/routes/clientRadarResearchRuns.route.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

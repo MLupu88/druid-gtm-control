@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
 import { AlertCircle, ArrowLeft, Building2, Globe } from "lucide-react";
 import {
   fetchAccountDetail,
@@ -15,6 +14,7 @@ import { DecisionControls } from "@/components/decision-controls";
 import { DecisionHistory } from "@/components/decision-history";
 import { ClientRadarResearchPanel } from "@/components/client-radar-research-panel";
 import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
+import { EvaluationRunsList } from "@/components/evaluation-runs-list";
 
 function accountIdentity(account: Account): { primary: string; secondary: string | null } {
   if (account.companyName) {
@@ -174,42 +174,13 @@ function AccountDetailContent({
 
       <ClientRadarResearchPanel accountId={account.id} />
 
-      {/* Decision history + evaluation history: two parallel record lists
+      {/* Decision history + evaluation runs: two parallel record lists
           — each independently scannable, so both columns carry real
           content rather than one being empty space. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <DecisionHistory accountId={account.id} />
 
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
-            Evaluation history
-          </h2>
-          {evaluations.length === 0 ? (
-            <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
-              <p className="text-sm text-muted-foreground">No evaluations recorded yet.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {evaluations.map((evaluation, i) => (
-                <Card key={evaluation.id} className="border-border bg-card">
-                  <CardContent className="px-4 py-3 space-y-1.5">
-                    <EvaluationSummaryLine label="Evaluation" summary={evaluation} />
-                    <p className="text-[11px] text-muted-foreground/60">
-                      {formatDateTime(evaluation.createdAt)}
-                      {evaluation.createdBy && ` · by ${evaluation.createdBy}`}
-                    </p>
-                    {evaluation.status === "failed" && evaluation.errorDetail && (
-                      <p className="text-[11px] text-red-300/80 leading-relaxed">
-                        {evaluation.errorDetail}
-                      </p>
-                    )}
-                  </CardContent>
-                  {i < evaluations.length - 1 && <Separator className="opacity-0" />}
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
+        <EvaluationRunsList evaluations={evaluations} />
       </div>
     </div>
   );

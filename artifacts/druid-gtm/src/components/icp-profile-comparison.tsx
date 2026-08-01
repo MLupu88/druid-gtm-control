@@ -245,13 +245,13 @@ export function DraftVsActiveComparison({
         ) : (
           <>
             <DiffSection title="Fit rules" diff={diff.fit.rules} renderEntry={(e) => <WeightedRuleEntryRow entry={e} />} />
-            <DiffSection title="Fit tiers" diff={diff.fit.tiers} renderEntry={(e) => <TierEntryRow entry={e} />} />
+            <DiffSection title="Fit bands" diff={diff.fit.tiers} renderEntry={(e) => <TierEntryRow entry={e} />} />
             <DiffSection
               title="Intent rules"
               diff={diff.intent.rules}
               renderEntry={(e) => <WeightedRuleEntryRow entry={e} />}
             />
-            <DiffSection title="Intent tiers" diff={diff.intent.tiers} renderEntry={(e) => <TierEntryRow entry={e} />} />
+            <DiffSection title="Intent bands" diff={diff.intent.tiers} renderEntry={(e) => <TierEntryRow entry={e} />} />
             <DiffSection
               title="Actionability rules"
               diff={diff.actionability.rules}

@@ -481,7 +481,11 @@ function SaveStatusLabel({ status, savedAt }: { status: SaveStatus; savedAt: Dat
       );
     case "unchanged":
     default:
-      return <p className="text-[11px] text-muted-foreground">No changes to save</p>;
+      // No separate text label — the Save button is already disabled for
+      // this exact state, so a redundant unchanged-state caption next
+      // to it would just repeat the same fact twice. The disabled button
+      // IS the clean/unchanged indicator.
+      return null;
   }
 }
 

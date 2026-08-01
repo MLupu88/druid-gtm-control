@@ -42,6 +42,62 @@ export class ClientRadarApiError extends Error {
   }
 }
 
+// ---------------------------------------------------------------------
+// Environment-misconfiguration is a DISTINCT, typed condition from a
+// genuine runtime/request failure — "Client Radar isn't set up in this
+// environment" is not the same fact as "we called Client Radar and it
+// failed". ClientRadarNotConfiguredError lets callers (see
+// ../services/clientRadarResearchRuns.ts) catch that distinction with
+// `instanceof`, and the two exported message constants below are the
+// ONLY strings this condition ever produces — never a freeform message —
+// so a later reader (the route layer, see
+// isClientRadarNotConfiguredMessage) can classify a persisted
+// lastError string reliably instead of pattern-matching arbitrary text.
+// The wording itself is unchanged from before this typed class existed,
+// so existing persisted client_radar_research_runs rows (written before
+// this change) still classify correctly — no backfill/migration needed.
+// ---------------------------------------------------------------------
+
+export const CLIENT_RADAR_BASE_URL_NOT_CONFIGURED_MESSAGE =
+  "CLIENT_RADAR_BASE_URL is not configured.";
+export const CLIENT_RADAR_API_TOKEN_NOT_CONFIGURED_MESSAGE =
+  "CLIENT_RADAR_API_TOKEN is not configured.";
+
+export class ClientRadarNotConfiguredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClientRadarNotConfiguredError";
+  }
+}
+
+/** True only for the exact two known "not configured" messages this module itself ever produces — never a substring/regex guess over arbitrary error text. */
+export function isClientRadarNotConfiguredMessage(
+  message: string | null | undefined,
+): boolean {
+  return (
+    message === CLIENT_RADAR_BASE_URL_NOT_CONFIGURED_MESSAGE ||
+    message === CLIENT_RADAR_API_TOKEN_NOT_CONFIGURED_MESSAGE
+  );
+}
+
+export type ClientRadarFailureReason = "not_configured" | "runtime_failure";
+
+/**
+ * Classifies a terminal "failed" client_radar_research_runs row's
+ * lastError as either an environment-configuration issue or a genuine
+ * runtime/request failure — computed at read time from the persisted
+ * text, never a new persisted column (no migration required). Only
+ * meaningful for status "failed"; callers pass null for any other
+ * status.
+ */
+export function classifyClientRadarFailureReason(
+  status: string,
+  lastError: string | null,
+): ClientRadarFailureReason | null {
+  if (status !== "failed") return null;
+  return isClientRadarNotConfiguredMessage(lastError) ? "not_configured" : "runtime_failure";
+}
+
 interface ClientRadarConfig {
   baseUrl: string;
   apiToken: string;
@@ -50,12 +106,12 @@ interface ClientRadarConfig {
 function getConfig(): ClientRadarConfig {
   const baseUrl = process.env.CLIENT_RADAR_BASE_URL;
   if (!baseUrl) {
-    throw new Error("CLIENT_RADAR_BASE_URL is not configured.");
+    throw new ClientRadarNotConfiguredError(CLIENT_RADAR_BASE_URL_NOT_CONFIGURED_MESSAGE);
   }
 
   const apiToken = process.env.CLIENT_RADAR_API_TOKEN;
   if (!apiToken) {
-    throw new Error("CLIENT_RADAR_API_TOKEN is not configured.");
+    throw new ClientRadarNotConfiguredError(CLIENT_RADAR_API_TOKEN_NOT_CONFIGURED_MESSAGE);
   }
 
   return { baseUrl: baseUrl.replace(/\/+$/, ""), apiToken };

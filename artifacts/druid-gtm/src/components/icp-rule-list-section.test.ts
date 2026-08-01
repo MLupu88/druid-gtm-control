@@ -64,6 +64,22 @@ test("every eligibility rule row shows the deterministic plain-language rule sen
   assert.ok(source.includes('kind: EligibilityRuleKind'));
 });
 
+test("the weight selector no longer uses the previously truncated narrow (w-40) layout — it's wide enough to read 'Advanced (exact points)' and the trigger fills its container", () => {
+  const source = readSource();
+  assert.ok(!source.includes("w-40 shrink-0"), "must not regress to the truncated fixed-width layout");
+  assert.ok(source.includes("sm:w-52"));
+  assert.ok(source.includes('className="h-8 text-sm w-full"'));
+});
+
+test("the rule header stacks on narrow viewports and stays a single row at sm+, so it never overflows at normal desktop widths while preserving mobile behavior", () => {
+  const source = readSource();
+  const weightedBlock = source.slice(
+    source.indexOf("export function WeightedRuleRow"),
+    source.indexOf("export function ConditionRuleRow"),
+  );
+  assert.ok(weightedBlock.includes("flex-col sm:flex-row"));
+});
+
 test("rule ids are only ever shown inside collapsed TechnicalDetails, never as primary text", () => {
   const source = readSource();
   assert.ok(source.includes("<TechnicalDetails"));

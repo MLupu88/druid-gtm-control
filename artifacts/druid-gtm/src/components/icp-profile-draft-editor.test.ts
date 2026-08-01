@@ -186,3 +186,20 @@ test("fit and intent bands are told the dimension's total configured maximum poi
   assert.ok(source.includes("configuredMaximumPoints={intentTotalPoints}"));
   assert.ok(source.includes("sumRulePoints"));
 });
+
+test("the unchanged save state shows no redundant 'No changes to save' caption alongside the already-disabled Save button — one clean indicator, not two", () => {
+  const source = readSource();
+  assert.ok(!source.includes("No changes to save"));
+  const labelBlock = source.slice(
+    source.indexOf("function SaveStatusLabel"),
+  );
+  const unchangedCaseBlock = labelBlock.slice(labelBlock.indexOf('case "unchanged"'));
+  assert.ok(unchangedCaseBlock.trim().startsWith('case "unchanged"'));
+  assert.ok(/return null;/.test(unchangedCaseBlock.slice(0, unchangedCaseBlock.indexOf("}"))));
+});
+
+test("never renders its own legacy-starter warning — ../pages/icp-profile-detail.tsx's VersionSummaryCard already shows it for the selected version (draft or published), so a second one here would be a duplicate", () => {
+  const source = readSource();
+  assert.ok(!source.includes("LegacyStarterWarning"));
+  assert.ok(!source.includes("isLegacyStarterIcpConfig"));
+});
