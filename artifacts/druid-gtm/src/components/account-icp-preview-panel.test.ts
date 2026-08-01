@@ -55,3 +55,160 @@ test("humanized terminology from the UX pass is present in the component's own c
   assert.ok(!source.includes("Analysis lens"));
   assert.ok(!source.includes("Run ICP preview"));
 });
+
+// ---------------------------------------------------------------------
+// Official Account Evaluation UX
+// ---------------------------------------------------------------------
+
+function readSource(): string {
+  return readFileSync(SOURCE_PATH, "utf8");
+}
+
+function functionBlock(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  assert.ok(start > -1, `function ${name} must exist`);
+  const nextFn = source.indexOf("\nfunction ", start + 1);
+  const nextExport = source.indexOf("\nexport function ", start + 1);
+  const candidates = [nextFn, nextExport].filter((i) => i > -1);
+  const end = candidates.length > 0 ? Math.min(...candidates) : source.length;
+  return source.slice(start, end);
+}
+
+test("uses a clearly named action — never a vague label like Save preview / Accept preview / Make official / Recalculate score", () => {
+  const source = readSource();
+  assert.ok(source.includes("Run and save official evaluation"));
+  for (const vague of ["Save preview", "Accept preview", "Make official", "Recalculate score"]) {
+    assert.ok(!source.includes(vague), `must not use the vague label "${vague}"`);
+  }
+});
+
+test("the official action always runs a fresh evaluation — it is never fed previewMutation.data", () => {
+  const source = readSource();
+  // handleConfirmOfficial is a short, nested function (inside
+  // AccountIcpPreviewPanel) — sliced to its own 3-line body precisely,
+  // rather than to "the next top-level function" (which would run past
+  // the end of the component and wrongly capture unrelated JSX that
+  // legitimately does reference previewMutation.data elsewhere).
+  const start = source.indexOf("function handleConfirmOfficial(");
+  assert.ok(start > -1);
+  const end = source.indexOf("const hasComparablePreview", start);
+  assert.ok(end > start);
+  const block = source.slice(start, end);
+  assert.ok(block.includes("officialMutation.mutate(selectedProfileId)"));
+  assert.ok(!block.includes("previewMutation.data"));
+  // The mutation itself only ever takes a profileId — never the
+  // preview's own evaluation object.
+  const mutationBlock = source.slice(
+    source.indexOf("const officialMutation = useMutation"),
+    source.indexOf("const profiles = profilesQ.data"),
+  );
+  assert.ok(mutationBlock.includes("runAccountIcpOfficialEvaluation(accountId, profileId)"));
+  assert.ok(!mutationBlock.includes("previewMutation.data"));
+});
+
+test("explicit confirmation is required — the action opens a dialog rather than mutating directly on click", () => {
+  const source = readSource();
+  assert.ok(source.includes("setOfficialConfirmOpen(true)"));
+  assert.ok(source.includes("<ConfirmOfficialEvaluationDialog"));
+});
+
+test("confirmation copy states that a fresh server-side evaluation runs, using the active published version and current account data", () => {
+  const block = functionBlock(readSource(), "ConfirmOfficialEvaluationDialog");
+  assert.ok(block.includes("brand new evaluation on the server"));
+  assert.ok(block.includes("currently active,"));
+  assert.ok(block.includes("published version"));
+  assert.ok(block.includes("account&apos;s current canonical data"));
+  assert.ok(block.includes("saved permanently"));
+});
+
+test("confirmation copy states the official result may differ from the preview", () => {
+  const block = functionBlock(readSource(), "ConfirmOfficialEvaluationDialog");
+  assert.ok(block.includes("may differ from it"));
+});
+
+test("double submission is prevented — the action and the dialog's confirm button are both disabled while a request is in flight", () => {
+  const source = readSource();
+  assert.ok(source.includes("officialMutation.isPending"));
+  assert.ok(source.includes("disabled={!canRunOfficial}"));
+  const dialogBlock = functionBlock(source, "ConfirmOfficialEvaluationDialog");
+  assert.ok(dialogBlock.includes("disabled={isPending}"));
+});
+
+test("eligibility is derived from the profile's real active-version data, not guessed — disabled when no active published version exists", () => {
+  const source = readSource();
+  assert.ok(source.includes("selectedProfile?.activeVersion"));
+  assert.ok(source.includes("This profile has no active, published version yet."));
+  // Never blocked merely because the preview is stale/absent — the
+  // disabled-reason derivation must not reference previewMutation at all.
+  const reasonBlock = source.slice(
+    source.indexOf("const officialDisabledReason"),
+    source.indexOf("const canRunOfficial"),
+  );
+  assert.ok(!reasonBlock.includes("previewMutation"));
+});
+
+test("on success, account detail and decision queries are both invalidated — evaluation history and decision availability both flow from account detail", () => {
+  const source = readSource();
+  const onSuccessBlock = source.slice(
+    source.indexOf("const officialMutation = useMutation"),
+    source.indexOf("const profiles = profilesQ.data"),
+  );
+  assert.ok(onSuccessBlock.includes("accountDetailQueryKey(accountId)"));
+  assert.ok(onSuccessBlock.includes("accountDecisionsQueryKey(accountId)"));
+});
+
+test("on failure, nothing about the preview mutation or its state is touched — no onError handler resets it", () => {
+  const source = readSource();
+  const mutationBlock = source.slice(
+    source.indexOf("const officialMutation = useMutation"),
+    source.indexOf("const profiles = profilesQ.data"),
+  );
+  assert.ok(!mutationBlock.includes("onError"));
+  assert.ok(!mutationBlock.includes("previewMutation.reset"));
+});
+
+test("failures show a human-readable error, not a raw backend message, for the known no_active_profile_version case", () => {
+  const block = functionBlock(readSource(), "OfficialEvaluationErrorState");
+  assert.ok(block.includes("no_active_profile_version"));
+  assert.ok(block.includes("Publish and activate a version"));
+});
+
+test("no fake/optimistic history entry is ever created — no local evaluation-history array is declared or appended to (technicalLines.push is pre-existing, unrelated collection of tier/rule labels, not a history list)", () => {
+  const source = readSource();
+  assert.ok(!/evaluations\s*=\s*\[/.test(source));
+  assert.ok(!/useState<AccountEvaluation\[\]>/.test(source));
+  // The only way the evaluation history list changes is via the real
+  // account-detail query being invalidated (see the success test above)
+  // — this file never maintains its own parallel list of evaluations.
+  assert.ok(!source.includes("setEvaluations"));
+});
+
+test("no automatic decision is ever recorded from this file — it never calls createAccountDecision", () => {
+  const source = readSource();
+  assert.ok(!source.includes("createAccountDecision"));
+  assert.ok(!source.includes("routingOutput"));
+});
+
+test("never claims that activating a profile automatically re-scores/re-evaluates existing accounts", () => {
+  const source = readSource();
+  for (const phrase of ["automatically re-scor", "automatically re-evaluat", "accounts have been re-scored"]) {
+    assert.ok(!source.toLowerCase().includes(phrase.toLowerCase()), `must not claim "${phrase}"`);
+  }
+});
+
+test("the official result displays the actual persisted profile version, timestamp, and evaluation ID — all real fields, nothing invented", () => {
+  const block = functionBlock(readSource(), "OfficialEvaluationResult");
+  assert.ok(block.includes("describeProfileVersion(evaluation, profile)"));
+  assert.ok(block.includes("formatDateTime(evaluation.createdAt)"));
+  assert.ok(block.includes("Evaluation ID: {evaluation.id}"));
+  // Never fabricated fields.
+  for (const invented of ["confidence", "impact", "changedAccounts", "affectedAccounts"]) {
+    assert.ok(!block.toLowerCase().includes(invented.toLowerCase()));
+  }
+});
+
+test("the official evaluation reuses the exact same result-rendering components as preview (CompletedEvaluationDetails/FailedEvaluationState), no duplicated rendering logic", () => {
+  const block = functionBlock(readSource(), "OfficialEvaluationResult");
+  assert.ok(block.includes("<CompletedEvaluationDetails"));
+  assert.ok(block.includes("<FailedEvaluationState"));
+});

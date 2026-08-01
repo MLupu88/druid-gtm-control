@@ -28,6 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { SettingsNav } from "@/components/settings-nav";
 import {
   AlertTriangle,
   Lock,
@@ -162,6 +163,7 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 max-w-3xl space-y-8">
+      <SettingsNav />
       <div>
         <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
           Settings

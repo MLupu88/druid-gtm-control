@@ -32,6 +32,8 @@ import AccountsPage from "@/pages/accounts";
 import AccountDetailPage from "@/pages/account-detail";
 import SampleLeadPage from "@/pages/sample-lead";
 import SettingsPage from "@/pages/settings";
+import SettingsIcpProfilesPage from "@/pages/settings-icp-profiles";
+import IcpProfileDetailPage from "@/pages/icp-profile-detail";
 import ReportsPage from "@/pages/reports";
 import NotFound from "@/pages/not-found";
 
@@ -189,6 +191,11 @@ function AppShell() {
             <Route path="/reports" component={ReportsPage} />
             <Route path="/sample-lead" component={SampleLeadPage} />
             <Route path="/settings" component={SettingsPage} />
+            <Route path="/settings/icp-profiles" component={SettingsIcpProfilesPage} />
+            <Route
+              path="/settings/icp-profiles/:profileId"
+              component={IcpProfileDetailPage}
+            />
             <Route component={NotFound} />
           </Switch>
         </SidebarInset>

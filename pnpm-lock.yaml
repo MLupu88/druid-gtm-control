@@ -369,6 +369,9 @@ importers:
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
+      '@workspace/evaluator':
+        specifier: workspace:*
+        version: link:../../lib/evaluator
       '@workspace/gtm-shared':
         specifier: workspace:*
         version: link:../../lib/gtm-shared

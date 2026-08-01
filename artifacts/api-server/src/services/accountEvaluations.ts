@@ -123,3 +123,52 @@ export async function runPreviewIcpEvaluationForAccount(
     evaluationMode: "preview",
   });
 }
+
+export interface RunOfficialIcpEvaluationForAccountArgs {
+  db: Db;
+  accountId: string;
+  profileId: string;
+  createdBy?: AccountEvaluation["createdBy"];
+}
+
+/**
+ * Orchestrates one OFFICIAL (production) ICP evaluation for a canonical
+ * account, starting from nothing but an accountId + profileId — the
+ * production-mode counterpart to runPreviewIcpEvaluationForAccount
+ * above. evaluationMode is hardcoded to "production" here (never
+ * "preview"); resolveProfileVersionForEvaluation's "production" branch
+ * requires the profile's ACTIVE, PUBLISHED version and throws
+ * NoActiveProfileVersionError when none exists — there is no fallback to
+ * a draft. This is the row ../pages/account-detail.tsx's
+ * findLatestCompletedProductionEvaluation (evaluationMode: "production",
+ * status: "completed") already treats as an account's official
+ * evaluation, and the only kind account_decisions may ever reference
+ * (enforced by a database trigger — see accountDecisions.ts). Always
+ * creates a fresh snapshot and a fresh evaluation row — there is no
+ * idempotency-key mechanism here; double-submission is prevented purely
+ * client-side (see ../../druid-gtm/src/components/account-icp-preview-panel.tsx),
+ * matching this endpoint's own minimal scope and the preview endpoint's
+ * identical lack of one.
+ */
+export async function runOfficialIcpEvaluationForAccount(
+  args: RunOfficialIcpEvaluationForAccountArgs,
+): Promise<AccountEvaluation> {
+  const { db, accountId, profileId, createdBy } = args;
+
+  const profileVersion = await resolveProfileVersionForEvaluation(
+    db,
+    profileId,
+    "production",
+  );
+  const snapshot = await createCurrentAccountSnapshot(db, accountId);
+  const evaluatorVersion = await resolveCanonicalEvaluatorVersion(db);
+
+  return createAccountEvaluation({
+    db,
+    snapshotId: snapshot.id,
+    profileVersionId: profileVersion.id,
+    evaluatorVersionId: evaluatorVersion.id,
+    evaluationMode: "production",
+    createdBy,
+  });
+}

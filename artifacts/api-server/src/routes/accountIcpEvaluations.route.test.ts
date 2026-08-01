@@ -23,14 +23,19 @@ import express, { type Express } from "express";
 import type { AccountEvaluation } from "@workspace/db/schema";
 import {
   AccountNotFoundError,
+  NoActiveProfileVersionError,
   NoResolvablePreviewVersionError,
 } from "../services/icpEvaluationResolvers.js";
 import { ProfileNotFoundError } from "../services/icpProfiles.js";
-import { MissingRecordError } from "@workspace/evaluator-persistence";
+import {
+  MissingRecordError,
+  ProductionRequiresPublishedProfileError,
+} from "@workspace/evaluator-persistence";
 import { UnsupportedEvaluatorVersionError } from "@workspace/evaluator";
 import {
   createAccountIcpEvaluationsRouter,
   type RunPreviewIcpEvaluationForAccountFn,
+  type RunOfficialIcpEvaluationForAccountFn,
 } from "./accountIcpEvaluations.js";
 
 const VALID_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
@@ -83,9 +88,17 @@ const unusedRunPreviewIcpEvaluationForAccountFn: RunPreviewIcpEvaluationForAccou
     );
   };
 
+const unusedRunOfficialIcpEvaluationForAccountFn: RunOfficialIcpEvaluationForAccountFn =
+  async () => {
+    throw new Error(
+      "runOfficialIcpEvaluationForAccountFn should not have been called",
+    );
+  };
+
 function buildTestApp(
   deps: {
     runPreviewIcpEvaluationForAccountFn?: RunPreviewIcpEvaluationForAccountFn;
+    runOfficialIcpEvaluationForAccountFn?: RunOfficialIcpEvaluationForAccountFn;
   } = {},
 ): Express {
   const app = express();
@@ -96,6 +109,9 @@ function buildTestApp(
       runPreviewIcpEvaluationForAccountFn:
         deps.runPreviewIcpEvaluationForAccountFn ??
         unusedRunPreviewIcpEvaluationForAccountFn,
+      runOfficialIcpEvaluationForAccountFn:
+        deps.runOfficialIcpEvaluationForAccountFn ??
+        unusedRunOfficialIcpEvaluationForAccountFn,
     }),
   );
   return app;
@@ -123,6 +139,18 @@ async function postIcpEvaluation(
   body: unknown,
 ): Promise<Response> {
   return fetch(`${baseUrl}/accounts/${accountId}/icp-evaluations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function postOfficialIcpEvaluation(
+  baseUrl: string,
+  accountId: string,
+  body: unknown,
+): Promise<Response> {
+  return fetch(`${baseUrl}/accounts/${accountId}/icp-evaluations/official`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -382,5 +410,258 @@ test("POST maps an unexpected service error to a safe 500 response, without leak
     assert.ok(!String(body.error).includes("pg://internal"));
     assert.ok(!String(body.error).includes("constraint"));
     assert.equal(runPreviewIcpEvaluationForAccountFn.mock.calls.length, 1);
+  });
+});
+
+// =======================================================================
+// POST /api/internal/accounts/:accountId/icp-evaluations/official
+// =======================================================================
+
+// ---------------------------------------------------------------------
+// 10. Successful official evaluation request
+// ---------------------------------------------------------------------
+
+test("POST /official returns 201 with the exact evaluation returned by the service, calling it exactly once with accountId/profileId/createdBy", async () => {
+  const evaluation = syntheticEvaluation({ evaluationMode: "production" });
+  const runOfficialIcpEvaluationForAccountFn =
+    mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () => evaluation);
+  const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postOfficialIcpEvaluation(baseUrl, VALID_ACCOUNT_ID, {
+      profileId: VALID_PROFILE_ID,
+    });
+    const body = await readJson(res);
+
+    assert.equal(res.status, 201);
+    assert.deepEqual(body, JSON.parse(JSON.stringify(evaluation)));
+  });
+
+  assert.equal(runOfficialIcpEvaluationForAccountFn.mock.calls.length, 1);
+  const call = runOfficialIcpEvaluationForAccountFn.mock.calls[0];
+  assert.ok(call, "runOfficialIcpEvaluationForAccountFn must have been called");
+  assert.deepEqual(call.arguments[0], {
+    accountId: VALID_ACCOUNT_ID,
+    profileId: VALID_PROFILE_ID,
+    createdBy: null,
+  });
+});
+
+// ---------------------------------------------------------------------
+// 11-14. Request validation — identical body contract to preview.
+// ---------------------------------------------------------------------
+
+test("POST /official rejects a malformed accountId with 400 invalid_request and does not call the service", async () => {
+  const runOfficialIcpEvaluationForAccountFn =
+    mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () =>
+      syntheticEvaluation(),
+    );
+  const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postOfficialIcpEvaluation(baseUrl, "not-a-uuid", {
+      profileId: VALID_PROFILE_ID,
+    });
+    const body = await readJson(res);
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(runOfficialIcpEvaluationForAccountFn.mock.calls.length, 0);
+  });
+});
+
+test("POST /official rejects a body missing profileId with 400 invalid_request and does not call the service", async () => {
+  const runOfficialIcpEvaluationForAccountFn =
+    mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () =>
+      syntheticEvaluation(),
+    );
+  const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postOfficialIcpEvaluation(baseUrl, VALID_ACCOUNT_ID, {});
+    const body = await readJson(res);
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(runOfficialIcpEvaluationForAccountFn.mock.calls.length, 0);
+  });
+});
+
+// Load-bearing: proves the strict request schema REJECTS evaluationMode
+// rather than silently ignoring it — same guarantee as the preview
+// endpoint's equivalent test above, now proven for /official too.
+test('POST /official rejects a body containing evaluationMode: "preview" with 400 invalid_request and does not call the service', async () => {
+  const runOfficialIcpEvaluationForAccountFn =
+    mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () =>
+      syntheticEvaluation(),
+    );
+  const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postOfficialIcpEvaluation(baseUrl, VALID_ACCOUNT_ID, {
+      profileId: VALID_PROFILE_ID,
+      evaluationMode: "preview",
+    });
+    const body = await readJson(res);
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(runOfficialIcpEvaluationForAccountFn.mock.calls.length, 0);
+  });
+});
+
+test("POST /official rejects a body containing an unrecognized field with 400 invalid_request and does not call the service", async () => {
+  const runOfficialIcpEvaluationForAccountFn =
+    mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () =>
+      syntheticEvaluation(),
+    );
+  const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postOfficialIcpEvaluation(baseUrl, VALID_ACCOUNT_ID, {
+      profileId: VALID_PROFILE_ID,
+      unknownField: "nope",
+    });
+    const body = await readJson(res);
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(runOfficialIcpEvaluationForAccountFn.mock.calls.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------
+// 15. Persisted failed evaluation still returns 201, unchanged
+// ---------------------------------------------------------------------
+
+test("POST /official returns 201 with a persisted failed evaluation returned unchanged", async () => {
+  const failedEvaluation = syntheticEvaluation({
+    evaluationMode: "production",
+    status: "failed",
+    errorDetail: "account snapshot failed NormalizedAccountInputV1 validation",
+    fitScore: null,
+    fitTier: null,
+    intentScore: null,
+    intentTier: null,
+    identityResolutionLevel: null,
+    identityConfidence: null,
+    actionabilityScore: null,
+    eligibilityOutcome: null,
+  });
+  const runOfficialIcpEvaluationForAccountFn =
+    mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () => failedEvaluation);
+  const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postOfficialIcpEvaluation(baseUrl, VALID_ACCOUNT_ID, {
+      profileId: VALID_PROFILE_ID,
+    });
+    const body = await readJson(res);
+
+    assert.equal(res.status, 201);
+    assert.deepEqual(body, JSON.parse(JSON.stringify(failedEvaluation)));
+    assert.equal(body.status, "failed");
+  });
+});
+
+// ---------------------------------------------------------------------
+// 16. Domain-error mappings
+// ---------------------------------------------------------------------
+
+const officialDomainErrorCases: Array<{
+  label: string;
+  makeError: () => Error;
+  status: number;
+  code: string;
+}> = [
+  {
+    label: "AccountNotFoundError",
+    makeError: () => new AccountNotFoundError(VALID_ACCOUNT_ID),
+    status: 404,
+    code: "account_not_found",
+  },
+  {
+    label: "ProfileNotFoundError",
+    makeError: () => new ProfileNotFoundError(VALID_PROFILE_ID),
+    status: 404,
+    code: "profile_not_found",
+  },
+  {
+    label: "NoActiveProfileVersionError",
+    makeError: () => new NoActiveProfileVersionError(VALID_PROFILE_ID),
+    status: 409,
+    code: "no_active_profile_version",
+  },
+  {
+    label: "MissingRecordError",
+    makeError: () =>
+      new MissingRecordError("accountSnapshot", VALID_SNAPSHOT_ID),
+    status: 404,
+    code: "record_not_found",
+  },
+  {
+    label: "ProductionRequiresPublishedProfileError",
+    makeError: () =>
+      new ProductionRequiresPublishedProfileError(
+        VALID_PROFILE_VERSION_ID,
+        "draft",
+      ),
+    status: 409,
+    code: "production_requires_published_profile",
+  },
+  {
+    label: "UnsupportedEvaluatorVersionError",
+    makeError: () => new UnsupportedEvaluatorVersionError("not-a-real-version"),
+    status: 422,
+    code: "unsupported_evaluator_version",
+  },
+];
+
+for (const { label, makeError, status, code } of officialDomainErrorCases) {
+  test(`POST /official maps ${label} to ${status} ${code}`, async () => {
+    const runOfficialIcpEvaluationForAccountFn =
+      mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () => {
+        throw makeError();
+      });
+    const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+    await withServer(app, async (baseUrl) => {
+      const res = await postOfficialIcpEvaluation(baseUrl, VALID_ACCOUNT_ID, {
+        profileId: VALID_PROFILE_ID,
+      });
+      const body = await readJson(res);
+
+      assert.equal(res.status, status);
+      assert.equal(body.code, code);
+      assert.equal(runOfficialIcpEvaluationForAccountFn.mock.calls.length, 1);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
+// 17. Unexpected error
+// ---------------------------------------------------------------------
+
+test("POST /official maps an unexpected service error to a safe 500 response, without leaking the thrown message or stack", async () => {
+  const runOfficialIcpEvaluationForAccountFn =
+    mock.fn<RunOfficialIcpEvaluationForAccountFn>(async () => {
+      throw new Error(
+        "relation account_evaluations violates constraint xyz at connection pg://internal",
+      );
+    });
+  const app = buildTestApp({ runOfficialIcpEvaluationForAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postOfficialIcpEvaluation(baseUrl, VALID_ACCOUNT_ID, {
+      profileId: VALID_PROFILE_ID,
+    });
+    const body = await readJson(res);
+
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.equal(body.error, "An unexpected error occurred.");
+    assert.ok(!String(body.error).includes("pg://internal"));
+    assert.ok(!String(body.error).includes("constraint"));
+    assert.equal(runOfficialIcpEvaluationForAccountFn.mock.calls.length, 1);
   });
 });
