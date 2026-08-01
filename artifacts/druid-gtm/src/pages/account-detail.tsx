@@ -56,7 +56,7 @@ export default function AccountDetailPage() {
   });
 
   return (
-    <div className="p-6 max-w-3xl space-y-6">
+    <div className="p-6 max-w-6xl space-y-6">
       <Link
         href="/accounts"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -129,78 +129,87 @@ function AccountDetailContent({
         </p>
       </div>
 
-      {/* Latest completed production evaluation */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="text-xs font-semibold uppercase tracking-wider text-primary">
-            Latest completed production evaluation
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {latestProduction ? (
-            <div className="space-y-3">
-              <EvaluationSummaryLine label="Result" summary={latestProduction} />
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <MetaField label="Identity resolution" value={latestProduction.identityResolutionLevel} />
-                <MetaField label="Identity confidence" value={latestProduction.identityConfidence} />
-                <MetaField label="Fit score" value={latestProduction.fitScore} />
-                <MetaField label="Intent score" value={latestProduction.intentScore} />
-                <MetaField label="Actionability score" value={latestProduction.actionabilityScore} />
-                <MetaField label="Created by" value={latestProduction.createdBy} />
+      {/* Latest evaluation + decision: two columns on desktop — the
+          decision on the right is made in direct reference to the
+          evaluation on the left, so both are genuinely useful side by
+          side rather than one column being filler. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="border-border bg-card">
+          <CardHeader>
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-primary">
+              Latest completed production evaluation
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {latestProduction ? (
+              <div className="space-y-3">
+                <EvaluationSummaryLine label="Result" summary={latestProduction} />
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <MetaField label="Identity resolution" value={latestProduction.identityResolutionLevel} />
+                  <MetaField label="Identity confidence" value={latestProduction.identityConfidence} />
+                  <MetaField label="Fit score" value={latestProduction.fitScore} />
+                  <MetaField label="Intent score" value={latestProduction.intentScore} />
+                  <MetaField label="Actionability score" value={latestProduction.actionabilityScore} />
+                  <MetaField label="Created by" value={latestProduction.createdBy} />
+                </div>
+                <p className="text-[11px] text-muted-foreground/60">
+                  {formatDateTime(latestProduction.createdAt)}
+                </p>
               </div>
-              <p className="text-[11px] text-muted-foreground/60">
-                {formatDateTime(latestProduction.createdAt)}
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No completed production evaluation yet.
               </p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No completed production evaluation yet.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
+
+        <DecisionControls
+          accountId={account.id}
+          latestCompletedProductionEvaluation={latestProduction}
+        />
+      </div>
 
       <AccountIcpPreviewPanel accountId={account.id} />
 
       <ClientRadarResearchPanel accountId={account.id} />
 
-      <DecisionControls
-        accountId={account.id}
-        latestCompletedProductionEvaluation={latestProduction}
-      />
+      {/* Decision history + evaluation history: two parallel record lists
+          — each independently scannable, so both columns carry real
+          content rather than one being empty space. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <DecisionHistory accountId={account.id} />
 
-      <DecisionHistory accountId={account.id} />
-
-      {/* Evaluation history */}
-      <div>
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
-          Evaluation history
-        </h2>
-        {evaluations.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
-            <p className="text-sm text-muted-foreground">No evaluations recorded yet.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {evaluations.map((evaluation, i) => (
-              <Card key={evaluation.id} className="border-border bg-card">
-                <CardContent className="px-4 py-3 space-y-1.5">
-                  <EvaluationSummaryLine label="Evaluation" summary={evaluation} />
-                  <p className="text-[11px] text-muted-foreground/60">
-                    {formatDateTime(evaluation.createdAt)}
-                    {evaluation.createdBy && ` · by ${evaluation.createdBy}`}
-                  </p>
-                  {evaluation.status === "failed" && evaluation.errorDetail && (
-                    <p className="text-[11px] text-red-300/80 leading-relaxed">
-                      {evaluation.errorDetail}
+        <div>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
+            Evaluation history
+          </h2>
+          {evaluations.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
+              <p className="text-sm text-muted-foreground">No evaluations recorded yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {evaluations.map((evaluation, i) => (
+                <Card key={evaluation.id} className="border-border bg-card">
+                  <CardContent className="px-4 py-3 space-y-1.5">
+                    <EvaluationSummaryLine label="Evaluation" summary={evaluation} />
+                    <p className="text-[11px] text-muted-foreground/60">
+                      {formatDateTime(evaluation.createdAt)}
+                      {evaluation.createdBy && ` · by ${evaluation.createdBy}`}
                     </p>
-                  )}
-                </CardContent>
-                {i < evaluations.length - 1 && <Separator className="opacity-0" />}
-              </Card>
-            ))}
-          </div>
-        )}
+                    {evaluation.status === "failed" && evaluation.errorDetail && (
+                      <p className="text-[11px] text-red-300/80 leading-relaxed">
+                        {evaluation.errorDetail}
+                      </p>
+                    )}
+                  </CardContent>
+                  {i < evaluations.length - 1 && <Separator className="opacity-0" />}
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

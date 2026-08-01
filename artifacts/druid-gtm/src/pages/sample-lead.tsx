@@ -232,7 +232,7 @@ export default function SampleLeadPage() {
                 asChild
                 className="bg-primary text-primary-foreground hover:bg-[#00c853] shadow-lg shadow-primary/20"
               >
-                <a href="/queue">Go to Review Queue</a>
+                <a href="/accounts?view=attention">Go to Review Queue</a>
               </Button>
             </div>
           </CardContent>

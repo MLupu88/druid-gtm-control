@@ -26,6 +26,7 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from "@/components/ui/accordion";
+import { TechnicalDetails } from "@/components/technical-details";
 import { accountDetailQueryKey, type AccountEvaluation } from "@/lib/accounts-api";
 import {
   fetchIcpProfiles,
@@ -36,6 +37,15 @@ import {
   runAccountIcpPreview,
   AccountIcpEvaluationApiError,
 } from "@/lib/account-icp-evaluations-api";
+import {
+  describeReasonEntry,
+  categorizeMissingInputs,
+  humanizeTierLabel,
+  formatScorePoints,
+  TIER_EXPLANATION,
+  type MissingInputCategory,
+  type ReasonEntry,
+} from "@/lib/icp-preview-presentation";
 
 export interface AccountIcpPreviewPanelProps {
   accountId: string;
@@ -45,7 +55,9 @@ export interface AccountIcpPreviewPanelProps {
 // Small, local, defensive helpers — this is a read-only display surface
 // over server-computed values, so nothing here re-derives or guesses a
 // score; every fallback below only ever substitutes a restrained "—" or
-// short explanatory copy, never a fabricated number.
+// short explanatory copy, never a fabricated number. Reason-code/tier/
+// missing-input humanization itself lives in
+// ../lib/icp-preview-presentation.ts (unit-tested there without a DOM).
 // ---------------------------------------------------------------------
 
 function formatDateTime(iso: string): string {
@@ -67,10 +79,10 @@ function describeProfileVersion(
   profile: IcpProfileListItem | undefined,
 ): string {
   if (profile?.draftVersion && evaluation.profileVersionId === profile.draftVersion.id) {
-    return `Draft preview · v${profile.draftVersion.versionNumber}`;
+    return `Draft version · v${profile.draftVersion.versionNumber}`;
   }
   if (profile?.activeVersion && evaluation.profileVersionId === profile.activeVersion.id) {
-    return `Active version preview · v${profile.activeVersion.versionNumber}`;
+    return `Active version · v${profile.activeVersion.versionNumber}`;
   }
   return `Profile version ${shortId(evaluation.profileVersionId)}`;
 }
@@ -129,50 +141,65 @@ function summarizeEligibilityCounts(evaluation: AccountEvaluation): string {
   return parts.join(" · ");
 }
 
-// Defensive rendering for the evaluator's jsonb array fields: prefers a
-// readable field, never crashes on an unexpected shape, and only falls
-// back to raw JSON when nothing readable exists.
-function describeEntry(item: unknown): string {
-  if (typeof item === "string") return item;
-
-  if (item && typeof item === "object" && !Array.isArray(item)) {
-    const record = item as Record<string, unknown>;
-    const label =
-      typeof record.description === "string"
-        ? record.description
-        : typeof record.reason === "string"
-          ? record.reason
-          : null;
-
-    const prefixParts: string[] = [];
-    if (typeof record.ruleId === "string") prefixParts.push(record.ruleId);
-    if (typeof record.field === "string") prefixParts.push(record.field);
-    if (prefixParts.length === 0 && typeof record.id === "string") {
-      prefixParts.push(record.id);
-    }
-
-    if (label) {
-      return prefixParts.length > 0 ? `${prefixParts.join(" · ")} — ${label}` : label;
-    }
-    if (prefixParts.length > 0) return prefixParts.join(" · ");
-  }
-
-  try {
-    return JSON.stringify(item);
-  } catch {
-    return "Unrecognized entry";
-  }
+function reasonEntries(items: unknown): ReasonEntry[] {
+  return Array.isArray(items) ? items.map(describeReasonEntry) : [];
 }
 
-function EntryList({ items, emptyLabel }: { items: unknown; emptyLabel: string }) {
-  if (!Array.isArray(items) || items.length === 0) {
+function MetricExplanation({ children }: { children: string }) {
+  return (
+    <p className="text-[11px] text-muted-foreground/70 mt-1 leading-relaxed">{children}</p>
+  );
+}
+
+// Renders only plain-language text — the raw ruleId/field behind each
+// entry (entry.technical) is deliberately NOT shown here; it's collected
+// once into CompletedEvaluationDetails' single bottom "Technical details"
+// disclosure instead, so traceability survives without every list
+// doubling as a dump of internal identifiers.
+function HumanEntryList({
+  entries,
+  emptyLabel,
+}: {
+  entries: ReasonEntry[];
+  emptyLabel: string;
+}) {
+  if (entries.length === 0) {
     return <p className="text-sm text-muted-foreground">{emptyLabel}</p>;
   }
   return (
     <ul className="space-y-1.5">
-      {items.map((item, index) => (
+      {entries.map((entry, index) => (
         <li key={index} className="text-sm text-foreground leading-relaxed">
-          {describeEntry(item)}
+          {entry.primary}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function MissingInputsSummary({
+  categories,
+}: {
+  categories: MissingInputCategory[] | null;
+}) {
+  if (categories === null) {
+    return <p className="text-sm text-muted-foreground">Data not available for this preview.</p>;
+  }
+  if (categories.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No missing inputs — every data point this evaluation needed was available.
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-1.5">
+      {categories.map((category) => (
+        <li key={category.category} className="text-sm text-foreground leading-relaxed">
+          {category.category}
+          {category.dimensions.length > 0 && (
+            <span className="text-muted-foreground"> — affects {category.dimensions.join(", ")}</span>
+          )}
         </li>
       ))}
     </ul>
@@ -223,16 +250,16 @@ function PreviewErrorState({ error }: { error: unknown }) {
         <AlertCircle className="h-4 w-4" />
         <AlertTitle>No previewable version</AlertTitle>
         <AlertDescription>
-          This profile has no draft or active version yet, so it can&apos;t be previewed.
+          This profile has no draft or active version yet, so it can&apos;t be tested.
         </AlertDescription>
       </Alert>
     );
   }
-  const message = error instanceof Error ? error.message : "Could not run ICP preview.";
+  const message = error instanceof Error ? error.message : "Could not test this ICP.";
   return (
     <Alert variant="destructive">
       <AlertCircle className="h-4 w-4" />
-      <AlertTitle>Preview failed</AlertTitle>
+      <AlertTitle>Test failed</AlertTitle>
       <AlertDescription>{message}</AlertDescription>
     </Alert>
   );
@@ -242,7 +269,7 @@ function FailedEvaluationState({ evaluation }: { evaluation: AccountEvaluation }
   return (
     <Alert variant="destructive">
       <AlertCircle className="h-4 w-4" />
-      <AlertTitle>Preview could not be completed</AlertTitle>
+      <AlertTitle>Test could not be completed</AlertTitle>
       <AlertDescription>
         {evaluation.errorDetail && evaluation.errorDetail.trim() !== ""
           ? evaluation.errorDetail
@@ -253,49 +280,100 @@ function FailedEvaluationState({ evaluation }: { evaluation: AccountEvaluation }
 }
 
 function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluation }) {
+  const fitTier = humanizeTierLabel(evaluation.fitTier);
+  const intentTier = humanizeTierLabel(evaluation.intentTier);
+
+  const matchedRuleEntries = reasonEntries(evaluation.matchedRules);
+  const hardDisqualifierEntries = reasonEntries(evaluation.hardDisqualifiers);
+  const restrictionEntries = reasonEntries(evaluation.eligibilityRestrictions);
+  const missingCategories = categorizeMissingInputs(evaluation.missingInputs);
+
+  // Every raw internal identifier shown anywhere in this view (tier
+  // codes, ruleIds, missing-input field paths) is collected here rather
+  // than inline, so the primary content above stays plain language while
+  // nothing is actually discarded — see ../lib/icp-preview-presentation.ts.
+  const technicalLines: { label: string; value: string }[] = [];
+  if (fitTier) technicalLines.push({ label: "ICP fit tier code", value: fitTier.raw });
+  if (intentTier) technicalLines.push({ label: "Buying intent tier code", value: intentTier.raw });
+  for (const entry of matchedRuleEntries) {
+    if (entry.technical) technicalLines.push({ label: "Matched rule", value: entry.technical });
+  }
+  for (const entry of hardDisqualifierEntries) {
+    if (entry.technical) technicalLines.push({ label: "Hard disqualifier rule", value: entry.technical });
+  }
+  for (const entry of restrictionEntries) {
+    if (entry.technical) technicalLines.push({ label: "Restriction rule", value: entry.technical });
+  }
+  if (missingCategories) {
+    for (const category of missingCategories) {
+      for (const field of category.fields) {
+        technicalLines.push({ label: "Missing field", value: field });
+      }
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Fit</p>
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">ICP fit</p>
         <div className="flex items-baseline gap-2 mt-0.5">
           <span className="text-4xl font-bold tracking-tight text-foreground">
-            {evaluation.fitScore ?? "—"}
+            {formatScorePoints(evaluation.fitScore)}
           </span>
-          {evaluation.fitTier && (
-            <Badge variant="secondary" className="text-xs font-medium">
-              {evaluation.fitTier}
-            </Badge>
-          )}
         </div>
+        {fitTier && (
+          <p className="text-xs text-foreground mt-1">
+            {fitTier.label}
+            <span className="text-muted-foreground"> · {TIER_EXPLANATION}</span>
+          </p>
+        )}
+        <MetricExplanation>
+          How closely this account matches the ICP profile&apos;s target criteria — industry,
+          size, region, and similar company attributes.
+        </MetricExplanation>
       </div>
 
-      <div className="flex flex-wrap gap-x-8 gap-y-3">
+      <div className="flex flex-wrap gap-x-8 gap-y-4">
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Intent</p>
-          <p className="text-sm font-medium text-foreground mt-0.5">
-            {evaluation.intentScore ?? "—"}
-            {evaluation.intentTier && (
-              <span className="text-muted-foreground font-normal"> · {evaluation.intentTier}</span>
-            )}
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+            Buying intent
           </p>
+          <p className="text-sm font-medium text-foreground mt-0.5">
+            {formatScorePoints(evaluation.intentScore)}
+          </p>
+          {intentTier && (
+            <p className="text-xs text-foreground mt-1">{intentTier.label}</p>
+          )}
+          <MetricExplanation>
+            How much recent engagement — site visits, repeat activity — suggests active
+            buying interest right now.
+          </MetricExplanation>
         </div>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Actionability
+            Ability to act
           </p>
           <p className="text-sm font-medium text-foreground mt-0.5">
-            {evaluation.actionabilityScore ?? "—"}
+            {formatScorePoints(evaluation.actionabilityScore)}
           </p>
+          <MetricExplanation>
+            Whether there&apos;s enough contact or CRM information available to actually
+            follow up.
+          </MetricExplanation>
         </div>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Eligibility
+            Outreach eligibility
           </p>
           <div className="mt-0.5">
             <Badge variant={eligibilityBadgeVariant(evaluation.eligibilityOutcome)}>
               {eligibilityLabel(evaluation.eligibilityOutcome)}
             </Badge>
           </div>
+          <MetricExplanation>
+            Whether policy restrictions — disqualifiers, do-not-contact, or an unresolved
+            identity — allow this account to be contacted at all.
+          </MetricExplanation>
         </div>
       </div>
 
@@ -305,7 +383,7 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
         <AccordionItem value="why">
           <AccordionTrigger className="text-sm py-2">Why this score</AccordionTrigger>
           <AccordionContent>
-            <EntryList items={evaluation.matchedRules} emptyLabel="No matched rules recorded." />
+            <HumanEntryList entries={matchedRuleEntries} emptyLabel="No matched rules recorded." />
           </AccordionContent>
         </AccordionItem>
         <AccordionItem value="restrictions">
@@ -315,26 +393,35 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
                 Hard disqualifiers
               </p>
-              <EntryList items={evaluation.hardDisqualifiers} emptyLabel="None recorded." />
+              <HumanEntryList entries={hardDisqualifierEntries} emptyLabel="None recorded." />
             </div>
             <div>
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">
                 Restrictions
               </p>
-              <EntryList
-                items={evaluation.eligibilityRestrictions}
-                emptyLabel="None recorded."
-              />
+              <HumanEntryList entries={restrictionEntries} emptyLabel="None recorded." />
             </div>
           </AccordionContent>
         </AccordionItem>
         <AccordionItem value="missing">
           <AccordionTrigger className="text-sm py-2">Missing inputs</AccordionTrigger>
           <AccordionContent>
-            <EntryList items={evaluation.missingInputs} emptyLabel="No missing inputs recorded." />
+            <MissingInputsSummary categories={missingCategories} />
           </AccordionContent>
         </AccordionItem>
       </Accordion>
+
+      {technicalLines.length > 0 && (
+        <TechnicalDetails>
+          <ul className="space-y-1 font-mono text-[11px] text-muted-foreground/80">
+            {technicalLines.map((line, index) => (
+              <li key={index}>
+                <span className="text-muted-foreground/50">{line.label}:</span> {line.value}
+              </li>
+            ))}
+          </ul>
+        </TechnicalDetails>
+      )}
     </div>
   );
 }
@@ -350,13 +437,13 @@ function PreviewResult({
     <div className="space-y-4 pt-1">
       <div className="space-y-0.5">
         <p className="text-sm font-medium text-foreground">
-          Evaluated against {profile?.name ?? "this profile"}
+          Tested against {profile?.name ?? "this profile"}
         </p>
         <p className="text-xs text-muted-foreground">
           {describeProfileVersion(evaluation, profile)} · {formatDateTime(evaluation.createdAt)}
         </p>
         <p className="text-[11px] text-muted-foreground/70">
-          This is a preview, not a production decision.
+          This result is not saved — it&apos;s a test only, not a recorded decision.
         </p>
       </div>
 
@@ -416,12 +503,12 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
               ICP preview
             </h2>
             <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-              Preview only
+              Not saved
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            Test this account against a selected ICP lens — nothing here is saved as a
-            permanent assignment.
+            Test this account against an ICP profile to see how it would score — nothing
+            here is saved as a decision or a permanent assignment.
           </p>
         </div>
 
@@ -439,7 +526,7 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
             <EmptyHeader>
               <EmptyTitle>No ICP profiles yet</EmptyTitle>
               <EmptyDescription>
-                Create an ICP profile before you can preview this account against one.
+                Create an ICP profile before you can test this account against one.
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -450,16 +537,16 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1 space-y-1.5">
                 <Label
-                  htmlFor="icp-preview-lens"
+                  htmlFor="icp-preview-profile"
                   className="text-xs font-medium text-muted-foreground"
                 >
-                  Analysis lens
+                  ICP profile
                 </Label>
                 <Select
                   value={selectedProfileId ?? undefined}
                   onValueChange={(value) => setSelectedProfileId(value)}
                 >
-                  <SelectTrigger id="icp-preview-lens">
+                  <SelectTrigger id="icp-preview-profile">
                     <SelectValue placeholder="Choose an ICP profile" />
                   </SelectTrigger>
                   <SelectContent>
@@ -472,16 +559,16 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
                 </Select>
               </div>
               <Button onClick={handleRunPreview} disabled={!canRun}>
-                {previewMutation.isPending ? "Evaluating…" : "Run ICP preview"}
+                {previewMutation.isPending ? "Testing…" : "Test against this ICP"}
               </Button>
             </div>
 
             <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
               <p>
-                This preview only has verified account name and domain data. CRM,
-                engagement, contact, and consent details are not yet available, so the
-                result may be conservative or incomplete.
+                This preview only uses the account&apos;s verified company name and domain
+                today. After you run it, anything the profile needed but couldn&apos;t find
+                will be listed under &quot;Missing inputs&quot; below.
               </p>
             </div>
 
@@ -491,7 +578,7 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
               <PreviewResult evaluation={previewMutation.data} profile={resultProfile} />
             ) : (
               <p className="text-sm text-muted-foreground py-2">
-                Choose an ICP lens and run a preview to see how this account fits.
+                Choose an ICP profile and run a test to see how this account fits.
               </p>
             )}
           </>
