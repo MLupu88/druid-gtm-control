@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { AlertCircle, ChevronRight, Plus } from "lucide-react";
@@ -12,7 +13,7 @@ import {
   EmptyTitle,
   EmptyDescription,
 } from "@/components/ui/empty";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { NewIcpProfileDialog } from "@/components/icp-new-profile-dialog";
 import {
   fetchIcpProfiles,
   icpProfilesListQueryKey,
@@ -50,27 +51,6 @@ function ListErrorState({ error, onRetry }: { error: unknown; onRetry: () => voi
         Retry
       </Button>
     </div>
-  );
-}
-
-// New profile creation lands with the draft-editor slice — this button
-// is deliberately visible-but-disabled rather than absent, so operators
-// know the capability is coming rather than assuming ICP profiles can
-// never be created from the UI. It must never simulate creating a
-// profile or navigate anywhere.
-function NewProfileButton() {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-block">
-          <Button disabled className="pointer-events-none">
-            <Plus className="w-4 h-4 mr-1.5" />
-            New ICP profile
-          </Button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>Available in the next step</TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -118,6 +98,7 @@ function ProfileRow({ profile }: { profile: IcpProfileListItem }) {
 // ─── Page ───────────────────────────────────────────────────────────────────
 
 export default function SettingsIcpProfilesPage() {
+  const [newProfileOpen, setNewProfileOpen] = useState(false);
   const profilesQ = useQuery({
     queryKey: icpProfilesListQueryKey(),
     queryFn: fetchIcpProfiles,
@@ -139,7 +120,10 @@ export default function SettingsIcpProfilesPage() {
             ideal customer profile.
           </p>
         </div>
-        <NewProfileButton />
+        <Button onClick={() => setNewProfileOpen(true)}>
+          <Plus className="w-4 h-4 mr-1.5" />
+          New ICP profile
+        </Button>
       </div>
 
       {profilesQ.isLoading && <ListSkeleton />}
@@ -154,8 +138,7 @@ export default function SettingsIcpProfilesPage() {
             <EmptyTitle>No ICP profiles yet</EmptyTitle>
             <EmptyDescription>
               ICP profiles define the criteria — fit, buying intent, and eligibility
-              — used to evaluate accounts. Creating one is available in the next
-              step.
+              — used to evaluate accounts. Create one to get started.
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
@@ -168,6 +151,8 @@ export default function SettingsIcpProfilesPage() {
           ))}
         </div>
       )}
+
+      <NewIcpProfileDialog open={newProfileOpen} onOpenChange={setNewProfileOpen} />
     </div>
   );
 }

@@ -79,3 +79,25 @@ test("the page derives its config summary and default version from the shared pu
   assert.ok(source.includes("selectDefaultVersionId"));
   assert.ok(source.includes("humanizeVersionStatus"));
 });
+
+test("the draft editor is shown when a draft exists, and a truthful no-draft message otherwise — never a fake Edit action", () => {
+  const source = readSource();
+  assert.ok(source.includes("<IcpProfileDraftEditor"));
+  assert.ok(source.includes("draftVersion ?"));
+  // The JSX text wraps across multiple lines/indentation in source, so
+  // this checks the phrase in two pieces rather than one continuous
+  // string — same approach as the re-evaluation disclosure test above.
+  assert.ok(source.includes("This profile has no editable draft."));
+  assert.ok(source.includes("available in the next step."));
+  // Load-bearing: no clone wiring in this slice.
+  assert.ok(!source.includes("cloneVersionIntoDraft"));
+  assert.ok(!/\/clone/.test(source));
+});
+
+test("unsaved draft changes are guarded before navigating back via the shared Link + preventDefault pattern", () => {
+  const source = readSource();
+  assert.ok(source.includes("draftDirty"));
+  assert.ok(source.includes("onDirtyChange={onDraftDirtyChange}") || source.includes("onDraftDirtyChange"));
+  assert.ok(source.includes("window.confirm"));
+  assert.ok(source.includes("e.preventDefault()"));
+});

@@ -29,22 +29,16 @@ test("the page uses normal product language for the section heading", () => {
   assert.ok(source.includes("ICP Profiles"));
 });
 
-test("a New ICP profile action is visible but does not simulate creating a profile", () => {
+test("a New ICP profile action opens the real creation dialog, not a fake/disabled action", () => {
   const source = readSource();
   assert.ok(source.includes("New ICP profile"));
-  assert.ok(source.includes("Available in the next step"));
-  // Load-bearing: no mutation anywhere in this file, and the button
-  // rendering "New ICP profile" itself is a plain `disabled` Button with
-  // no onClick — see NewProfileButton. (The page does have one legitimate
-  // onClick elsewhere, the "Retry" button in ListErrorState, which this
-  // test must not flag.)
+  assert.ok(source.includes("NewIcpProfileDialog"));
+  assert.ok(source.includes("setNewProfileOpen(true)"));
+  // The page itself must not duplicate creation logic (no mutation, no
+  // direct call to createIcpProfile here) — that all lives inside
+  // ../components/icp-new-profile-dialog.tsx, which this page only opens.
   assert.ok(!source.includes("useMutation"));
-  const newProfileButtonBlock = source.slice(
-    source.indexOf("function NewProfileButton"),
-    source.indexOf("function ProfileRow"),
-  );
-  assert.ok(newProfileButtonBlock.includes("New ICP profile"));
-  assert.ok(!newProfileButtonBlock.includes("onClick"));
+  assert.ok(!source.includes("createIcpProfile"));
 });
 
 test("the page has real loading, error, and empty states, not just a happy path", () => {

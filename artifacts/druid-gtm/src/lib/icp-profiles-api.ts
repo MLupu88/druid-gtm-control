@@ -1,24 +1,41 @@
-// Hand-written types + fetch functions for the ICP profiles API
-// (GET /api/internal/icp-profiles, GET /api/internal/icp-profiles/:profileId).
+// Hand-written types + fetch functions for the ICP profiles API:
+//   - GET  /api/internal/icp-profiles
+//   - GET  /api/internal/icp-profiles/:profileId
+//   - POST /api/internal/icp-profiles              (create profile + initial draft)
+//   - PUT  /api/internal/icp-profiles/:profileId/draft (full-replacement draft update)
 // Shapes here are verified directly against
 // artifacts/api-server/src/services/icpProfiles.ts's
 // ProfileVersionSummary/ProfileListItem/ProfileDetail and
-// artifacts/api-server/src/routes/icpProfiles.ts's GET / and GET
-// /:profileId handlers (both return the service's result as raw JSON, no
-// wrapper) — not guessed.
+// artifacts/api-server/src/routes/icpProfiles.ts's GET /, GET
+// /:profileId, POST /, and PUT /:profileId/draft handlers (all return the
+// service's result as raw JSON, no wrapper) — not guessed. In particular:
+//   - CreateIcpProfileRequestSchema is `{ name, description?, config }`
+//     .strict() — createIcpProfile below sends exactly that, nothing more.
+//   - UpdateDraftRequestSchema is `{ config, notes? }` .strict() — there is
+//     NO name/description field on this endpoint. Profile name/description
+//     can only ever be set once, at creation; the draft editor
+//     (../components/icp-profile-draft-editor.tsx) treats them as
+//     read-only for exactly this reason, not as an oversight.
+//   - updateDraft is a FULL REPLACEMENT of config — updateIcpProfileDraft
+//     below has no partial/patch variant; callers must always submit the
+//     complete IcpProfileConfigV1 object.
 //
-// This slice (Settings → ICP Profiles, read-only foundation) only adds
-// READ operations. create/updateDraft/clone/publish/activate already
-// exist on the backend (see icpProfiles.ts route) but have no client
-// function here yet — that lands with the draft-editor slice, which will
-// mutate the exact same IcpProfileVersion/IcpProfileDetail shapes this
-// slice's detail page already reads.
+// This module depends on @workspace/evaluator only for the
+// IcpProfileConfigV1 type on the two write functions below (stronger
+// typing at the call site) — it does not re-validate against
+// IcpProfileConfigV1Schema itself; that lives in
+// ../lib/icp-profile-config-validation.ts, run by the editor before ever
+// calling these functions, with the server's own validateProfileConfig
+// remaining the authoritative last word (see IcpProfilesApiError below,
+// carrying the 422 invalid_profile_config code on a rejected save).
 //
 // Follows the same raw-fetch + credentials:"include" convention as
 // ./accounts-api.ts / ./account-decisions-api.ts /
 // ./client-radar-research-api.ts. React Query itself stays in the
 // components; this module only exports plain fetch functions and stable
 // query-key helpers.
+
+import type { IcpProfileConfigV1 } from "@workspace/evaluator";
 
 export type IcpProfileVersionStatus = "draft" | "published";
 
@@ -154,4 +171,79 @@ export async function fetchIcpProfileDetail(
 
 export function icpProfileDetailQueryKey(profileId: string) {
   return ["icp-profiles", "detail", profileId] as const;
+}
+
+// ---------------------------------------------------------------------
+// Create profile + initial draft (POST /api/internal/icp-profiles).
+// createdBy is stamped server-side (see routes/icpProfiles.ts's
+// deriveCreatedBy) — never sent from here.
+// ---------------------------------------------------------------------
+
+export interface CreateIcpProfileArgs {
+  name: string;
+  /** undefined/omitted and null are both valid — both mean "no description". */
+  description?: string | null;
+  config: IcpProfileConfigV1;
+}
+
+// Mirrors the exact shape createProfile (icpProfiles.ts service) returns:
+// `{ profile, draftVersion }`, not a bare profile or a bare version.
+export interface CreateIcpProfileResult {
+  profile: IcpProfile;
+  draftVersion: IcpProfileVersion;
+}
+
+export async function createIcpProfile(
+  args: CreateIcpProfileArgs,
+): Promise<CreateIcpProfileResult> {
+  const res = await fetch("/api/internal/icp-profiles", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: args.name,
+      description: args.description ?? null,
+      config: args.config,
+    }),
+  });
+  if (!res.ok) {
+    await throwForResponse(res, "Could not create this ICP profile.");
+  }
+  return res.json() as Promise<CreateIcpProfileResult>;
+}
+
+// ---------------------------------------------------------------------
+// Update the current draft (PUT /api/internal/icp-profiles/:profileId/draft)
+// — full replacement of config; notes replaces the stored value when
+// supplied (including explicit null), and is left untouched when omitted
+// entirely. There is no name/description field here — see module comment.
+// ---------------------------------------------------------------------
+
+export interface UpdateIcpProfileDraftArgs {
+  config: IcpProfileConfigV1;
+  /** Omit entirely to leave stored notes untouched; null/string to replace. */
+  notes?: string | null;
+}
+
+export async function updateIcpProfileDraft(
+  profileId: string,
+  args: UpdateIcpProfileDraftArgs,
+): Promise<IcpProfileVersion> {
+  const body: Record<string, unknown> = { config: args.config };
+  if ("notes" in args) {
+    body.notes = args.notes;
+  }
+  const res = await fetch(
+    `/api/internal/icp-profiles/${encodeURIComponent(profileId)}/draft`,
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    await throwForResponse(res, "Could not save this draft.");
+  }
+  return res.json() as Promise<IcpProfileVersion>;
 }

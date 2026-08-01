@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
 import { ArrowLeft, AlertCircle, Info } from "lucide-react";
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { TechnicalDetails } from "@/components/technical-details";
+import { IcpProfileDraftEditor } from "@/components/icp-profile-draft-editor";
 import { cn } from "@/lib/utils";
 import {
   fetchIcpProfileDetail,
@@ -206,8 +207,36 @@ function VersionSummaryCard({
   );
 }
 
+// ─── No-editable-draft message ───────────────────────────────────────────────
+// Truthful, not a fake Edit action: clone-into-new-draft (the only way to
+// start editing a profile that's already been published with no draft
+// left) isn't implemented yet.
+function NoDraftMessage() {
+  return (
+    <Card className="border-border bg-card">
+      <CardHeader>
+        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-primary">
+          Draft
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          This profile has no editable draft. Creating a new draft from a
+          published version will be available in the next step.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Content ──────────────────────────────────────────────────────────────────
-function ProfileDetailContent({ detail }: { detail: IcpProfileDetail }) {
+function ProfileDetailContent({
+  detail,
+  onDraftDirtyChange,
+}: {
+  detail: IcpProfileDetail;
+  onDraftDirtyChange: (dirty: boolean) => void;
+}) {
   const { profile, versions } = detail;
 
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(() =>
@@ -288,6 +317,16 @@ function ProfileDetailContent({ detail }: { detail: IcpProfileDetail }) {
         </Card>
       </div>
 
+      {draftVersion ? (
+        <IcpProfileDraftEditor
+          profile={profile}
+          draftVersion={draftVersion}
+          onDirtyChange={onDraftDirtyChange}
+        />
+      ) : (
+        <NoDraftMessage />
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
         {versions.length > 0 ? (
           <>
@@ -321,6 +360,7 @@ function ProfileDetailContent({ detail }: { detail: IcpProfileDetail }) {
 // ─── Page ───────────────────────────────────────────────────────────────────
 export default function IcpProfileDetailPage() {
   const { profileId } = useParams<{ profileId: string }>();
+  const [draftDirty, setDraftDirty] = useState(false);
 
   const detailQ = useQuery({
     queryKey: icpProfileDetailQueryKey(profileId ?? ""),
@@ -328,11 +368,28 @@ export default function IcpProfileDetailPage() {
     enabled: !!profileId,
   });
 
+  // Guards only this page's own "Back to ICP profiles" link — wouter has
+  // no navigation-blocking hook to intercept the shared SettingsNav or
+  // sidebar links the same way (see
+  // ../components/icp-profile-draft-editor.tsx's beforeunload effect,
+  // which covers tab close/refresh/typed-URL navigation instead). A
+  // known gap, not silently pretended away — see the Slice 2 report.
+  function handleBackClick(e: MouseEvent<HTMLAnchorElement>) {
+    if (!draftDirty) return;
+    const confirmed = window.confirm(
+      "You have unsaved changes to this draft. Leave without saving them?",
+    );
+    if (!confirmed) {
+      e.preventDefault();
+    }
+  }
+
   return (
     <div className="p-6 max-w-4xl space-y-6">
       <SettingsNav />
       <Link
         href="/settings/icp-profiles"
+        onClick={handleBackClick}
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
@@ -360,7 +417,9 @@ export default function IcpProfileDetailPage() {
         </div>
       )}
 
-      {detailQ.data && <ProfileDetailContent detail={detailQ.data} />}
+      {detailQ.data && (
+        <ProfileDetailContent detail={detailQ.data} onDraftDirtyChange={setDraftDirty} />
+      )}
     </div>
   );
 }
