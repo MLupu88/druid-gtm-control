@@ -57,24 +57,20 @@ const googleSheetId = requireEnv("GOOGLE_SHEET_ID");
 const googleServiceAccountJson = requireEnv("GOOGLE_SERVICE_ACCOUNT_JSON");
 const databaseUrl = requireEnv("DATABASE_URL");
 
-// Exact minimal, schema-valid IcpProfileConfigV1 shape already proven in
-// services/icpProfiles.test.ts / routes/icpProfiles.integration.test.ts —
-// reused verbatim, not invented here.
+// Structurally minimal, schema-valid IcpProfileConfigV1 shape — no rules
+// invented on the operator's behalf (a fake "has a domain" fit rule
+// describes nothing about what makes a good customer, it only confirms a
+// company record exists), and no arbitrary tier labels ("base"/"floor"
+// carry no business meaning). This mirrors
+// ../../../druid-gtm/src/lib/icp-profile-config-editing.ts's
+// buildStarterProfileConfig() exactly — the same truthful, empty starting
+// point every profile created through the UI gets — so this one-time
+// production seed is not a second, divergent definition of "starter".
 function starterProfileConfig() {
   return {
     configSchemaVersion: "v1",
-    fit: {
-      rules: [
-        {
-          id: "has_domain",
-          description: "Has a domain",
-          points: 10,
-          condition: { op: "exists", field: "company.domain" },
-        },
-      ],
-      tiers: [{ code: "base", minScore: 0 }],
-    },
-    intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+    fit: { rules: [], tiers: [{ code: "not_yet_qualified", minScore: 0 }] },
+    intent: { rules: [], tiers: [{ code: "no_observed_intent", minScore: 0 }] },
     actionability: { rules: [] },
     eligibility: { hardDisqualifiers: [], restrictions: [] },
   };

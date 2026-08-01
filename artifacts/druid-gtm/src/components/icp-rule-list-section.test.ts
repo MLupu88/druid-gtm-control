@@ -31,18 +31,37 @@ test("the list section supports add, duplicate, reorder, and remove via the shar
   assert.ok(source.includes("moveItem"));
 });
 
-test("a weighted rule row exposes a Points field; a condition-only (eligibility) row does not", () => {
+test("a weighted rule row exposes a Weight field (business-friendly presets, with an Advanced numeric escape hatch); a condition-only (eligibility) row does not", () => {
   const source = readSource();
   const weightedBlock = source.slice(
     source.indexOf("export function WeightedRuleRow"),
     source.indexOf("export function ConditionRuleRow"),
   );
   const conditionBlock = source.slice(source.indexOf("export function ConditionRuleRow"));
-  assert.ok(weightedBlock.includes("Points"), "WeightedRuleRow must show a Points field");
+  assert.ok(weightedBlock.includes("WeightEditor"), "WeightedRuleRow must show the weight editor");
   assert.ok(
-    !conditionBlock.includes("Points"),
-    "ConditionRuleRow (hard disqualifiers/restrictions) must never show a Points field — the schema has no points there",
+    !conditionBlock.includes("WeightEditor") && !conditionBlock.includes("points"),
+    "ConditionRuleRow (hard disqualifiers/restrictions) must never show a points/weight field — the schema has no points there",
   );
+});
+
+test("the weight editor offers exactly the three documented presets plus an Advanced numeric option, never silently rewriting an existing arbitrary value", () => {
+  const source = readSource();
+  assert.ok(source.includes("WEIGHT_PRESET_ORDER"));
+  assert.ok(source.includes("WEIGHT_PRESET_VALUES"));
+  assert.ok(source.includes("weightPresetForPoints"));
+  assert.ok(source.includes("Advanced (exact points)"));
+});
+
+test("every weighted rule row shows the deterministic plain-language rule sentence, derived from the real condition", () => {
+  const source = readSource();
+  assert.ok(source.includes("describeWeightedRuleSentence"));
+});
+
+test("every eligibility rule row shows the deterministic plain-language rule sentence, tagged hard-disqualifier vs restriction", () => {
+  const source = readSource();
+  assert.ok(source.includes("describeEligibilityRuleSentence"));
+  assert.ok(source.includes('kind: EligibilityRuleKind'));
 });
 
 test("rule ids are only ever shown inside collapsed TechnicalDetails, never as primary text", () => {

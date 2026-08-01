@@ -146,3 +146,43 @@ test("publish disabled reasons are explained, not just a silently disabled butto
   assert.ok(source.includes("Fix the issues listed below before publishing."));
   assert.ok(source.includes("Save your changes before publishing."));
 });
+
+// ---------------------------------------------------------------------
+// ICP Authoring UX — business-language summary, bands terminology, and
+// weight/sentence wiring
+// ---------------------------------------------------------------------
+
+test("renders the 'How this ICP works' business-language summary, sourced from the shared deterministic helper", () => {
+  const source = readSource();
+  assert.ok(source.includes("<IcpProfileSummaryCard"));
+  assert.ok(source.includes("config={config}"));
+});
+
+test("fit and intent tier sections use 'bands' product language, not raw schema terminology", () => {
+  const source = readSource();
+  assert.ok(source.includes('title="Fit bands"'));
+  assert.ok(source.includes('title="Intent bands"'));
+});
+
+test("each scored dimension's rule rows are told which dimension they belong to and the dimension's current total points, for the weight-share display", () => {
+  const source = readSource();
+  assert.ok(source.includes('dimension="fit"'));
+  assert.ok(source.includes('dimension="intent"'));
+  assert.ok(source.includes('dimension="actionability"'));
+  assert.ok(source.includes("totalPoints={fitTotalPoints}"));
+  assert.ok(source.includes("totalPoints={intentTotalPoints}"));
+  assert.ok(source.includes("totalPoints={actionabilityTotalPoints}"));
+});
+
+test("eligibility rows are tagged hard-disqualifier vs restriction for the plain-language sentence", () => {
+  const source = readSource();
+  assert.ok(source.includes('kind="hardDisqualifier"'));
+  assert.ok(source.includes('kind="restriction"'));
+});
+
+test("fit and intent bands are told the dimension's total configured maximum points, for the unreachable-band warning — never a second, divergent computation", () => {
+  const source = readSource();
+  assert.ok(source.includes("configuredMaximumPoints={fitTotalPoints}"));
+  assert.ok(source.includes("configuredMaximumPoints={intentTotalPoints}"));
+  assert.ok(source.includes("sumRulePoints"));
+});

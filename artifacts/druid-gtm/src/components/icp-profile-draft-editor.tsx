@@ -33,9 +33,11 @@ import {
 } from "@/lib/icp-profile-config-editing";
 import { RuleListSection, WeightedRuleRow, ConditionRuleRow } from "@/components/icp-rule-list-section";
 import { TierEditor } from "@/components/icp-tier-editor";
+import { IcpProfileSummaryCard } from "@/components/icp-profile-summary-card";
 import { PublishDraftAction } from "@/components/icp-profile-lifecycle-actions";
 import type { IcpProfileConfigV1, WeightedRule, ConditionRule } from "@workspace/evaluator";
 import { MAX_RULES_PER_DIMENSION } from "@workspace/evaluator";
+import { sumRulePoints } from "@/lib/icp-profile-business-summary";
 
 // The complete Draft editor for an ICP profile. Always holds and submits
 // the FULL IcpProfileConfigV1 object (updateDraft is a full-replacement
@@ -153,6 +155,10 @@ export function IcpProfileDraftEditor({
 
   const issues = validation.valid ? [] : validation.issues;
 
+  const fitTotalPoints = sumRulePoints(config.fit.rules);
+  const intentTotalPoints = sumRulePoints(config.intent.rules);
+  const actionabilityTotalPoints = sumRulePoints(config.actionability.rules);
+
   return (
     <Card className="border-border bg-card">
       <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
@@ -184,6 +190,8 @@ export function IcpProfileDraftEditor({
         {!validation.valid && (
           <ErrorSummary issues={issues} />
         )}
+
+        <IcpProfileSummaryCard config={config} />
 
         <div className="flex items-start gap-1.5 text-[11px] text-muted-foreground bg-muted/20 rounded-md px-2.5 py-2">
           <Info className="w-3 h-3 shrink-0 mt-0.5" />
@@ -246,7 +254,7 @@ export function IcpProfileDraftEditor({
             <AccordionContent className="space-y-5 pt-1">
               <RuleListSection<WeightedRule>
                 title="Fit rules"
-                description="Points awarded when an account matches these criteria."
+                description="Weighted points awarded when an account matches these criteria."
                 rules={config.fit.rules}
                 onChange={(rules) => setConfig({ ...config, fit: { ...config.fit, rules } })}
                 onCreate={() => newWeightedRule(fitAllowlist)}
@@ -254,15 +262,23 @@ export function IcpProfileDraftEditor({
                 maxRules={MAX_RULES_PER_DIMENSION}
                 issuesByIndex={(index) => issuesForPath(issues, ["fit", "rules", index])}
                 renderRow={(rule, _index, actions) => (
-                  <WeightedRuleRow key={rule.id} rule={rule} allowlist={fitAllowlist} actions={actions} />
+                  <WeightedRuleRow
+                    key={rule.id}
+                    rule={rule}
+                    allowlist={fitAllowlist}
+                    dimension="fit"
+                    totalPoints={fitTotalPoints}
+                    actions={actions}
+                  />
                 )}
               />
               <TierEditor
-                title="Fit tiers"
-                description="Score thresholds that turn a fit score into a plain-language tier."
+                title="Fit bands"
+                description="Score thresholds that turn a fit score into a plain-language band."
                 tiers={config.fit.tiers}
                 onChange={(tiers) => setConfig({ ...config, fit: { ...config.fit, tiers } })}
                 issues={issuesForPath(issues, ["fit", "tiers"])}
+                configuredMaximumPoints={fitTotalPoints}
               />
             </AccordionContent>
           </AccordionItem>
@@ -273,7 +289,7 @@ export function IcpProfileDraftEditor({
             <AccordionContent className="space-y-5 pt-1">
               <RuleListSection<WeightedRule>
                 title="Intent rules"
-                description="Points awarded for recent engagement suggesting active buying interest."
+                description="Weighted points awarded for recent engagement suggesting active buying interest."
                 rules={config.intent.rules}
                 onChange={(rules) => setConfig({ ...config, intent: { ...config.intent, rules } })}
                 onCreate={() => newWeightedRule(intentAllowlist)}
@@ -281,15 +297,23 @@ export function IcpProfileDraftEditor({
                 maxRules={MAX_RULES_PER_DIMENSION}
                 issuesByIndex={(index) => issuesForPath(issues, ["intent", "rules", index])}
                 renderRow={(rule, _index, actions) => (
-                  <WeightedRuleRow key={rule.id} rule={rule} allowlist={intentAllowlist} actions={actions} />
+                  <WeightedRuleRow
+                    key={rule.id}
+                    rule={rule}
+                    allowlist={intentAllowlist}
+                    dimension="intent"
+                    totalPoints={intentTotalPoints}
+                    actions={actions}
+                  />
                 )}
               />
               <TierEditor
-                title="Intent tiers"
-                description="Score thresholds that turn an intent score into a plain-language tier."
+                title="Intent bands"
+                description="Score thresholds that turn an intent score into a plain-language band."
                 tiers={config.intent.tiers}
                 onChange={(tiers) => setConfig({ ...config, intent: { ...config.intent, tiers } })}
                 issues={issuesForPath(issues, ["intent", "tiers"])}
+                configuredMaximumPoints={intentTotalPoints}
               />
             </AccordionContent>
           </AccordionItem>
@@ -300,7 +324,7 @@ export function IcpProfileDraftEditor({
             <AccordionContent className="pt-1">
               <RuleListSection<WeightedRule>
                 title="Actionability rules"
-                description="Points awarded for having enough contact or CRM information to actually follow up. There are no tiers for this dimension."
+                description="Weighted points awarded for having enough contact or CRM information to actually follow up. There are no bands for this dimension."
                 rules={config.actionability.rules}
                 onChange={(rules) =>
                   setConfig({ ...config, actionability: { ...config.actionability, rules } })
@@ -316,6 +340,8 @@ export function IcpProfileDraftEditor({
                     key={rule.id}
                     rule={rule}
                     allowlist={actionabilityAllowlist}
+                    dimension="actionability"
+                    totalPoints={actionabilityTotalPoints}
                     actions={actions}
                   />
                 )}
@@ -350,6 +376,7 @@ export function IcpProfileDraftEditor({
                     key={rule.id}
                     rule={rule}
                     allowlist={eligibilityAllowlist}
+                    kind="hardDisqualifier"
                     actions={actions}
                   />
                 )}
@@ -375,6 +402,7 @@ export function IcpProfileDraftEditor({
                     key={rule.id}
                     rule={rule}
                     allowlist={eligibilityAllowlist}
+                    kind="restriction"
                     actions={actions}
                   />
                 )}

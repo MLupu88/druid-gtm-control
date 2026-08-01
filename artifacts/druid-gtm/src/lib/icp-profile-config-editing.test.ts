@@ -23,6 +23,9 @@ import {
   addConditionChild,
   replaceConditionChildAt,
   removeConditionChildAt,
+  WEIGHT_PRESET_VALUES,
+  WEIGHT_PRESET_ORDER,
+  weightPresetForPoints,
 } from "./icp-profile-config-editing.js";
 
 // ---------------------------------------------------------------------
@@ -73,6 +76,42 @@ test("buildStarterProfileConfig includes exactly the required floor tier for fit
   assert.equal(config.fit.tiers[0]?.minScore, 0);
   assert.equal(config.intent.tiers.length, 1);
   assert.equal(config.intent.tiers[0]?.minScore, 0);
+});
+
+test("buildStarterProfileConfig gives the fallback fit/intent bands truthful, dimension-specific labels — never an arbitrary base/floor/unscored term", () => {
+  const config = buildStarterProfileConfig();
+  for (const arbitraryTerm of ["base", "floor", "unscored"]) {
+    assert.notEqual(config.fit.tiers[0]?.code, arbitraryTerm);
+    assert.notEqual(config.intent.tiers[0]?.code, arbitraryTerm);
+  }
+  assert.equal(config.fit.tiers[0]?.code, "not_yet_qualified");
+  assert.equal(config.intent.tiers[0]?.code, "no_observed_intent");
+  // Fit and intent must not share one generic label — each dimension's
+  // fallback band describes THAT dimension truthfully.
+  assert.notEqual(config.fit.tiers[0]?.code, config.intent.tiers[0]?.code);
+});
+
+// ---------------------------------------------------------------------
+// Weight presets
+// ---------------------------------------------------------------------
+
+test("WEIGHT_PRESET_VALUES documents exactly three ascending numeric weights", () => {
+  assert.equal(WEIGHT_PRESET_ORDER.length, 3);
+  assert.deepEqual(WEIGHT_PRESET_ORDER, ["supporting", "important", "critical"]);
+  assert.ok(WEIGHT_PRESET_VALUES.supporting < WEIGHT_PRESET_VALUES.important);
+  assert.ok(WEIGHT_PRESET_VALUES.important < WEIGHT_PRESET_VALUES.critical);
+});
+
+test("weightPresetForPoints maps a preset's exact documented value back to its key", () => {
+  assert.equal(weightPresetForPoints(WEIGHT_PRESET_VALUES.supporting), "supporting");
+  assert.equal(weightPresetForPoints(WEIGHT_PRESET_VALUES.important), "important");
+  assert.equal(weightPresetForPoints(WEIGHT_PRESET_VALUES.critical), "critical");
+});
+
+test("weightPresetForPoints does not snap an arbitrary existing value to the nearest preset — it reports no match at all", () => {
+  assert.equal(weightPresetForPoints(10), null);
+  assert.equal(weightPresetForPoints(1), null);
+  assert.equal(weightPresetForPoints(1000), null);
 });
 
 // ---------------------------------------------------------------------

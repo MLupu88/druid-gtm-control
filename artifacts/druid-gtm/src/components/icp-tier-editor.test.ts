@@ -20,17 +20,27 @@ function readSource(): string {
   return readFileSync(SOURCE_PATH, "utf8");
 }
 
-test("the required lowest tier is identified without using 'floor' as the primary user-facing label", () => {
+test("the required lowest band is identified as the fallback band, without using 'floor' as the primary user-facing label", () => {
   const source = readSource();
-  assert.ok(source.includes("Starting tier"));
+  assert.ok(source.includes("Fallback band"));
   assert.ok(!source.includes(">Floor<"));
   assert.ok(!source.includes('"Floor tier"'));
   assert.ok(!source.includes('"Floor Tier"'));
 });
 
-test("explains that every possible score must resolve to a configured tier", () => {
+test("explains that every possible score must resolve to a configured band", () => {
   const source = readSource();
-  assert.ok(source.includes("Every possible score must resolve to a configured tier"));
+  assert.ok(source.includes("Every possible score must resolve to a configured band"));
+});
+
+test("flags a band whose threshold exceeds the dimension's total configured positive rule weights (a safe upper bound, never claimed as a guarantee of reachability for lower bands)", () => {
+  const source = readSource();
+  assert.ok(source.includes("configuredMaximumPoints"));
+  assert.ok(source.includes("Cannot be reached with configured weights"));
+  // Must not claim this is merely a transient/"currently" state, nor use
+  // "achievable"/"reachable" framing that overclaims what the arithmetic
+  // upper bound actually proves.
+  assert.ok(!source.toLowerCase().includes("achievable"));
 });
 
 test("explicitly warns against assuming a score is out of 100, rather than silently implying a fixed scale", () => {

@@ -1,14 +1,37 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Plus, Copy, Trash2, ChevronUp, ChevronDown, AlertCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
 import { TechnicalDetails } from "@/components/technical-details";
 import type { WeightedRule, ConditionRule, FieldAllowlist } from "@workspace/evaluator";
 import { ConditionEditor } from "@/components/icp-condition-editor";
-import { replaceItemAt, removeItemAt, moveItem } from "@/lib/icp-profile-config-editing";
+import {
+  replaceItemAt,
+  removeItemAt,
+  moveItem,
+  WEIGHT_PRESET_ORDER,
+  WEIGHT_PRESET_LABELS,
+  WEIGHT_PRESET_VALUES,
+  weightPresetForPoints,
+  type WeightPresetKey,
+} from "@/lib/icp-profile-config-editing";
 import type { ConfigValidationIssue } from "@/lib/icp-profile-config-validation";
+import {
+  describeWeightedRuleSentence,
+  describeEligibilityRuleSentence,
+  ruleSharePercent,
+  type ScoredDimension,
+  type EligibilityRuleKind,
+} from "@/lib/icp-profile-business-summary";
 
 // ---------------------------------------------------------------------
 // Generic add/duplicate/reorder/remove list wrapper, shared by every
@@ -179,17 +202,87 @@ function RuleIssueList({ issues }: { issues: ConfigValidationIssue[] }) {
   );
 }
 
+// ─── Weight editor: business-friendly presets, with an Advanced numeric
+// escape hatch. The select's displayed value is always derived from
+// `points` (never a separate source of truth) so it can never silently
+// diverge from what's actually saved — an existing arbitrary value that
+// doesn't match a preset is presented as "Advanced" and its exact number
+// is shown, untouched, until the author explicitly picks something else.
+// ─────────────────────────────────────────────────────────────────────
+type WeightMode = WeightPresetKey | "advanced";
+
+function WeightEditor({
+  points,
+  onChange,
+}: {
+  points: number;
+  onChange: (points: number) => void;
+}) {
+  // Only overrides the derived mode while the author is actively viewing
+  // the numeric field for a value that WOULD otherwise match a preset —
+  // e.g. after typing a preset's exact number by hand. Never itself the
+  // source of truth for what gets saved.
+  const [advancedOverride, setAdvancedOverride] = useState(false);
+  const derivedPreset = weightPresetForPoints(points);
+  const mode: WeightMode = advancedOverride || !derivedPreset ? "advanced" : derivedPreset;
+
+  function handleModeChange(next: WeightMode) {
+    if (next === "advanced") {
+      setAdvancedOverride(true);
+      return;
+    }
+    setAdvancedOverride(false);
+    onChange(WEIGHT_PRESET_VALUES[next]);
+  }
+
+  return (
+    <div className="w-40 shrink-0 space-y-1.5">
+      <Label className="text-xs text-muted-foreground">Weight</Label>
+      <Select value={mode} onValueChange={(v) => handleModeChange(v as WeightMode)}>
+        <SelectTrigger className="h-8 text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {WEIGHT_PRESET_ORDER.map((key) => (
+            <SelectItem key={key} value={key}>
+              {WEIGHT_PRESET_LABELS[key]} ({WEIGHT_PRESET_VALUES[key]} pts)
+            </SelectItem>
+          ))}
+          <SelectItem value="advanced">Advanced (exact points)</SelectItem>
+        </SelectContent>
+      </Select>
+      {mode === "advanced" && (
+        <Input
+          type="number"
+          min={0}
+          value={points}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="h-8 text-sm"
+          aria-label="Exact points"
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Weighted rule row (fit / intent / actionability) ────────────────────────
 export function WeightedRuleRow({
   rule,
   allowlist,
+  dimension,
+  totalPoints,
   actions,
 }: {
   rule: WeightedRule;
   allowlist: FieldAllowlist;
+  /** Which scored dimension this rule belongs to — drives the "Award N <dimension> points…" sentence and the weight preset labels. */
+  dimension: ScoredDimension;
+  /** Sum of every rule's points currently configured in this dimension — used only to show this rule's share of the total, never to change what's saved. */
+  totalPoints: number;
   actions: RuleRowActions;
 }) {
   const onChange = actions.onChange as (next: WeightedRule) => void;
+  const share = ruleSharePercent(rule.points, totalPoints);
   return (
     <Card className="border-border bg-card">
       <CardContent className="p-3 space-y-2.5">
@@ -203,20 +296,21 @@ export function WeightedRuleRow({
               className="h-8 text-sm"
             />
           </div>
-          <div className="w-24 shrink-0 space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Points</Label>
-            <Input
-              type="number"
-              min={0}
-              value={rule.points}
-              onChange={(e) => onChange({ ...rule, points: Number(e.target.value) })}
-              className="h-8 text-sm"
-            />
-          </div>
+          <WeightEditor
+            points={rule.points}
+            onChange={(points) => onChange({ ...rule, points })}
+          />
           <div className="pt-5">
             <RuleRowActionButtons {...actions} />
           </div>
         </div>
+
+        {share !== null && (
+          <p className="text-[11px] text-muted-foreground/70">
+            {rule.points} of {totalPoints} configured {dimension} points ({share}% of this
+            dimension&apos;s current total) — a weight, not a score out of 100.
+          </p>
+        )}
 
         <ConditionEditor
           condition={rule.condition}
@@ -224,6 +318,10 @@ export function WeightedRuleRow({
           depth={1}
           onChange={(condition) => onChange({ ...rule, condition })}
         />
+
+        <p className="text-[11px] text-muted-foreground/70 italic">
+          {describeWeightedRuleSentence(dimension, rule)}
+        </p>
 
         <RuleIssueList issues={actions.issues} />
 
@@ -239,10 +337,13 @@ export function WeightedRuleRow({
 export function ConditionRuleRow({
   rule,
   allowlist,
+  kind,
   actions,
 }: {
   rule: ConditionRule;
   allowlist: FieldAllowlist;
+  /** Whether this row is a hard disqualifier or a restriction — drives the "Disqualify outright…"/"Restrict outreach…" sentence. */
+  kind: EligibilityRuleKind;
   actions: RuleRowActions;
 }) {
   const onChange = actions.onChange as (next: ConditionRule) => void;
@@ -270,6 +371,10 @@ export function ConditionRuleRow({
           depth={1}
           onChange={(condition) => onChange({ ...rule, condition })}
         />
+
+        <p className="text-[11px] text-muted-foreground/70 italic">
+          {describeEligibilityRuleSentence(kind, rule)}
+        </p>
 
         <RuleIssueList issues={actions.issues} />
 

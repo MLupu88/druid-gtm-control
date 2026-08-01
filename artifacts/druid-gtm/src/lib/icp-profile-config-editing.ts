@@ -55,16 +55,66 @@ export function generateRuleId(prefix: RuleIdPrefix = "rule"): string {
 // schema's own required floor tier). No rules are invented; a new
 // profile starts with nothing scored and nothing disqualified until the
 // author adds real criteria.
+//
+// The required minScore-0 tier's `code` is the one thing that must have
+// SOME value (RuleIdSchema-shaped identifiers can't be blank), so it is
+// given an honest, dimension-specific label describing what it actually
+// means — "no rule has matched yet" — rather than an arbitrary word like
+// "base"/"floor"/"unscored" that carries no meaning to a non-technical
+// author. Tier `code` must be lowercase snake_case (see TierCodeSchema);
+// every display surface (icp-tier-editor.tsx, icp-preview-presentation.ts)
+// humanizes it (e.g. "not_yet_qualified" -> "Not Yet Qualified") rather
+// than showing the raw code as prose.
 // ---------------------------------------------------------------------
 
 export function buildStarterProfileConfig(): IcpProfileConfigV1 {
   return {
     configSchemaVersion: "v1",
-    fit: { rules: [], tiers: [{ code: "unscored", minScore: 0 }] },
-    intent: { rules: [], tiers: [{ code: "unscored", minScore: 0 }] },
+    fit: { rules: [], tiers: [{ code: "not_yet_qualified", minScore: 0 }] },
+    intent: { rules: [], tiers: [{ code: "no_observed_intent", minScore: 0 }] },
     actionability: { rules: [] },
     eligibility: { hardDisqualifiers: [], restrictions: [] },
   };
+}
+
+// ---------------------------------------------------------------------
+// Business-friendly weight presets. A rule's `points` field is a plain
+// number with no fixed scale (see profileConfig.ts) — most authors don't
+// need to pick an arbitrary integer, they need to say how much a
+// criterion matters. These three documented values are the only thing a
+// "preset" ever means; picking one always sets `points` to exactly this
+// number, deterministically. An existing rule whose points value doesn't
+// match any of these three is presented as "Advanced" (see
+// ../components/icp-rule-list-section.tsx) — its value is never silently
+// snapped to the nearest preset.
+// ---------------------------------------------------------------------
+
+export const WEIGHT_PRESET_VALUES = {
+  supporting: 5,
+  important: 15,
+  critical: 30,
+} as const;
+
+export type WeightPresetKey = keyof typeof WEIGHT_PRESET_VALUES;
+
+export const WEIGHT_PRESET_ORDER: WeightPresetKey[] = [
+  "supporting",
+  "important",
+  "critical",
+];
+
+export const WEIGHT_PRESET_LABELS: Record<WeightPresetKey, string> = {
+  supporting: "Supporting",
+  important: "Important",
+  critical: "Critical",
+};
+
+/** Returns the preset key whose documented value exactly matches `points`, or null when it doesn't match any preset (i.e. an "Advanced"/custom value). */
+export function weightPresetForPoints(points: number): WeightPresetKey | null {
+  for (const key of WEIGHT_PRESET_ORDER) {
+    if (WEIGHT_PRESET_VALUES[key] === points) return key;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------
