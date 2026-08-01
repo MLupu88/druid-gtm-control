@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Info } from "lucide-react";
+import { AlertCircle, CheckCircle2, Info } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Empty,
   EmptyHeader,
@@ -28,6 +35,7 @@ import {
 } from "@/components/ui/accordion";
 import { TechnicalDetails } from "@/components/technical-details";
 import { accountDetailQueryKey, type AccountEvaluation } from "@/lib/accounts-api";
+import { accountDecisionsQueryKey } from "@/lib/account-decisions-api";
 import {
   fetchIcpProfiles,
   icpProfilesListQueryKey,
@@ -35,6 +43,7 @@ import {
 } from "@/lib/icp-profiles-api";
 import {
   runAccountIcpPreview,
+  runAccountIcpOfficialEvaluation,
   AccountIcpEvaluationApiError,
 } from "@/lib/account-icp-evaluations-api";
 import {
@@ -457,6 +466,165 @@ function PreviewResult({
 }
 
 // ---------------------------------------------------------------------
+// Official (production) evaluation — runs and saves a fresh server-side
+// evaluation, distinct from the preview above. Never submits the
+// currently-displayed preview result; the mutation always calls
+// runAccountIcpOfficialEvaluation(accountId, profileId), which sends
+// nothing but a profileId (see ../lib/account-icp-evaluations-api.ts).
+// ---------------------------------------------------------------------
+
+function OfficialEvaluationErrorState({ error }: { error: unknown }) {
+  if (error instanceof AccountIcpEvaluationApiError) {
+    if (error.code === "no_active_profile_version") {
+      return (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Profile isn&apos;t published yet</AlertTitle>
+          <AlertDescription>
+            This ICP profile has no active, published version, so an official
+            evaluation can&apos;t be saved yet. Publish and activate a version
+            first, then try again.
+          </AlertDescription>
+        </Alert>
+      );
+    }
+    if (error.code === "account_not_found" || error.code === "profile_not_found") {
+      return (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Save failed</AlertTitle>
+          <AlertDescription>
+            This account or ICP profile could no longer be found. Refresh the
+            page and try again.
+          </AlertDescription>
+        </Alert>
+      );
+    }
+  }
+  const message =
+    error instanceof Error ? error.message : "Could not run and save the official evaluation.";
+  return (
+    <Alert variant="destructive">
+      <AlertCircle className="h-4 w-4" />
+      <AlertTitle>Save failed</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
+  );
+}
+
+// The evaluation ID appears only in TechnicalDetails, consistent with
+// this file's existing convention of never showing raw internal
+// identifiers as primary text — see describeProfileVersion's own
+// shortId() fallback above.
+function OfficialEvaluationResult({
+  evaluation,
+  profile,
+  hasComparablePreview,
+}: {
+  evaluation: AccountEvaluation;
+  profile: IcpProfileListItem | undefined;
+  /** True when a preview for this exact same profile is also currently displayed, so the "may differ" note is truthful, not a generic disclaimer. */
+  hasComparablePreview: boolean;
+}) {
+  return (
+    <div className="space-y-4 pt-1">
+      <div className="space-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />
+          <p className="text-sm font-medium text-foreground">
+            Saved as the official evaluation against {profile?.name ?? "this profile"}
+          </p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {describeProfileVersion(evaluation, profile)} · {formatDateTime(evaluation.createdAt)}
+        </p>
+        <p className="text-[11px] text-primary/80">
+          This is now recorded in the account&apos;s evaluation history.
+        </p>
+        {hasComparablePreview && (
+          <p className="text-[11px] text-muted-foreground/70">
+            This may differ from the preview above — an official evaluation always
+            uses the profile&apos;s active published version and the account&apos;s
+            current data, never a draft.
+          </p>
+        )}
+      </div>
+
+      {evaluation.status === "failed" ? (
+        <FailedEvaluationState evaluation={evaluation} />
+      ) : (
+        <CompletedEvaluationDetails evaluation={evaluation} />
+      )}
+
+      <TechnicalDetails summary="Evaluation record">
+        <p className="font-mono text-[11px] text-muted-foreground/80">
+          Evaluation ID: {evaluation.id}
+        </p>
+      </TechnicalDetails>
+    </div>
+  );
+}
+
+function ConfirmOfficialEvaluationDialog({
+  open,
+  onOpenChange,
+  profileName,
+  onConfirm,
+  isPending,
+  error,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  profileName: string;
+  onConfirm: () => void;
+  isPending: boolean;
+  error: unknown;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(next) => !isPending && onOpenChange(next)}>
+      <DialogContent className="max-w-md rounded-2xl border border-border bg-background">
+        <DialogHeader className="border-b border-border pb-4">
+          <DialogTitle className="text-base font-semibold font-display">
+            Run and save official evaluation?
+          </DialogTitle>
+        </DialogHeader>
+        <div className="py-4 space-y-3 text-sm text-foreground leading-relaxed">
+          <p>
+            This runs a brand new evaluation on the server right now, against{" "}
+            <span className="font-medium">{profileName}</span>&apos;s currently active,
+            published version and the account&apos;s current canonical data.
+          </p>
+          <p className="text-muted-foreground">
+            The result is saved permanently to this account&apos;s evaluation history.
+            If you&apos;ve run a preview, this official result may differ from it —
+            previews can use a draft version of the profile; this always uses the
+            active published version.
+          </p>
+          {error !== null && <OfficialEvaluationErrorState error={error} />}
+        </div>
+        <DialogFooter className="border-t border-border pt-4 gap-2">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isPending}
+            className="flex-1"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={isPending}
+            className="flex-1 bg-primary text-primary-foreground hover:bg-[#00c853] shadow-lg shadow-primary/20"
+          >
+            {isPending ? "Running…" : "Run and save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------
 
@@ -464,6 +632,7 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
   const { accountId } = props;
   const queryClient = useQueryClient();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [officialConfirmOpen, setOfficialConfirmOpen] = useState(false);
 
   const profilesQ = useQuery({
     queryKey: icpProfilesListQueryKey(),
@@ -478,6 +647,23 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
     },
   });
 
+  // Always runs a fresh server-side evaluation and persists it — never
+  // submits previewMutation.data. On success: account detail (which the
+  // "Latest completed production evaluation" card and the evaluation
+  // history list both read) and decision history are invalidated so
+  // Promote to MQL / Keep for review become available from the newly
+  // persisted evaluation, driven entirely by the refetched data — never
+  // unlocked optimistically from this mutation's own response.
+  const officialMutation = useMutation({
+    mutationFn: (profileId: string) => runAccountIcpOfficialEvaluation(accountId, profileId),
+    retry: false,
+    onSuccess: () => {
+      setOfficialConfirmOpen(false);
+      void queryClient.invalidateQueries({ queryKey: accountDetailQueryKey(accountId) });
+      void queryClient.invalidateQueries({ queryKey: accountDecisionsQueryKey(accountId) });
+    },
+  });
+
   const profiles = profilesQ.data ?? [];
   // The result must stay pinned to the profile actually used for that
   // specific mutation call (its variables), never to whatever the
@@ -486,6 +672,9 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
   const resultProfile = previewMutation.variables
     ? profiles.find((profile) => profile.id === previewMutation.variables)
     : undefined;
+  const officialResultProfile = officialMutation.variables
+    ? profiles.find((profile) => profile.id === officialMutation.variables)
+    : undefined;
 
   function handleRunPreview() {
     if (!selectedProfileId) return;
@@ -493,6 +682,41 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
   }
 
   const canRun = !!selectedProfileId && !previewMutation.isPending;
+
+  // Eligibility is derived from the SAME profiles list already loaded
+  // for the dropdown above (IcpProfileListItem.activeVersion — see
+  // ../lib/icp-profiles-api.ts), not guessed: an official evaluation
+  // requires the profile's active PUBLISHED version, exactly what
+  // resolveProfileVersionForEvaluation's "production" branch enforces
+  // server-side. "Missing canonical account" / "identity not resolved"
+  // are NOT real preconditions the backend enforces — the evaluator runs
+  // successfully even for an anonymous account, so they are deliberately
+  // not modeled here as disabled-state reasons.
+  const selectedProfile = selectedProfileId
+    ? profiles.find((profile) => profile.id === selectedProfileId)
+    : undefined;
+  const officialDisabledReason = !selectedProfileId
+    ? "Choose an ICP profile first."
+    : !selectedProfile?.activeVersion
+      ? "This profile has no active, published version yet."
+      : officialMutation.isPending
+        ? "An official evaluation is already running for this account."
+        : null;
+  const canRunOfficial = officialDisabledReason === null;
+
+  function handleConfirmOfficial() {
+    if (!selectedProfileId) return;
+    officialMutation.mutate(selectedProfileId);
+  }
+
+  // The "may differ from preview" note is only truthful when the
+  // currently displayed preview and the currently displayed official
+  // result were run against the exact same profile — never inferred
+  // from whatever the dropdown happens to show now.
+  const hasComparablePreview =
+    !!previewMutation.data &&
+    previewMutation.variables !== undefined &&
+    previewMutation.variables === officialMutation.variables;
 
   return (
     <Card className="border-border bg-card">
@@ -580,6 +804,53 @@ export function AccountIcpPreviewPanel(props: AccountIcpPreviewPanelProps) {
               <p className="text-sm text-muted-foreground py-2">
                 Choose an ICP profile and run a test to see how this account fits.
               </p>
+            )}
+
+            <div className="border-t border-border pt-5 space-y-3">
+              <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-foreground">Official evaluation</h3>
+                <p className="text-xs text-muted-foreground">
+                  Runs a fresh evaluation on the server and saves it to this account&apos;s
+                  evaluation history — separate from the preview above.
+                </p>
+              </div>
+
+              <div className="flex flex-col items-start gap-1.5">
+                <Button
+                  variant="outline"
+                  onClick={() => setOfficialConfirmOpen(true)}
+                  disabled={!canRunOfficial}
+                >
+                  Run and save official evaluation
+                </Button>
+                {officialDisabledReason && (
+                  <p className="text-[11px] text-muted-foreground">{officialDisabledReason}</p>
+                )}
+              </div>
+
+              {officialMutation.isError ? (
+                <OfficialEvaluationErrorState error={officialMutation.error} />
+              ) : (
+                officialMutation.isSuccess &&
+                officialMutation.data && (
+                  <OfficialEvaluationResult
+                    evaluation={officialMutation.data}
+                    profile={officialResultProfile}
+                    hasComparablePreview={hasComparablePreview}
+                  />
+                )
+              )}
+            </div>
+
+            {selectedProfile && (
+              <ConfirmOfficialEvaluationDialog
+                open={officialConfirmOpen}
+                onOpenChange={setOfficialConfirmOpen}
+                profileName={selectedProfile.name}
+                onConfirm={handleConfirmOfficial}
+                isPending={officialMutation.isPending}
+                error={officialMutation.isError ? officialMutation.error : null}
+              />
             )}
           </>
         )}

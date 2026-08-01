@@ -1,12 +1,14 @@
-// Integration tests for the account-level ICP preview orchestration,
-// exercised end-to-end against a real, migrated Postgres instance: real
-// db, real resolvers (./icpEvaluationResolvers.ts), real
-// @workspace/evaluator-persistence, and the real integrity triggers/
-// constraints from lib/db/drizzle/0001_integrity_triggers.sql — no fakes
-// anywhere in this file. Tests runPreviewIcpEvaluationForAccount()
-// directly, not through HTTP — the route boundary (validation, error-code
-// mapping, response serialization, and the "evaluationMode can never be
-// smuggled in" guarantee) is already covered by
+// Integration tests for the account-level ICP preview AND official
+// (production) evaluation orchestration, exercised end-to-end against a
+// real, migrated Postgres instance: real db, real resolvers
+// (./icpEvaluationResolvers.ts), real @workspace/evaluator-persistence,
+// and the real integrity triggers/constraints from
+// lib/db/drizzle/0001_integrity_triggers.sql — no fakes anywhere in this
+// file. Tests runPreviewIcpEvaluationForAccount() and
+// runOfficialIcpEvaluationForAccount() directly, not through HTTP — the
+// route boundary (validation, error-code mapping, response
+// serialization, and the "evaluationMode can never be smuggled in"
+// guarantee) is already covered by
 // ../routes/accountIcpEvaluations.route.test.ts using injected fakes; this
 // file's job is proving the real orchestration composes correctly.
 //
@@ -33,9 +35,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
 import { activateVersion } from "./icpProfiles.js";
-import { runPreviewIcpEvaluationForAccount } from "./accountEvaluations.js";
+import {
+  runPreviewIcpEvaluationForAccount,
+  runOfficialIcpEvaluationForAccount,
+} from "./accountEvaluations.js";
 import {
   CURRENT_STATE_SNAPSHOT_SOURCE,
+  NoActiveProfileVersionError,
   NoResolvablePreviewVersionError,
 } from "./icpEvaluationResolvers.js";
 
@@ -338,6 +344,165 @@ test(
       .limit(1);
     assert.ok(snapshotRow, "snapshot row must exist");
     assert.equal(snapshotRow.accountId, account.id);
+  },
+);
+
+// ---------------------------------------------------------------------
+// runOfficialIcpEvaluationForAccount — the official (production)
+// counterpart to runPreviewIcpEvaluationForAccount above.
+// ---------------------------------------------------------------------
+
+test(
+  "official resolves the profile's active (published) version, never a draft, and produces a completed production evaluation",
+  { skip },
+  async () => {
+    const account = await makeAccount({
+      companyName: "Acme Rockets",
+      companyDomain: "acme-rockets.example",
+    });
+    const profile = await makeProfile("official-uses-active");
+    const activeVersion = await makeActiveVersion(
+      profile.id,
+      syntheticProfileConfig("active"),
+      1,
+    );
+    // A draft also exists — proves official ignores it, unlike preview.
+    const draftVersion = await makeDraftVersion(
+      profile.id,
+      syntheticProfileConfig("draft"),
+      2,
+    );
+
+    const evaluation = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+      createdBy: "operator-integration-test",
+    });
+
+    assert.equal(evaluation.status, "completed");
+    assert.equal(evaluation.evaluationMode, "production");
+    assert.equal(evaluation.profileVersionId, activeVersion.id);
+    assert.notEqual(evaluation.profileVersionId, draftVersion.id);
+    assert.equal(evaluation.createdBy, "operator-integration-test");
+
+    // Persisted for real, through the canonical repository — not
+    // simulated with in-memory/frontend state, and never the same row a
+    // preview would have produced (a fresh snapshot every call).
+    const [evaluationRow] = await db!
+      .select()
+      .from(schema.accountEvaluations)
+      .where(eq(schema.accountEvaluations.id, evaluation.id))
+      .limit(1);
+    assert.ok(evaluationRow, "evaluation row must exist");
+    assert.equal(evaluationRow.evaluationMode, "production");
+
+    const [snapshotRow] = await db!
+      .select()
+      .from(schema.accountSnapshots)
+      .where(eq(schema.accountSnapshots.id, evaluation.snapshotId))
+      .limit(1);
+    assert.ok(snapshotRow, "snapshot row must exist");
+    assert.equal(snapshotRow.accountId, account.id);
+  },
+);
+
+test(
+  "official against a profile with only a draft (no active/published version) is rejected and creates no snapshot or evaluation",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const profile = await makeProfile("official-no-active");
+    // A draft exists — enough for preview, but not for an official evaluation.
+    await makeDraftVersion(profile.id);
+
+    const snapshotsBefore = await countSnapshotsForAccount(account.id);
+    const evaluationsBefore = await countEvaluationsForAccount(account.id);
+
+    await assert.rejects(
+      runOfficialIcpEvaluationForAccount({
+        db: db!,
+        accountId: account.id,
+        profileId: profile.id,
+      }),
+      NoActiveProfileVersionError,
+    );
+
+    assert.equal(await countSnapshotsForAccount(account.id), snapshotsBefore);
+    assert.equal(
+      await countEvaluationsForAccount(account.id),
+      evaluationsBefore,
+    );
+  },
+);
+
+test(
+  "official defaults createdBy to null when omitted, exactly like createAccountEvaluation's own default",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const profile = await makeProfile("official-default-created-by");
+    await makeActiveVersion(profile.id);
+
+    const evaluation = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+
+    assert.equal(evaluation.createdBy, null);
+  },
+);
+
+test(
+  "a malformed stored profile config produces a persisted failed official evaluation, not a thrown error",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const profile = await makeProfile("official-malformed-config");
+    const malformedConfig = {
+      malformed: true,
+      note: "not a real profile config",
+    };
+    await makeActiveVersion(profile.id, malformedConfig);
+
+    const evaluation = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+
+    assert.equal(evaluation.status, "failed");
+    assert.equal(evaluation.evaluationMode, "production");
+    assert.ok(
+      evaluation.errorDetail && evaluation.errorDetail.length > 0,
+      "errorDetail must be non-empty",
+    );
+    assert.match(evaluation.errorDetail!, /IcpProfileConfigV1/);
+  },
+);
+
+test(
+  "calling official twice for the same account+profile creates two independent evaluation rows — no idempotency/dedup, matching this endpoint's own minimal scope",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const profile = await makeProfile("official-no-idempotency");
+    await makeActiveVersion(profile.id);
+
+    const first = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+    const second = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+
+    assert.notEqual(first.id, second.id);
+    assert.equal(await countEvaluationsForAccount(account.id), 2);
   },
 );
 
