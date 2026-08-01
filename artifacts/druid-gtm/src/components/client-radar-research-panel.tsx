@@ -15,6 +15,8 @@ import {
   type ClientRadarAccountPayload,
   type ClientRadarEvidenceItem,
 } from "@/lib/client-radar-research-api";
+import { describeClientRadarFailure } from "@/lib/client-radar-error-presentation";
+import { TechnicalDetails } from "@/components/technical-details";
 
 // Two-column "findings" fields (short values) vs full-width "narrative"
 // fields (longer free text) — mirrors account-detail.tsx's own split
@@ -214,6 +216,39 @@ function AccountFindings({ payload }: { payload: ClientRadarAccountPayload }) {
   );
 }
 
+function FailedOrCancelledResult({
+  run,
+  onRetry,
+  retryPending,
+}: {
+  run: ClientRadarResearchRun;
+  onRetry: () => void;
+  retryPending: boolean;
+}) {
+  const failure = describeClientRadarFailure(
+    run.lastError,
+    run.status as "failed" | "cancelled",
+  );
+  return (
+    <div className="space-y-2">
+      <p className="text-sm text-red-300/90 leading-relaxed">{failure.primary}</p>
+      {failure.technical && (
+        <TechnicalDetails>
+          <p className="font-mono text-[11px] text-muted-foreground/80">{failure.technical}</p>
+        </TechnicalDetails>
+      )}
+      <Button onClick={onRetry} disabled={retryPending}>
+        {retryPending ? "Starting research…" : "Retry research"}
+      </Button>
+      <p className="text-[11px] text-muted-foreground/60">
+        {run.status === "failed"
+          ? run.failedAt && `Failed ${formatDateTime(run.failedAt)}`
+          : `Updated ${formatDateTime(run.updatedAt)}`}
+      </p>
+    </div>
+  );
+}
+
 function CompletedResult({ run }: { run: ClientRadarResearchRun }) {
   return (
     <div className="space-y-5">
@@ -380,22 +415,11 @@ export function ClientRadarResearchPanel({ accountId }: { accountId: string }) {
         )}
 
         {run && (run.status === "failed" || run.status === "cancelled") && (
-          <div className="space-y-2">
-            <p className="text-sm text-red-300/90 leading-relaxed">
-              {run.lastError ??
-                (run.status === "failed"
-                  ? "Client Radar could not complete this research run, and no error message was recorded."
-                  : "This research run was cancelled.")}
-            </p>
-            <Button onClick={() => startMutation.mutate()} disabled={startMutation.isPending}>
-              {startMutation.isPending ? "Starting research…" : "Retry research"}
-            </Button>
-            <p className="text-[11px] text-muted-foreground/60">
-              {run.status === "failed"
-                ? run.failedAt && `Failed ${formatDateTime(run.failedAt)}`
-                : `Updated ${formatDateTime(run.updatedAt)}`}
-            </p>
-          </div>
+          <FailedOrCancelledResult
+            run={run}
+            onRetry={() => startMutation.mutate()}
+            retryPending={startMutation.isPending}
+          />
         )}
 
         {run && run.status === "completed" && <CompletedResult run={run} />}

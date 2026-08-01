@@ -103,8 +103,7 @@ export function DecisionControls({
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Decisions can be recorded once this account has a completed production
-            evaluation.
+            A decision can be recorded after this account has a saved ICP evaluation.
           </p>
         </CardContent>
       </Card>
