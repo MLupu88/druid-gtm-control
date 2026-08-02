@@ -22,6 +22,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "@workspace/db/schema";
+import type { ClientRadarResearchRun } from "@workspace/db/schema";
 import {
   startClientRadarResearch,
   getLatestClientRadarResearchRun,
@@ -31,6 +32,20 @@ import {
   ActiveResearchRunExistsError,
   ResearchRunNotFoundError,
 } from "../services/clientRadarResearchRuns.js";
+import { classifyClientRadarFailureReason } from "../lib/clientRadarClient.js";
+
+// HTTP-contract-only addition: every research run this route returns is
+// annotated with a computed (never persisted — no migration) failureReason,
+// so the frontend can distinguish "Client Radar isn't configured in this
+// environment" from a genuine runtime/request failure via a stable typed
+// field instead of pattern-matching lastError text itself. See
+// ../lib/clientRadarClient.ts's classifyClientRadarFailureReason.
+function serializeResearchRun(run: ClientRadarResearchRun) {
+  return {
+    ...run,
+    failureReason: classifyClientRadarFailureReason(run.status, run.lastError),
+  };
+}
 
 const AccountIdParamsSchema = z.object({ accountId: z.string().uuid() }).strict();
 const ResearchRunIdParamsSchema = z
@@ -146,7 +161,7 @@ export function createClientRadarResearchRunsRouter(
         const researchRun = await startClientRadarResearchFn({
           accountId: parsed.data.accountId,
         });
-        res.status(201).json({ researchRun });
+        res.status(201).json({ researchRun: serializeResearchRun(researchRun) });
       } catch (err) {
         if (err instanceof AccountNotFoundError) {
           sendError(res, 404, "account_not_found", err.message);
@@ -160,7 +175,7 @@ export function createClientRadarResearchRunsRouter(
           res.status(409).json({
             error: err.message,
             code: "active_research_run_exists",
-            existingRun: err.existingRun,
+            existingRun: serializeResearchRun(err.existingRun),
           });
           return;
         }
@@ -191,7 +206,9 @@ export function createClientRadarResearchRunsRouter(
         const researchRun = await getLatestClientRadarResearchRunFn(
           parsed.data.accountId,
         );
-        res.status(200).json({ researchRun: researchRun ?? null });
+        res
+          .status(200)
+          .json({ researchRun: researchRun ? serializeResearchRun(researchRun) : null });
       } catch (err) {
         req.log?.error(
           { err },
@@ -224,7 +241,7 @@ export function createClientRadarResearchRunsRouter(
         const researchRun = await refreshClientRadarResearchRunFn(
           parsed.data.researchRunId,
         );
-        res.status(200).json({ researchRun });
+        res.status(200).json({ researchRun: serializeResearchRun(researchRun) });
       } catch (err) {
         if (err instanceof ResearchRunNotFoundError) {
           sendError(res, 404, "research_run_not_found", err.message);

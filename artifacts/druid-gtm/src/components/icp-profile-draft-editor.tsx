@@ -36,8 +36,22 @@ import { TierEditor } from "@/components/icp-tier-editor";
 import { IcpProfileSummaryCard } from "@/components/icp-profile-summary-card";
 import { PublishDraftAction } from "@/components/icp-profile-lifecycle-actions";
 import type { IcpProfileConfigV1, WeightedRule, ConditionRule } from "@workspace/evaluator";
-import { MAX_RULES_PER_DIMENSION } from "@workspace/evaluator";
-import { sumRulePoints } from "@/lib/icp-profile-business-summary";
+import { MAX_RULES_PER_DIMENSION, isSimpleFitRule, isSimpleIntentRule } from "@workspace/evaluator";
+import {
+  sumRulePoints,
+  describeWeightedRuleSentence,
+  describeEligibilityRuleSentence,
+} from "@/lib/icp-profile-business-summary";
+import {
+  BusinessRuleListSection,
+  AdvancedCriteriaList,
+} from "@/components/icp-business-rule-list-section";
+import { FitBusinessRuleRow, IntentBusinessRuleRow } from "@/components/icp-business-rule-rows";
+import {
+  newSimpleFitRule,
+  newSimpleIntentRule,
+  duplicateSimpleRule,
+} from "@/lib/icp-business-rule-editing";
 
 // The complete Draft editor for an ICP profile. Always holds and submits
 // the FULL IcpProfileConfigV1 object (updateDraft is a full-replacement
@@ -247,7 +261,113 @@ export function IcpProfileDraftEditor({
           </div>
         </section>
 
-        <Accordion type="multiple" defaultValue={["fit", "intent", "actionability", "eligibility"]}>
+        <Accordion type="multiple" defaultValue={["target-company", "buying-signals"]}>
+          {/* Target company — business editing for simple fit rules; anything advanced (compound conditions, custom points) shows as a read-only Advanced criterion here, editable only in Technical configuration below. */}
+          <AccordionItem value="target-company">
+            <AccordionTrigger className="text-sm font-semibold py-2">Target company</AccordionTrigger>
+            <AccordionContent className="pt-1">
+              <BusinessRuleListSection<WeightedRule>
+                title="Target company criteria"
+                description="Plain-language criteria that describe a good-fit company."
+                allRules={config.fit.rules}
+                isSimple={isSimpleFitRule}
+                onChange={(rules) => setConfig({ ...config, fit: { ...config.fit, rules } })}
+                onCreateSimple={newSimpleFitRule}
+                duplicateRule={duplicateSimpleRule}
+                maxRules={MAX_RULES_PER_DIMENSION}
+                emptyMessage="No target company criteria configured yet."
+                describeAdvanced={(rule) => describeWeightedRuleSentence("fit", rule)}
+                renderSimpleRow={(rule, actions) => (
+                  <FitBusinessRuleRow key={rule.id} rule={rule} actions={actions} />
+                )}
+              />
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* Buying signals — business editing for the specific supported intent shapes; engagement.lastSeenAt and any compound/custom-point rule stay Technical-only. */}
+          <AccordionItem value="buying-signals">
+            <AccordionTrigger className="text-sm font-semibold py-2">Buying signals</AccordionTrigger>
+            <AccordionContent className="pt-1">
+              <BusinessRuleListSection<WeightedRule>
+                title="Buying-intent signals"
+                description="Plain-language engagement signals that suggest active buying interest."
+                allRules={config.intent.rules}
+                isSimple={isSimpleIntentRule}
+                onChange={(rules) => setConfig({ ...config, intent: { ...config.intent, rules } })}
+                onCreateSimple={newSimpleIntentRule}
+                duplicateRule={duplicateSimpleRule}
+                maxRules={MAX_RULES_PER_DIMENSION}
+                emptyMessage='No buying-intent signals configured yet — every account will show "Intent not configured" rather than a real evaluated signal.'
+                describeAdvanced={(rule) => describeWeightedRuleSentence("intent", rule)}
+                renderSimpleRow={(rule, actions) => (
+                  <IntentBusinessRuleRow key={rule.id} rule={rule} actions={actions} />
+                )}
+              />
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* Qualification and outreach policy — collapsed by default. Actionability and eligibility have no supported business-simple shape yet (see @workspace/evaluator's isSimpleActionabilityRule/isSimpleEligibilityRule), so every configured rule here is shown as a read-only Advanced criterion; editing happens only in Technical configuration below. */}
+          <AccordionItem value="qualification-outreach">
+            <AccordionTrigger className="text-sm font-semibold py-2">
+              Qualification and outreach policy
+            </AccordionTrigger>
+            <AccordionContent className="space-y-5 pt-1">
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-foreground">Ability to act</h4>
+                <p className="text-xs text-muted-foreground">
+                  Whether there&apos;s enough contact or CRM information to actually follow up.
+                </p>
+                {config.actionability.rules.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    No actionability criteria configured yet.
+                  </p>
+                ) : (
+                  <AdvancedCriteriaList
+                    rules={config.actionability.rules}
+                    describeRule={(rule) => describeWeightedRuleSentence("actionability", rule)}
+                    note="edit these in Technical configuration below"
+                  />
+                )}
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-foreground">Outreach eligibility</h4>
+                <p className="text-xs text-muted-foreground">
+                  What disqualifies an account outright, or restricts outreach to it.
+                </p>
+                {config.eligibility.hardDisqualifiers.length === 0 &&
+                config.eligibility.restrictions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">
+                    No hard disqualifiers or restrictions configured yet.
+                  </p>
+                ) : (
+                  <>
+                    {config.eligibility.hardDisqualifiers.length > 0 && (
+                      <AdvancedCriteriaList
+                        rules={config.eligibility.hardDisqualifiers}
+                        describeRule={(rule) => describeEligibilityRuleSentence("hardDisqualifier", rule)}
+                        note="edit these in Technical configuration below"
+                      />
+                    )}
+                    {config.eligibility.restrictions.length > 0 && (
+                      <AdvancedCriteriaList
+                        rules={config.eligibility.restrictions}
+                        describeRule={(rule) => describeEligibilityRuleSentence("restriction", rule)}
+                        note="edit these in Technical configuration below"
+                      />
+                    )}
+                  </>
+                )}
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* Technical configuration — collapsed by default. Full rule/tier authoring, unchanged from the pre-business-first editor: every dimension, every rule (simple and advanced alike), points, tiers, and the raw condition-tree editor. Both this and the business sections above operate on the exact same `config` state, so an edit made here is immediately reflected in the business sections' classification above. */}
+          <AccordionItem value="technical-configuration">
+            <AccordionTrigger className="text-sm font-semibold py-2">
+              Technical configuration
+            </AccordionTrigger>
+            <AccordionContent className="pt-1">
+              <Accordion type="multiple" defaultValue={["fit", "intent", "actionability", "eligibility"]}>
           {/* Company fit */}
           <AccordionItem value="fit">
             <AccordionTrigger className="text-sm font-semibold py-2">Company fit</AccordionTrigger>
@@ -420,6 +540,9 @@ export function IcpProfileDraftEditor({
               )}
             </AccordionContent>
           </AccordionItem>
+              </Accordion>
+            </AccordionContent>
+          </AccordionItem>
         </Accordion>
       </CardContent>
     </Card>
@@ -481,7 +604,11 @@ function SaveStatusLabel({ status, savedAt }: { status: SaveStatus; savedAt: Dat
       );
     case "unchanged":
     default:
-      return <p className="text-[11px] text-muted-foreground">No changes to save</p>;
+      // No separate text label — the Save button is already disabled for
+      // this exact state, so a redundant unchanged-state caption next
+      // to it would just repeat the same fact twice. The disabled button
+      // IS the clean/unchanged indicator.
+      return null;
   }
 }
 

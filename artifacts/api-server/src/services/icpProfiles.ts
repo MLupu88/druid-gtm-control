@@ -36,7 +36,13 @@ import {
 import type * as schema from "@workspace/db/schema";
 import {
   IcpProfileConfigV1Schema,
+  evaluatePublicationReadiness,
+  classifyProfileConfig,
+  targetCriteria as extractTargetCriteria,
   type IcpProfileConfigV1,
+  type NotReadyForPublishReason,
+  type ProfileClassification,
+  type TargetCriterion,
 } from "@workspace/evaluator";
 
 type Db = NodePgDatabase<typeof schema>;
@@ -103,6 +109,21 @@ export class InvalidProfileConfigError extends Error {
   }
 }
 
+// Raised by publishDraft() when the draft is schema-valid but not yet
+// ready to publish per business rules — distinct from
+// InvalidProfileConfigError (schema validity, checked earlier by
+// validateProfileConfig). The classification itself
+// (evaluatePublicationReadiness/NotReadyForPublishReason) lives in
+// @workspace/evaluator, not here, so the API server and the frontend's
+// own pre-publish readiness display can never disagree about what
+// "ready to publish" means.
+export class NotReadyForPublishError extends Error {
+  constructor(public readonly reasons: NotReadyForPublishReason[]) {
+    super("This draft is not ready to publish.");
+    this.name = "NotReadyForPublishError";
+  }
+}
+
 /** Throws InvalidProfileConfigError; otherwise returns the validated, canonical config. */
 export function validateProfileConfig(config: unknown): IcpProfileConfigV1 {
   const parsed = IcpProfileConfigV1Schema.safeParse(config);
@@ -137,6 +158,10 @@ export interface ProfileListItem {
   activeVersion: ProfileVersionSummary | null;
   draftVersion: ProfileVersionSummary | null;
   latestVersion: ProfileVersionSummary | null;
+  /** Derived from the active version's config — see @workspace/evaluator's classifyProfileConfig. "no_active_definition" whenever activeVersion is null. Never a stored column. */
+  classification: ProfileClassification;
+  /** Structured target-company criteria extracted from the active version's simple, directly supported fit rules — see @workspace/evaluator's targetCriteria. Never points, rule ids, thresholds, or compound-rule internals. Empty when there's no active version or no simple meaningful criteria configured yet. */
+  targetCriteria: TargetCriterion[];
 }
 
 export interface ProfileDetail {
@@ -178,6 +203,15 @@ export function buildProfileListItem(
     null,
   );
 
+  // Every version's config was already schema-validated when it was
+  // written (createProfile/updateDraft both call validateProfileConfig,
+  // and a published version is immutable thereafter) — re-validated here
+  // rather than cast, since a silent default would risk misclassifying
+  // corrupted or unexpected stored data instead of surfacing the problem.
+  const activeConfig: IcpProfileConfigV1 | null = active
+    ? validateProfileConfig(active.config)
+    : null;
+
   return {
     id: profile.id,
     name: profile.name,
@@ -188,6 +222,8 @@ export function buildProfileListItem(
     activeVersion: active ? toVersionSummary(active) : null,
     draftVersion: draft ? toVersionSummary(draft) : null,
     latestVersion: latest ? toVersionSummary(latest) : null,
+    classification: classifyProfileConfig(activeConfig),
+    targetCriteria: extractTargetCriteria(activeConfig),
   };
 }
 
@@ -446,6 +482,20 @@ export async function publishDraft(
       )
       .limit(1);
     if (!draft) throw new NoDraftVersionError(profileId);
+
+    // Schema-validity was already enforced when this draft's config was
+    // last written (createProfile/updateDraft both call
+    // validateProfileConfig), so this re-parse should always succeed —
+    // re-running it here (rather than trusting the stored jsonb blindly)
+    // is what lets evaluatePublicationReadiness receive a real, typed
+    // IcpProfileConfigV1 instead of `unknown`. No database migration and
+    // no evaluator-semantic change: this only decides whether publishing
+    // is ALLOWED, never what the config contains or how it's evaluated.
+    const validatedConfig = validateProfileConfig(draft.config);
+    const reasons = evaluatePublicationReadiness(validatedConfig);
+    if (reasons.length > 0) {
+      throw new NotReadyForPublishError(reasons);
+    }
 
     const [published] = await tx
       .update(icpProfileVersions)

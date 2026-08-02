@@ -52,6 +52,17 @@ test("configuration guidance warnings render only when they exist, never as a pe
   assert.ok(source.includes("warnings.length > 0"));
 });
 
+test("configuration guidance uses the shared semantic Alert primitive with accessible dual-tone amber text, not a hardcoded one-off faint color", () => {
+  const source = readSource();
+  const warningsBlock = source.slice(source.indexOf("{warnings.length > 0 && ("));
+  assert.ok(warningsBlock.includes("<Alert"));
+  assert.ok(warningsBlock.includes("<AlertTitle"));
+  assert.ok(warningsBlock.includes("<AlertDescription"));
+  assert.ok(warningsBlock.includes("dark:text-amber-300") || warningsBlock.includes("dark:text-amber-400"));
+  // The old bare, containerless, low-contrast-on-light text must be gone.
+  assert.ok(!warningsBlock.includes("text-amber-300/90\""));
+});
+
 test("explains the three weight presets and their documented numeric values, derived from the shared constants — never hand-duplicated", () => {
   const source = readSource();
   assert.ok(source.includes("WEIGHT_PRESET_ORDER"));

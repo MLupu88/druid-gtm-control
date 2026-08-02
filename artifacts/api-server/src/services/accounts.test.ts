@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Account, AccountEvaluation } from "@workspace/db/schema";
+import { IcpProfileConfigV1Schema, isIntentConfigured } from "@workspace/evaluator";
 import {
   listAccounts,
   getAccountById,
@@ -33,9 +34,40 @@ function syntheticAccount(overrides: Partial<Account> = {}): Account {
   };
 }
 
+// A real, schema-valid IcpProfileConfigV1 with one configured intent
+// rule — used as the default profileConfigSnapshot below so
+// toEvaluationSummary's IcpProfileConfigV1Schema.safeParse() (in
+// ./accounts.ts) always succeeds against these fixtures.
+const SYNTHETIC_INTENT_CONFIGURED_SNAPSHOT: unknown = {
+  configSchemaVersion: "v1",
+  fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+  intent: {
+    rules: [
+      {
+        id: "has_engagement",
+        description: "Has any engagement source",
+        points: 5,
+        condition: { op: "exists", field: "engagement.sources" },
+      },
+    ],
+    tiers: [{ code: "floor", minScore: 0 }],
+  },
+  actionability: { rules: [] },
+  eligibility: { hardDisqualifiers: [], restrictions: [] },
+};
+
+// The raw shape a DISTINCT ON query row has BEFORE ./accounts.ts's
+// toEvaluationSummary strips profileConfigSnapshot and derives
+// intentConfigured — distinct from AccountEvaluationSummary (the shape
+// listAccounts() actually returns), which has no profileConfigSnapshot
+// and a real intentConfigured boolean instead.
+type RawEvaluationSummaryRow = Omit<AccountEvaluationSummary, "intentConfigured"> & {
+  profileConfigSnapshot: unknown;
+};
+
 function syntheticEvaluationSummary(
-  overrides: Partial<AccountEvaluationSummary> = {},
-): AccountEvaluationSummary {
+  overrides: Partial<RawEvaluationSummaryRow> = {},
+): RawEvaluationSummaryRow {
   return {
     id: "22222222-2222-4222-8222-222222222222",
     accountId: "11111111-1111-4111-8111-111111111111",
@@ -55,7 +87,22 @@ function syntheticEvaluationSummary(
     eligibilityOutcome: "eligible",
     createdAt: new Date("2026-01-02T00:00:00Z"),
     createdBy: null,
+    profileConfigSnapshot: SYNTHETIC_INTENT_CONFIGURED_SNAPSHOT,
     ...overrides,
+  };
+}
+
+// Mirrors ./accounts.ts's toEvaluationSummary exactly, so tests can
+// assert listAccounts()'s actual output (which is a NEW object, not the
+// same reference as the raw fake-db row) against a truthfully-derived
+// expectation rather than a hand-guessed one.
+function expectedSummary(row: RawEvaluationSummaryRow): AccountEvaluationSummary {
+  const { profileConfigSnapshot, ...rest } = row;
+  return {
+    ...rest,
+    intentConfigured: isIntentConfigured(
+      IcpProfileConfigV1Schema.parse(profileConfigSnapshot),
+    ),
   };
 }
 
@@ -185,10 +232,10 @@ test("listAccounts maps latestEvaluation and latestProductionEvaluation independ
 
   const itemA = result.items.find((i) => i.account.id === "acc-a");
   const itemB = result.items.find((i) => i.account.id === "acc-b");
-  assert.equal(itemA?.latestEvaluation, latestA);
+  assert.deepEqual(itemA?.latestEvaluation, expectedSummary(latestA));
   assert.equal(itemA?.latestProductionEvaluation, null);
   assert.equal(itemB?.latestEvaluation, null);
-  assert.equal(itemB?.latestProductionEvaluation, latestProductionB);
+  assert.deepEqual(itemB?.latestProductionEvaluation, expectedSummary(latestProductionB));
 });
 
 test("listAccounts: a preview evaluation newer than the latest production evaluation surfaces separately in each field", async () => {
@@ -213,8 +260,11 @@ test("listAccounts: a preview evaluation newer than the latest production evalua
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
-  assert.equal(result.items[0]?.latestEvaluation, previewLatest);
-  assert.equal(result.items[0]?.latestProductionEvaluation, productionOlder);
+  assert.deepEqual(result.items[0]?.latestEvaluation, expectedSummary(previewLatest));
+  assert.deepEqual(
+    result.items[0]?.latestProductionEvaluation,
+    expectedSummary(productionOlder),
+  );
 });
 
 test("listAccounts: when the latest evaluation is itself the latest production evaluation, both fields return it (no null/dedup special-casing)", async () => {
@@ -233,8 +283,49 @@ test("listAccounts: when the latest evaluation is itself the latest production e
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
-  assert.equal(result.items[0]?.latestEvaluation, evaluation);
-  assert.equal(result.items[0]?.latestProductionEvaluation, evaluation);
+  assert.deepEqual(result.items[0]?.latestEvaluation, expectedSummary(evaluation));
+  assert.deepEqual(result.items[0]?.latestProductionEvaluation, expectedSummary(evaluation));
+});
+
+test("listAccounts derives intentConfigured=true when the evaluation's profileConfigSnapshot has at least one intent rule", async () => {
+  const account = syntheticAccount();
+  const evaluation = syntheticEvaluationSummary({
+    profileConfigSnapshot: SYNTHETIC_INTENT_CONFIGURED_SNAPSHOT,
+  });
+  const { db } = makeFakeDb([[{ value: 1 }], [account], [evaluation], [evaluation], []]);
+
+  const result = await listAccounts({ db, limit: 50, offset: 0 });
+
+  assert.equal(result.items[0]?.latestEvaluation?.intentConfigured, true);
+  assert.equal("profileConfigSnapshot" in (result.items[0]?.latestEvaluation ?? {}), false);
+});
+
+test("listAccounts derives intentConfigured=false when the evaluation's profileConfigSnapshot has no intent rules", async () => {
+  const account = syntheticAccount();
+  const evaluation = syntheticEvaluationSummary({
+    profileConfigSnapshot: {
+      configSchemaVersion: "v1",
+      fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
+  });
+  const { db } = makeFakeDb([[{ value: 1 }], [account], [evaluation], [evaluation], []]);
+
+  const result = await listAccounts({ db, limit: 50, offset: 0 });
+
+  assert.equal(result.items[0]?.latestEvaluation?.intentConfigured, false);
+});
+
+test("listAccounts throws rather than defaulting when a persisted evaluation's profileConfigSnapshot fails schema validation", async () => {
+  const account = syntheticAccount();
+  const evaluation = syntheticEvaluationSummary({
+    profileConfigSnapshot: { configSchemaVersion: "v1" }, // missing fit/intent/actionability/eligibility
+  });
+  const { db } = makeFakeDb([[{ value: 1 }], [account], [evaluation], [evaluation], []]);
+
+  await assert.rejects(listAccounts({ db, limit: 50, offset: 0 }));
 });
 
 test("listAccounts maps latestDecision per account, independently of latestEvaluation/latestProductionEvaluation", async () => {

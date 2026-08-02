@@ -54,6 +54,16 @@ export interface ClientRadarAccountPayload {
   updated_at: string;
 }
 
+// "not_configured" | "runtime_failure" | null — computed server-side at
+// read time (never persisted, no migration) from lastError via a small
+// closed set of known messages the backend itself controls; see
+// artifacts/api-server/src/lib/clientRadarClient.ts's
+// classifyClientRadarFailureReason. Only ever non-null when status is
+// "failed" — always null for every other status, including "cancelled".
+// A stable typed field to switch UI treatment on, replacing the old
+// approach of pattern-matching lastError's raw text in the frontend.
+export type ClientRadarFailureReason = "not_configured" | "runtime_failure";
+
 export interface ClientRadarResearchRun {
   id: string;
   accountId: string;
@@ -64,6 +74,7 @@ export interface ClientRadarResearchRun {
   completedAt: string | null;
   failedAt: string | null;
   lastError: string | null;
+  failureReason: ClientRadarFailureReason | null;
   // Nullable: Client Radar may complete a run without resolving an
   // account (see clientRadarResearchRuns.ts's syncClientRadarResearchResult).
   accountPayload: ClientRadarAccountPayload | null;

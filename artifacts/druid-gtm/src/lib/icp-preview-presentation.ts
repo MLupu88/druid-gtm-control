@@ -17,6 +17,10 @@
 // for a collapsed technical-details view, never discarded.
 
 import { humanizeToken } from "@workspace/gtm-shared";
+import {
+  isIntentConfigured as isIntentConfiguredCanonical,
+  IcpProfileConfigV1Schema,
+} from "@workspace/evaluator";
 
 // ---------------------------------------------------------------------
 // Dimension labels — mirrors lib/evaluator/src/types.ts's `Dimension`
@@ -51,13 +55,13 @@ export function humanizeDimension(dimension: unknown): string | null {
 // a code like "base" or "floor" cannot be safely assumed to mean "the
 // lowest tier" (or anything else) without also knowing that profile's
 // tier thresholds, which this panel does not have. Every tier is
-// therefore labeled the same honest way: a neutral "Configured tier: X"
+// therefore labeled the same honest way: a neutral "Configured band: X"
 // plus an explanation that the threshold comes from the profile, never a
 // guessed interpretation — and the raw code is always preserved
 // separately for the technical-details view.
 // ---------------------------------------------------------------------
 export const TIER_EXPLANATION =
-  "This tier's threshold is defined by the selected ICP profile, not by this preview.";
+  "This band's threshold is defined by the selected ICP profile, not by this preview.";
 
 export interface TierLabel {
   label: string;
@@ -66,16 +70,206 @@ export interface TierLabel {
 
 export function humanizeTierLabel(tier: string | null): TierLabel | null {
   if (tier === null || tier.trim() === "") return null;
-  return { label: `Configured tier: ${humanizeToken(tier)}`, raw: tier };
+  return { label: `Configured band: ${humanizeToken(tier)}`, raw: tier };
 }
+
+// ---------------------------------------------------------------------
+// Fit-only truthfulness. When a profile has zero configured intent rules,
+// every account's intentTier still resolves to a real value (the
+// profile's fallback band — see lib/evaluator/src/rules/scoring.ts) even
+// though nothing about buying intent was actually evaluated. Showing
+// that fallback tier as if it were a real signal would misrepresent a
+// fit-only profile as having assessed intent.
+//
+// evaluationIntentConfigured() below is used by preview/official
+// evaluation detail (../components/account-icp-preview-panel.tsx) and
+// evaluation runs (../components/evaluation-runs-list.tsx), which both
+// have the evaluation's full profileConfigSnapshot in hand. Account-list
+// rows (../pages/accounts.tsx) do NOT call this function — that surface
+// only has the lightweight AccountEvaluationSummary, which never carries
+// the full config snapshot; it instead reads the server-derived
+// AccountEvaluationSummary.intentConfigured boolean directly (see
+// ../lib/accounts-api.ts and artifacts/api-server/src/services/
+// accounts.ts's toEvaluationSummary), computed from the exact same
+// @workspace/evaluator isIntentConfigured this function delegates to.
+// ---------------------------------------------------------------------
+
+/**
+ * Whether the ICP profile config an evaluation actually ran against had
+ * at least one configured intent rule — delegates the actual definition
+ * to @workspace/evaluator's isIntentConfigured (the single source of
+ * truth also used server-side and in profile-list classification), never
+ * reimplemented here. `profileConfigSnapshot` arrives as `unknown` jsonb;
+ * this re-validates it against the canonical schema rather than
+ * duck-typing or blindly trusting its shape.
+ *
+ * Three explicit states, never collapsed into two:
+ *   - true  — at least one intent rule is configured; show the evaluated tier.
+ *   - false — zero intent rules are configured; show "Intent not configured".
+ *   - null  — the snapshot doesn't parse as a real IcpProfileConfigV1 at
+ *     all (should not happen for a real persisted evaluation, but never
+ *     assumed); show "Intent configuration unavailable" rather than
+ *     silently falling back to the tier display, which could misrepresent
+ *     unreadable data as a real evaluated signal.
+ */
+export function evaluationIntentConfigured(profileConfigSnapshot: unknown): boolean | null {
+  const parsed = IcpProfileConfigV1Schema.safeParse(profileConfigSnapshot);
+  if (!parsed.success) return null;
+  return isIntentConfiguredCanonical(parsed.data);
+}
+
+export const INTENT_NOT_CONFIGURED_LABEL = "Intent not configured";
+export const INTENT_NOT_CONFIGURED_EXPLANATION =
+  "This profile has no buying-intent rules configured, so this account's buying intent was not evaluated.";
+
+export const INTENT_CONFIGURATION_UNAVAILABLE_LABEL = "Intent configuration unavailable";
+export const INTENT_CONFIGURATION_UNAVAILABLE_EXPLANATION =
+  "This evaluation's saved profile configuration could not be read, so whether buying intent was actually configured can't be confirmed.";
 
 // Scores are arbitrary-scale rule-point totals (see
 // lib/evaluator/src/profileConfig.ts: tiers are defined by minScore
 // thresholds per profile, with no fixed maximum anywhere in the
 // evaluator) — never labeled "out of 100" or any other invented ceiling.
+// "Weighted score" (not just "points") makes clear this is a rule-weight
+// total, not a percentage or a score out of a fixed maximum.
 export function formatScorePoints(score: string | null): string {
   if (score === null || score.trim() === "") return "—";
-  return `${score} points`;
+  return `${score} points (weighted score)`;
+}
+
+// ---------------------------------------------------------------------
+// Outreach eligibility label/badge — the plain-language mapping of
+// AccountEvaluation.eligibilityOutcome. Moved here (from
+// ../components/account-icp-preview-panel.tsx, where it originated) so
+// ../components/evaluation-runs-list.tsx can render the exact same
+// truthful labels/colors for every persisted evaluation, not just the
+// live preview/official result — eligibilityOutcome is never
+// reinterpreted or softened between the two surfaces.
+// ---------------------------------------------------------------------
+
+export type EligibilityOutcome = "eligible" | "restricted" | "ineligible" | null;
+
+export function eligibilityLabel(outcome: EligibilityOutcome): string {
+  switch (outcome) {
+    case "eligible":
+      return "Eligible";
+    case "restricted":
+      return "Restricted";
+    case "ineligible":
+      return "Disqualified";
+    default:
+      return "Unknown";
+  }
+}
+
+export function eligibilityBadgeVariant(
+  outcome: EligibilityOutcome,
+): "default" | "secondary" | "destructive" | "outline" {
+  switch (outcome) {
+    case "eligible":
+      return "default";
+    case "restricted":
+      return "outline";
+    case "ineligible":
+      return "destructive";
+    default:
+      return "secondary";
+  }
+}
+
+// ---------------------------------------------------------------------
+// Identity-not-person-addressable restriction clarification. This is the
+// one canonical, evaluator-version-fixed restriction rule (never
+// profile-authored — see lib/evaluator/src/rules/eligibility.ts) whose
+// raw meaning ("no verified individual contact yet") can otherwise read
+// as a legal/policy disqualification when only shown as "Restricted".
+// This helper only detects whether that SPECIFIC rule fired — it never
+// changes eligibilityOutcome, never claims "Eligible" when the persisted
+// result is "restricted", and every other restriction keeps its existing
+// generic/rule-specific presentation untouched.
+// ---------------------------------------------------------------------
+
+export const IDENTITY_NOT_PERSON_ADDRESSABLE_RULE_ID =
+  "canonical.identity_not_person_addressable";
+
+export function hasIdentityNotPersonAddressableRestriction(
+  restrictions: unknown,
+): boolean {
+  if (!Array.isArray(restrictions)) return false;
+  return restrictions.some(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      !Array.isArray(entry) &&
+      (entry as Record<string, unknown>).ruleId ===
+        IDENTITY_NOT_PERSON_ADDRESSABLE_RULE_ID,
+  );
+}
+
+// ---------------------------------------------------------------------
+// Actionability — a deterministic, user-facing STATE derived from the
+// evaluator's own actionabilityScore and missingInputs, never an
+// invented conclusion. A raw "0 points" is not itself a meaningful
+// business outcome (it conflates "we checked and there's genuinely
+// nothing" with "we don't know yet because contact/CRM data is
+// missing") — this distinguishes those cases using only fields the
+// evaluator already produced (missingInputs entries whose `affects`
+// includes "actionability", categorized by the same ACTIONABILITY_FIELD_
+// ALLOWLIST prefixes profileConfig.ts defines: contact.* vs crm.*).
+// ---------------------------------------------------------------------
+
+export type ActionabilityState =
+  | "actionable"
+  | "needs_contact_data"
+  | "needs_crm_data"
+  | "not_yet_actionable";
+
+export const ACTIONABILITY_STATE_LABELS: Record<ActionabilityState, string> = {
+  actionable: "Actionable",
+  needs_contact_data: "Needs contact data",
+  needs_crm_data: "Needs CRM data",
+  not_yet_actionable: "Not yet actionable",
+};
+
+function isMissingInputEntry(
+  value: unknown,
+): value is { field: string; affects: unknown } {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).field === "string"
+  );
+}
+
+export function deriveActionabilityState(
+  actionabilityScore: string | null,
+  missingInputs: unknown,
+): ActionabilityState {
+  // Missing-input gaps that are STRUCTURALLY marked (via the evaluator's
+  // own `affects` array — real evaluator output, never inferred by
+  // string-matching whether a gap is "relevant") as affecting
+  // actionability take precedence over the score. A positive score does
+  // NOT mean "actionable" if the evaluator itself also flagged a
+  // relevant gap: e.g. a CRM-owner rule may have matched (score > 0)
+  // while contact.email is still missing — that account still needs
+  // contact data before real outreach, regardless of the numeric score.
+  const items = Array.isArray(missingInputs) ? missingInputs : [];
+  const actionabilityGaps = items
+    .filter(isMissingInputEntry)
+    .filter((item) => Array.isArray(item.affects) && item.affects.includes("actionability"));
+
+  if (actionabilityGaps.some((item) => item.field.startsWith("contact."))) {
+    return "needs_contact_data";
+  }
+  if (actionabilityGaps.some((item) => item.field.startsWith("crm."))) {
+    return "needs_crm_data";
+  }
+
+  const score = actionabilityScore !== null ? Number(actionabilityScore) : null;
+  if (score !== null && Number.isFinite(score) && score > 0) return "actionable";
+
+  return "not_yet_actionable";
 }
 
 // ---------------------------------------------------------------------

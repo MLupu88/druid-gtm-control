@@ -15,7 +15,53 @@ import {
   describeReasonEntry,
   categorizeMissingInputs,
   TIER_EXPLANATION,
+  eligibilityLabel,
+  eligibilityBadgeVariant,
+  hasIdentityNotPersonAddressableRestriction,
+  deriveActionabilityState,
+  ACTIONABILITY_STATE_LABELS,
+  evaluationIntentConfigured,
 } from "./icp-preview-presentation.js";
+
+function validConfigWithIntentRules(hasRules: boolean): unknown {
+  return {
+    configSchemaVersion: "v1",
+    fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+    intent: {
+      rules: hasRules
+        ? [
+            {
+              id: "has_engagement",
+              description: "Has engagement",
+              points: 5,
+              condition: { op: "exists", field: "engagement.sources" },
+            },
+          ]
+        : [],
+      tiers: [{ code: "floor", minScore: 0 }],
+    },
+    actionability: { rules: [] },
+    eligibility: { hardDisqualifiers: [], restrictions: [] },
+  };
+}
+
+// ---------------------------------------------------------------------
+// Fit-only truthfulness — evaluationIntentConfigured
+// ---------------------------------------------------------------------
+
+test("evaluationIntentConfigured is true when the snapshot has at least one intent rule", () => {
+  assert.equal(evaluationIntentConfigured(validConfigWithIntentRules(true)), true);
+});
+
+test("evaluationIntentConfigured is false when the snapshot has zero intent rules", () => {
+  assert.equal(evaluationIntentConfigured(validConfigWithIntentRules(false)), false);
+});
+
+test("evaluationIntentConfigured is null (never a guessed true/false) for a snapshot that doesn't parse as a real config", () => {
+  assert.equal(evaluationIntentConfigured({ configSchemaVersion: "v1" }), null);
+  assert.equal(evaluationIntentConfigured(null), null);
+  assert.equal(evaluationIntentConfigured("not an object"), null);
+});
 
 // ---------------------------------------------------------------------
 // Humanized dimension/metric terminology
@@ -33,29 +79,32 @@ test("humanizeDimension falls back to a humanized token for an unknown dimension
   assert.equal(humanizeDimension("some_new_dimension"), "Some New Dimension");
 });
 
-test("formatScorePoints uses points, never an invented out-of-100 scale", () => {
-  assert.equal(formatScorePoints("42"), "42 points");
+test("formatScorePoints labels the number as a weighted score, never an invented out-of-100 scale", () => {
+  assert.equal(formatScorePoints("42"), "42 points (weighted score)");
   assert.equal(formatScorePoints(null), "—");
   const result = formatScorePoints("42");
   assert.ok(!result.includes("100"), "score formatting must not invent a fixed maximum");
+  assert.ok(result.includes("weighted"));
 });
 
 // ---------------------------------------------------------------------
-// Tier labels — "base"/"floor" must never render as bare title-cased
+// Band labels — "base"/"floor" must never render as bare title-cased
 // tokens; meaning can't be safely inferred from the code alone (see
-// ./icp-preview-presentation.ts's comment), so every tier gets the same
-// neutral, honest treatment.
+// ./icp-preview-presentation.ts's comment), so every band gets the same
+// neutral, honest treatment. "Tier" is an internal/legacy word — never
+// user-facing; see the "band" business terminology used throughout the
+// ICP editor and account preview surfaces.
 // ---------------------------------------------------------------------
 
-test("tier labels are never bare title-cased tokens like 'Base' or 'Floor'", () => {
+test("band labels are never bare title-cased tokens like 'Base' or 'Floor', and use 'band' business language", () => {
   const base = humanizeTierLabel("base");
   const floor = humanizeTierLabel("floor");
   assert.ok(base);
   assert.ok(floor);
   assert.notEqual(base!.label, "Base");
   assert.notEqual(floor!.label, "Floor");
-  assert.match(base!.label, /^Configured tier: Base$/);
-  assert.match(floor!.label, /^Configured tier: Floor$/);
+  assert.match(base!.label, /^Configured band: Base$/);
+  assert.match(floor!.label, /^Configured band: Floor$/);
 });
 
 test("tier labels preserve the raw code separately for a technical-details view", () => {
@@ -182,4 +231,122 @@ test("categorizeMissingInputs never fabricates a consent category unless a real 
     { field: "company.domain", affects: ["fit"] },
   ]);
   assert.ok(!withoutConsent!.some((c) => c.category === "Consent or lawful-basis information"));
+});
+
+// ---------------------------------------------------------------------
+// Outreach eligibility label/badge
+// ---------------------------------------------------------------------
+
+test("eligibilityLabel truthfully reflects every real eligibilityOutcome value — never 'Eligible' for a restricted/ineligible result", () => {
+  assert.equal(eligibilityLabel("eligible"), "Eligible");
+  assert.equal(eligibilityLabel("restricted"), "Restricted");
+  assert.equal(eligibilityLabel("ineligible"), "Disqualified");
+  assert.equal(eligibilityLabel(null), "Unknown");
+});
+
+test("eligibilityBadgeVariant never uses the default/positive variant for a restricted or ineligible outcome", () => {
+  assert.notEqual(eligibilityBadgeVariant("restricted"), "default");
+  assert.notEqual(eligibilityBadgeVariant("ineligible"), "default");
+  assert.equal(eligibilityBadgeVariant("eligible"), "default");
+  assert.equal(eligibilityBadgeVariant("ineligible"), "destructive");
+});
+
+// ---------------------------------------------------------------------
+// Identity-not-person-addressable restriction clarification
+// ---------------------------------------------------------------------
+
+test("hasIdentityNotPersonAddressableRestriction detects only the specific canonical rule, not any restriction", () => {
+  assert.equal(
+    hasIdentityNotPersonAddressableRestriction([
+      { ruleId: "canonical.identity_not_person_addressable", description: "x" },
+    ]),
+    true,
+  );
+  assert.equal(
+    hasIdentityNotPersonAddressableRestriction([
+      { ruleId: "some_other_restriction", description: "x" },
+    ]),
+    false,
+  );
+});
+
+test("hasIdentityNotPersonAddressableRestriction is defensively false for empty/malformed input, never a guess", () => {
+  assert.equal(hasIdentityNotPersonAddressableRestriction([]), false);
+  assert.equal(hasIdentityNotPersonAddressableRestriction(null), false);
+  assert.equal(hasIdentityNotPersonAddressableRestriction("not an array"), false);
+});
+
+// ---------------------------------------------------------------------
+// Actionability state derivation
+// ---------------------------------------------------------------------
+
+// A positive score does NOT win over a real, structurally-marked
+// actionability gap (missingInputs entry whose `affects` includes
+// "actionability" — real evaluator output, not a guess). Some rule may
+// have matched (e.g. a CRM-owner rule) producing a positive score while
+// a genuinely required field (contact.email) is still missing — that
+// account still needs that data before real outreach.
+
+test("positive score + an actionability-affecting contact.* gap => 'needs_contact_data' (the gap wins, not the score)", () => {
+  assert.equal(
+    deriveActionabilityState("5", [{ field: "contact.email", affects: ["actionability"] }]),
+    "needs_contact_data",
+  );
+});
+
+test("positive score + an actionability-affecting crm.* gap => 'needs_crm_data' (the gap wins, not the score)", () => {
+  assert.equal(
+    deriveActionabilityState("5", [{ field: "crm.hubspotOwner", affects: ["actionability"] }]),
+    "needs_crm_data",
+  );
+});
+
+test("positive score + a missing input that does NOT affect actionability => 'actionable' (an irrelevant gap never blocks it)", () => {
+  assert.equal(
+    deriveActionabilityState("5", [{ field: "engagement.pagesVisited", affects: ["intent"] }]),
+    "actionable",
+  );
+  assert.equal(
+    deriveActionabilityState("5", [{ field: "contact.email", affects: ["fit"] }]),
+    "actionable",
+  );
+});
+
+test("positive score + no relevant gaps at all => 'actionable'", () => {
+  assert.equal(deriveActionabilityState("10", []), "actionable");
+});
+
+test("zero score + no relevant gaps => 'not_yet_actionable' (never fabricates a reason no missing-input entry supports)", () => {
+  assert.equal(deriveActionabilityState("0", []), "not_yet_actionable");
+  assert.equal(
+    deriveActionabilityState("0", [{ field: "engagement.pagesVisited", affects: ["intent"] }]),
+    "not_yet_actionable",
+  );
+});
+
+test("deriveActionabilityState is 'needs_contact_data' when a zero/null score is explained by a missing contact.* field", () => {
+  assert.equal(
+    deriveActionabilityState("0", [{ field: "contact.email", affects: ["actionability"] }]),
+    "needs_contact_data",
+  );
+  assert.equal(
+    deriveActionabilityState(null, [{ field: "contact.phone", affects: ["actionability"] }]),
+    "needs_contact_data",
+  );
+});
+
+test("deriveActionabilityState is 'needs_crm_data' when a zero score is explained by a missing crm.* field, not contact.*", () => {
+  assert.equal(
+    deriveActionabilityState("0", [{ field: "crm.hubspotOwner", affects: ["actionability"] }]),
+    "needs_crm_data",
+  );
+});
+
+test("ACTIONABILITY_STATE_LABELS covers every state with plain business language, never a raw score", () => {
+  for (const label of Object.values(ACTIONABILITY_STATE_LABELS)) {
+    assert.ok(!/^\d/.test(label), `label "${label}" must not start with a raw number`);
+  }
+  assert.equal(ACTIONABILITY_STATE_LABELS.actionable, "Actionable");
+  assert.equal(ACTIONABILITY_STATE_LABELS.needs_contact_data, "Needs contact data");
+  assert.equal(ACTIONABILITY_STATE_LABELS.needs_crm_data, "Needs CRM data");
 });

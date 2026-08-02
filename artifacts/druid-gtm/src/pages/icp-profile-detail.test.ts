@@ -45,7 +45,7 @@ test("the configuration summary shows counts, not the raw rules/conditions, as p
   const source = readSource();
   assert.ok(source.includes("Configuration summary"));
   assert.ok(source.includes("Fit rules"));
-  assert.ok(source.includes("Fit tiers"));
+  assert.ok(source.includes("Fit bands"));
   assert.ok(source.includes("Intent rules"));
   assert.ok(source.includes("Actionability rules"));
   assert.ok(source.includes("Hard disqualifiers"));
@@ -132,4 +132,27 @@ test("no archive, deactivate, or activation-history capability is implemented on
   for (const term of ["archiveProfile", "deactivateVersion", "activation-events", "activationEvents", "activation history"]) {
     assert.ok(!source.toLowerCase().includes(term.toLowerCase()), `must not reference "${term}"`);
   }
+});
+
+// ---------------------------------------------------------------------
+// Legacy Starter ICP warning — shown once, in VersionSummaryCard, for
+// whichever version is selected (draft or published) — never gated to
+// published-only, and never duplicated in the draft editor (see the
+// sibling test in icp-profile-draft-editor.test.ts).
+// ---------------------------------------------------------------------
+
+test("VersionSummaryCard shows the legacy starter warning for the selected version's own config, unconditionally — not gated behind the published-only branch", () => {
+  const source = readSource();
+  const cardStart = source.indexOf("function VersionSummaryCard");
+  assert.ok(cardStart > -1, "VersionSummaryCard must exist");
+  const cardBody = source.slice(cardStart);
+  const legacyCheckIndex = cardBody.indexOf("isLegacyStarterIcpConfig(version.config)");
+  const publishedGateIndex = cardBody.indexOf('version.status === "published"');
+  assert.ok(legacyCheckIndex > -1, "must check isLegacyStarterIcpConfig(version.config)");
+  assert.ok(publishedGateIndex > -1);
+  assert.ok(
+    legacyCheckIndex < publishedGateIndex,
+    "the legacy check must run before (outside) the published-only branch, so it applies to a selected DRAFT version too",
+  );
+  assert.ok(cardBody.slice(legacyCheckIndex, legacyCheckIndex + 100).includes("<LegacyStarterWarning"));
 });

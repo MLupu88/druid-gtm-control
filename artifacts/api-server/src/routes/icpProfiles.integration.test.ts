@@ -105,16 +105,22 @@ async function readRecord(
 // Fixtures
 // ---------------------------------------------------------------------
 
+// Uses an explicit `eq` match on company.domain (not a bare `exists`
+// check) so this fixture carries meaningful target-company criteria —
+// see evaluatePublicationReadiness in @workspace/evaluator (invoked from
+// ../services/icpProfiles.ts). A plain "domain exists" rule alone would
+// make every /publish call in this file fail with 422
+// not_ready_for_publish.
 function syntheticProfileConfig(marker = "base") {
   return {
     configSchemaVersion: "v1",
     fit: {
       rules: [
         {
-          id: "has_domain",
-          description: `Has a domain (${marker})`,
+          id: "domain_match",
+          description: `Domain matches ${marker}.example.com`,
           points: 10,
-          condition: { op: "exists", field: "company.domain" },
+          condition: { op: "eq", field: "company.domain", value: `${marker}.example.com` },
         },
       ],
       tiers: [{ code: "base", minScore: 0 }],

@@ -24,9 +24,9 @@ test("every required section is covered", () => {
   const source = readSource();
   for (const label of [
     "Fit rules",
-    "Fit tiers",
+    "Fit bands",
     "Intent rules",
-    "Intent tiers",
+    "Intent bands",
     "Actionability rules",
     "Hard disqualifiers",
     "Restrictions",

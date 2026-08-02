@@ -82,8 +82,8 @@ test("leafOperatorsForFieldType offers exists/eq/in for boolean fields, never gt
 // describeConfigErrorLocation
 // ---------------------------------------------------------------------
 
-test("describeConfigErrorLocation humanizes a dimension + section + 1-based index", () => {
-  assert.equal(describeConfigErrorLocation(["fit", "tiers", 1, "minScore"]), "Company fit — tier #2");
+test("describeConfigErrorLocation humanizes a dimension + section + 1-based index, using 'band' business language for tiers", () => {
+  assert.equal(describeConfigErrorLocation(["fit", "tiers", 1, "minScore"]), "Company fit — band #2");
   assert.equal(
     describeConfigErrorLocation(["intent", "rules", 0, "condition"]),
     "Buying intent — rule #1",
@@ -91,7 +91,7 @@ test("describeConfigErrorLocation humanizes a dimension + section + 1-based inde
 });
 
 test("describeConfigErrorLocation humanizes a dimension + section with no index (whole-section issue)", () => {
-  assert.equal(describeConfigErrorLocation(["fit", "tiers"]), "Company fit — tiers");
+  assert.equal(describeConfigErrorLocation(["fit", "tiers"]), "Company fit — bands");
 });
 
 test("describeConfigErrorLocation falls back to a neutral label for an unrecognized path", () => {
@@ -116,7 +116,7 @@ test("validateProfileConfigDraft rejects a config missing the required floor tie
   if (!result.valid) {
     const tierIssue = result.issues.find((i) => i.message.includes("floor tier"));
     assert.ok(tierIssue, "expected a floor-tier issue");
-    assert.equal(tierIssue!.location, "Company fit — tiers");
+    assert.equal(tierIssue!.location, "Company fit — bands");
   }
 });
 

@@ -236,11 +236,11 @@ function WeightEditor({
   }
 
   return (
-    <div className="w-40 shrink-0 space-y-1.5">
+    <div className="flex-1 sm:flex-none sm:w-52 shrink-0 space-y-1.5 min-w-0">
       <Label className="text-xs text-muted-foreground">Weight</Label>
       <Select value={mode} onValueChange={(v) => handleModeChange(v as WeightMode)}>
-        <SelectTrigger className="h-8 text-sm">
-          <SelectValue />
+        <SelectTrigger className="h-8 text-sm w-full">
+          <SelectValue className="truncate" />
         </SelectTrigger>
         <SelectContent>
           {WEIGHT_PRESET_ORDER.map((key) => (
@@ -286,7 +286,7 @@ export function WeightedRuleRow({
   return (
     <Card className="border-border bg-card">
       <CardContent className="p-3 space-y-2.5">
-        <div className="flex items-start gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-start gap-2">
           <div className="flex-1 min-w-0 space-y-1.5">
             <Label className="text-xs text-muted-foreground">Description</Label>
             <Input
@@ -296,12 +296,14 @@ export function WeightedRuleRow({
               className="h-8 text-sm"
             />
           </div>
-          <WeightEditor
-            points={rule.points}
-            onChange={(points) => onChange({ ...rule, points })}
-          />
-          <div className="pt-5">
-            <RuleRowActionButtons {...actions} />
+          <div className="flex items-end gap-2 sm:contents">
+            <WeightEditor
+              points={rule.points}
+              onChange={(points) => onChange({ ...rule, points })}
+            />
+            <div className="sm:pt-5">
+              <RuleRowActionButtons {...actions} />
+            </div>
           </div>
         </div>
 

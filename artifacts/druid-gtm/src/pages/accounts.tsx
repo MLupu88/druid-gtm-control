@@ -17,6 +17,7 @@ import {
   type AccountListItem,
 } from "@/lib/accounts-api";
 import { NeedsAttentionView } from "@/components/needs-attention-view";
+import { getEvaluationSummaryIntentLabel } from "@/lib/accounts-presentation";
 
 type View = "attention" | "all";
 type SortKey = "updated" | "name";
@@ -273,6 +274,7 @@ export function EvaluationSummaryLine({
   label: string;
   summary: AccountEvaluationSummary;
 }) {
+  const intentLabel = getEvaluationSummaryIntentLabel(summary);
   return (
     <div className="flex items-center gap-1.5 flex-wrap text-xs">
       <span className="text-muted-foreground/70">{label}:</span>
@@ -293,9 +295,9 @@ export function EvaluationSummaryLine({
               Fit: {summary.fitTier}
             </Badge>
           )}
-          {summary.intentTier && (
+          {intentLabel && (
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-border text-muted-foreground">
-              Intent: {summary.intentTier}
+              {intentLabel}
             </Badge>
           )}
           {summary.eligibilityOutcome && (
