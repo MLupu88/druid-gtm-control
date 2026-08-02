@@ -10,6 +10,7 @@ import { createAccountsRouter } from "./accounts";
 import { createAccountDecisionsRouter } from "./accountDecisions";
 import { createClientRadarResearchRunsRouter } from "./clientRadarResearchRuns";
 import { createAccountIcpEvaluationsRouter } from "./accountIcpEvaluations";
+import { createAccountFactsRouter } from "./accountFacts";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -47,5 +48,6 @@ router.use(
   requireAuth,
   createAccountIcpEvaluationsRouter({ db }),
 );
+router.use("/internal", requireAuth, createAccountFactsRouter({ db }));
 
 export default router;

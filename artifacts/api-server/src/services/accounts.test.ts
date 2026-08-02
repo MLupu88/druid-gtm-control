@@ -64,18 +64,30 @@ const SYNTHETIC_INTENT_CONFIGURED_SNAPSHOT: unknown = {
 // of a hand-guessed one.
 const SYNTHETIC_SNAPSHOT_ID = "33333333-3333-4333-8333-333333333333";
 
-type SnapshotRow = Pick<AccountSnapshot, "id" | "source" | "normalizedInput">;
+type SnapshotRow = Pick<
+  AccountSnapshot,
+  "id" | "accountId" | "source" | "rawInput" | "normalizedInput"
+>;
+
+// The account id every syntheticEvaluationSummary/syntheticEvaluation
+// fixture's accountId uses by default (see line ~101 below) — reused here
+// so syntheticSnapshotRow's accountId matches, as a real
+// account_snapshots row's would.
+const SYNTHETIC_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 
 // A recognized (gtm-account-current-state-v1), evidence-bearing snapshot
 // — company.domain/name are non-blank so any fit rule referencing only
 // those two fields resolves; engagement/contact/crm/consent are absent
 // from this fixture's normalizedInput entirely, so any rule referencing
 // them is correctly treated as unevidenced by
-// ./mqlDecisionReadiness.ts's deriveMqlDecisionReadiness.
+// ./mqlDecisionReadiness.ts's deriveMqlDecisionReadiness. rawInput is
+// irrelevant to the v1 resolver (unlike v2's) and left empty here.
 function syntheticSnapshotRow(overrides: Partial<SnapshotRow> = {}): SnapshotRow {
   return {
     id: SYNTHETIC_SNAPSHOT_ID,
+    accountId: SYNTHETIC_ACCOUNT_ID,
     source: "gtm-account-current-state-v1",
+    rawInput: {},
     normalizedInput: { company: { domain: "example.test", name: "Example Co" } },
     ...overrides,
   };

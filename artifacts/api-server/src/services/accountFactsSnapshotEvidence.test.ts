@@ -1,0 +1,259 @@
+// Unit tests for the versioned, validated evidence envelope frozen into
+// account_snapshots.rawInput for gtm-account-current-state-v2 snapshots.
+//
+// Run with: tsx --test src/services/accountFactsSnapshotEvidence.test.ts
+
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  AccountFactsSnapshotEvidenceV1Schema,
+  buildAccountFactsSnapshotEvidence,
+  ACCOUNT_FACTS_SNAPSHOT_EVIDENCE_SCHEMA_VERSION,
+  ACCOUNT_RECORD_IDENTITY_SOURCE,
+} from "./accountFactsSnapshotEvidence.js";
+import type { Account, AccountFact } from "@workspace/db/schema";
+
+const ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
+const FACT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+function validIdentityEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    field: "company.domain",
+    value: "acme.com",
+    source: ACCOUNT_RECORD_IDENTITY_SOURCE,
+    ...overrides,
+  };
+}
+
+function validEvidenceEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    field: "company.industry",
+    value: "Banking",
+    accountFactId: FACT_ID,
+    source: "manual-operator-v1",
+    recordedBy: "operator@example.com",
+    observedAt: "2026-01-01T00:00:00.000Z",
+    recordedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function validEnvelope(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: ACCOUNT_FACTS_SNAPSHOT_EVIDENCE_SCHEMA_VERSION,
+    account: { id: ACCOUNT_ID },
+    identity: [validIdentityEntry()],
+    evidence: [validEvidenceEntry()],
+    ...overrides,
+  };
+}
+
+test("accepts a well-formed envelope", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(validEnvelope());
+  assert.equal(result.success, true);
+});
+
+test("rejects the wrong schemaVersion", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({ schemaVersion: "account-facts-snapshot-v2" }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects an unknown manual-fact field", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({
+      evidence: [validEvidenceEntry({ field: "company.someNewField" })],
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects a non-UUID accountFactId", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({ evidence: [validEvidenceEntry({ accountFactId: "not-a-uuid" })] }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects duplicate identity fields", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({
+      identity: [validIdentityEntry(), validIdentityEntry()],
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects duplicate manual-fact fields", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({
+      evidence: [validEvidenceEntry(), validEvidenceEntry({ accountFactId: FACT_ID })],
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects more than two identity entries", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({
+      identity: [
+        validIdentityEntry({ field: "company.domain" }),
+        validIdentityEntry({ field: "company.name" }),
+        // A third, structurally-invalid identity field is still rejected
+        // purely by the max(2) bound, independent of field validity.
+        { field: "company.name", value: "dup", source: ACCOUNT_RECORD_IDENTITY_SOURCE },
+      ],
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects more than five manual-fact entries", () => {
+  const fields = [
+    "company.industry",
+    "company.country",
+    "company.region",
+    "company.employeeRange",
+    "company.revenueRange",
+  ];
+  const evidence = fields.map((field, i) =>
+    field === "company.region"
+      ? validEvidenceEntry({ field, value: "us", accountFactId: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${i}` })
+      : validEvidenceEntry({ field, accountFactId: `aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${i}` }),
+  );
+  // Six entries: five distinct fields plus one more re-using a field name
+  // deliberately not present above, purely to exceed max(5) — uniqueness
+  // is tested separately above.
+  evidence.push(
+    validEvidenceEntry({ field: "company.industry", accountFactId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }),
+  );
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({ evidence }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects a blank, null, or empty identity value", () => {
+  for (const value of ["", "   ", null]) {
+    const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+      validEnvelope({ identity: [validIdentityEntry({ value })] }),
+    );
+    assert.equal(result.success, false, `value=${JSON.stringify(value)} should be rejected`);
+  }
+});
+
+test("rejects a blank, null, or empty manual-fact value", () => {
+  for (const value of ["", "   ", null]) {
+    const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+      validEnvelope({ evidence: [validEvidenceEntry({ value })] }),
+    );
+    assert.equal(result.success, false, `value=${JSON.stringify(value)} should be rejected`);
+  }
+});
+
+test("rejects company.region = 'unknown' — never a manually-confirmable value", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({
+      evidence: [validEvidenceEntry({ field: "company.region", value: "unknown" })],
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("accepts company.region only for 'us' | 'emea' | 'other'", () => {
+  for (const value of ["us", "emea", "other"]) {
+    const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+      validEnvelope({
+        evidence: [validEvidenceEntry({ field: "company.region", value })],
+      }),
+    );
+    assert.equal(result.success, true, `value=${value} should be accepted`);
+  }
+  for (const value of ["apac", "US", "unknown", "global"]) {
+    const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+      validEnvelope({
+        evidence: [validEvidenceEntry({ field: "company.region", value })],
+      }),
+    );
+    assert.equal(result.success, false, `value=${value} should be rejected`);
+  }
+});
+
+test("rejects identity evidence whose source is not 'account-record-v1'", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({
+      identity: [validIdentityEntry({ source: "manual-operator-v1" })],
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+test("rejects manual-fact evidence whose source is not 'manual-operator-v1'", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(
+    validEnvelope({
+      evidence: [validEvidenceEntry({ source: "account-record-v1" })],
+    }),
+  );
+  assert.equal(result.success, false);
+});
+
+// ---------------------------------------------------------------------
+// buildAccountFactsSnapshotEvidence
+// ---------------------------------------------------------------------
+
+function syntheticAccount(overrides: Partial<Account> = {}): Pick<Account, "id" | "companyDomain" | "companyName"> {
+  return {
+    id: ACCOUNT_ID,
+    companyDomain: "acme.com",
+    companyName: "Acme Co",
+    ...overrides,
+  };
+}
+
+function syntheticFact(overrides: Partial<AccountFact> = {}): AccountFact {
+  return {
+    id: FACT_ID,
+    accountId: ACCOUNT_ID,
+    field: "company.industry",
+    value: "Banking",
+    source: "manual-operator-v1",
+    recordedBy: "operator@example.com",
+    observedAt: new Date("2026-01-01T00:00:00.000Z"),
+    recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+    correctionReason: null,
+    supersedesFactId: null,
+    ...overrides,
+  } as AccountFact;
+}
+
+test("buildAccountFactsSnapshotEvidence: no facts, no identity -> empty envelope", () => {
+  const envelope = buildAccountFactsSnapshotEvidence(
+    syntheticAccount({ companyDomain: null, companyName: null }),
+    [],
+  );
+  assert.deepEqual(envelope.identity, []);
+  assert.deepEqual(envelope.evidence, []);
+  assert.equal(envelope.account.id, ACCOUNT_ID);
+});
+
+test("buildAccountFactsSnapshotEvidence: identity from the account row, evidence from current facts", () => {
+  const envelope = buildAccountFactsSnapshotEvidence(syntheticAccount(), [
+    syntheticFact(),
+  ]);
+  assert.deepEqual(
+    envelope.identity.map((e) => e.field).sort(),
+    ["company.domain", "company.name"],
+  );
+  assert.equal(envelope.evidence.length, 1);
+  assert.equal(envelope.evidence[0]?.accountFactId, FACT_ID);
+  assert.equal(envelope.evidence[0]?.value, "Banking");
+});
+
+test("buildAccountFactsSnapshotEvidence: a blank companyDomain/companyName is not identity evidence", () => {
+  const envelope = buildAccountFactsSnapshotEvidence(
+    syntheticAccount({ companyDomain: "   ", companyName: "" }),
+    [],
+  );
+  assert.deepEqual(envelope.identity, []);
+});

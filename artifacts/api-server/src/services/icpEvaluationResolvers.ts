@@ -25,11 +25,15 @@ import { and, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   accounts,
+  accountFacts,
+  accountFactCurrent,
   accountSnapshots,
   evaluatorVersions,
   icpProfiles,
   icpProfileVersions,
   type Account,
+  type AccountFact,
+  type AccountFactField,
   type AccountSnapshot,
   type EvaluatorVersion,
   type IcpProfileVersion,
@@ -38,12 +42,30 @@ import type * as schema from "@workspace/db/schema";
 import {
   SUPPORTED_EVALUATOR_VERSIONS,
   type NormalizedAccountInputV1,
+  type RegionV1,
 } from "@workspace/evaluator";
 import { ProfileNotFoundError } from "./icpProfiles.js";
+import { buildAccountFactsSnapshotEvidence } from "./accountFactsSnapshotEvidence.js";
+import { ManualRegionValueSchema } from "./accountFactValueValidation.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
+// v1 source constant, kept only for two reasons: (1) historical
+// interpretability of any snapshot already persisted with this source
+// before this slice shipped, and (2) its evidence resolver in
+// ../services/mqlDecisionReadiness.ts remains registered and unchanged.
+// createCurrentAccountSnapshot below no longer creates snapshots with
+// this source — see CURRENT_STATE_V2_SNAPSHOT_SOURCE.
 export const CURRENT_STATE_SNAPSHOT_SOURCE = "gtm-account-current-state-v1";
+
+// The source every NEW preview/official snapshot is created with,
+// unconditionally — no separate "evaluate with facts" action exists.
+// Adds real evidence for the five Slice 1 company fields (via
+// account_facts/account_fact_current) on top of everything
+// gtm-account-current-state-v1 already truthfully provided; still
+// genuinely sparse for engagement/contact/crm/consent, exactly as v1
+// was — Slice 1 introduces no evidence source for those.
+export const CURRENT_STATE_V2_SNAPSHOT_SOURCE = "gtm-account-current-state-v2";
 
 // ---------------------------------------------------------------------
 // Errors
@@ -130,8 +152,78 @@ export function buildNormalizedAccountInputFromAccount(
 }
 
 // ---------------------------------------------------------------------
+// 1b. v2: derive NormalizedAccountInputV1's company.* fields from real,
+// currently-accepted manual facts (see ../services/accountFacts.ts),
+// falling back to the exact same truthful "unknown" representation as v1
+// for any Slice 1 field with no current fact. NormalizedAccountInputV1's
+// SHAPE is unchanged from v1 — only which values it truthfully carries
+// differs. engagement/contact/crm/consent remain exactly as sparse as
+// v1: Slice 1 introduces no evidence source for those.
+// ---------------------------------------------------------------------
+
+export function buildNormalizedAccountInputFromAccountAndFacts(
+  account: Account,
+  currentFactsByField: ReadonlyMap<AccountFactField, AccountFact>,
+): NormalizedAccountInputV1 {
+  const base = buildNormalizedAccountInputFromAccount(account);
+
+  const regionFact = currentFactsByField.get("company.region");
+  // ManualRegionValueSchema.parse (not the DB CHECK alone) is the
+  // defense-in-depth boundary here: a stored company.region value that
+  // somehow failed to satisfy the closed 'us'|'emea'|'other' set would
+  // be a genuine data-integrity bug, and this throws loudly rather than
+  // silently coercing it into the evaluator's typed RegionV1 shape.
+  const region: RegionV1 = regionFact
+    ? ManualRegionValueSchema.parse(regionFact.value)
+    : "unknown";
+
+  return {
+    ...base,
+    company: {
+      ...base.company,
+      industry: currentFactsByField.get("company.industry")?.value ?? null,
+      employeeRange:
+        currentFactsByField.get("company.employeeRange")?.value ?? null,
+      revenueRange:
+        currentFactsByField.get("company.revenueRange")?.value ?? null,
+      region,
+      country: currentFactsByField.get("company.country")?.value ?? null,
+    },
+    source: CURRENT_STATE_V2_SNAPSHOT_SOURCE,
+  };
+}
+
+// ---------------------------------------------------------------------
+// 1c. Load the account_fact_current-winning account_facts row per
+// Slice 1 field for one account (at most five rows) — the single query
+// both the v2 normalizedInput builder and the v2 evidence-envelope
+// builder (buildAccountFactsSnapshotEvidence) consume.
+// ---------------------------------------------------------------------
+
+async function resolveCurrentAccountFacts(
+  db: Db,
+  accountId: string,
+): Promise<Map<AccountFactField, AccountFact>> {
+  const rows = await db
+    .select({ fact: accountFacts })
+    .from(accountFactCurrent)
+    .innerJoin(accountFacts, eq(accountFactCurrent.factId, accountFacts.id))
+    .where(eq(accountFactCurrent.accountId, accountId));
+
+  const byField = new Map<AccountFactField, AccountFact>();
+  for (const row of rows) {
+    byField.set(row.fact.field as AccountFactField, row.fact);
+  }
+  return byField;
+}
+
+// ---------------------------------------------------------------------
 // 2. Persist a new, immutable snapshot of the account's current state.
 // No deduplication/reuse in this slice — every call inserts a new row.
+// Unconditionally uses CURRENT_STATE_V2_SNAPSHOT_SOURCE: every new
+// preview/official evaluation automatically gets real company-fact
+// evidence when it exists, with no separate "evaluate with facts" user
+// action.
 // ---------------------------------------------------------------------
 
 export async function createCurrentAccountSnapshot(
@@ -147,17 +239,21 @@ export async function createCurrentAccountSnapshot(
     throw new AccountNotFoundError(accountId);
   }
 
-  const normalizedInput = buildNormalizedAccountInputFromAccount(account);
+  const currentFactsByField = await resolveCurrentAccountFacts(db, accountId);
+  const currentFacts = Array.from(currentFactsByField.values());
+
+  const normalizedInput = buildNormalizedAccountInputFromAccountAndFacts(
+    account,
+    currentFactsByField,
+  );
+  const rawInput = buildAccountFactsSnapshotEvidence(account, currentFacts);
 
   const [snapshot] = await db
     .insert(accountSnapshots)
     .values({
       accountId,
-      source: CURRENT_STATE_SNAPSHOT_SOURCE,
-      rawInput: {
-        companyDomain: account.companyDomain,
-        companyName: account.companyName,
-      },
+      source: CURRENT_STATE_V2_SNAPSHOT_SOURCE,
+      rawInput,
       normalizedInput,
       schemaVersion: "v1",
       // capturedAt intentionally omitted -> database default (now()).

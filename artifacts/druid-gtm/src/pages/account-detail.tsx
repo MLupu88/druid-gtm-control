@@ -14,6 +14,7 @@ import { DecisionControls } from "@/components/decision-controls";
 import { DecisionHistory } from "@/components/decision-history";
 import { ClientRadarResearchPanel } from "@/components/client-radar-research-panel";
 import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
+import { AccountFactsPanel } from "@/components/account-facts-panel";
 import { EvaluationRunsList } from "@/components/evaluation-runs-list";
 
 function accountIdentity(account: Account): { primary: string; secondary: string | null } {
@@ -128,6 +129,8 @@ function AccountDetailContent({
           {formatDateTime(account.updatedAt)}
         </p>
       </div>
+
+      <AccountFactsPanel accountId={account.id} />
 
       {/* Latest evaluation + decision: two columns on desktop — the
           decision on the right is made in direct reference to the
