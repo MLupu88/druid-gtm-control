@@ -17,7 +17,14 @@ import { z } from "zod/v4";
 // Shared primitives
 // ---------------------------------------------------------------------
 
-const NonBlankString = z.string().trim().min(1).max(500);
+// Exported so other packages that must validate/normalize the same kind
+// of evaluator-facing string value (e.g. api-server's manual account-fact
+// intake) can reuse this exact primitive instead of re-implementing an
+// equivalent one — see NonBlankStringMaxLength for the numeric bound
+// alone, when only the length matters and re-validating trim/min(1)
+// would be redundant with a caller's own schema composition.
+export const NonBlankString = z.string().trim().min(1).max(500);
+export const NonBlankStringMaxLength = 500;
 
 export const RegionV1 = z.enum(["us", "emea", "other", "unknown"]);
 export type RegionV1 = z.infer<typeof RegionV1>;

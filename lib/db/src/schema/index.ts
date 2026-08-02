@@ -13,3 +13,5 @@ export * from "./accountSnapshots";
 export * from "./accountEvaluations";
 export * from "./accountDecisions";
 export * from "./clientRadarResearchRuns";
+export * from "./accountFacts";
+export * from "./accountFactCurrent";

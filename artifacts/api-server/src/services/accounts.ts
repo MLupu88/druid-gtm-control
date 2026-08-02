@@ -38,11 +38,22 @@ import { deriveMqlDecisionReadiness } from "./mqlDecisionReadiness.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
-type SnapshotForReadiness = Pick<AccountSnapshot, "id" | "source" | "normalizedInput">;
+// accountId and rawInput are required by mqlDecisionReadiness.ts's
+// gtm-account-current-state-v2 resolver (envelope.account.id must match
+// the snapshot's own accountId, and rawInput carries the frozen evidence
+// envelope itself) — kept in this narrow projection alongside source/
+// normalizedInput rather than fetching full rows, preserving this
+// function's one-query-regardless-of-row-count batching.
+type SnapshotForReadiness = Pick<
+  AccountSnapshot,
+  "id" | "accountId" | "source" | "rawInput" | "normalizedInput"
+>;
 
 const SNAPSHOT_READINESS_COLUMNS = {
   id: accountSnapshots.id,
+  accountId: accountSnapshots.accountId,
   source: accountSnapshots.source,
+  rawInput: accountSnapshots.rawInput,
   normalizedInput: accountSnapshots.normalizedInput,
 } as const;
 
