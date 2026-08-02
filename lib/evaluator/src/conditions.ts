@@ -290,6 +290,34 @@ export function dedupeSorted(values: string[]): string[] {
   return Array.from(new Set(values)).sort();
 }
 
+// ---------------------------------------------------------------------
+// Tri-state combinators — the exact and/or/not composition rules from
+// evaluateCondition's own doc comment below, extracted as standalone
+// pure functions so a second caller (mqlDecisionReadiness.ts's
+// evidence-masked resolver) can reuse the identical truth table instead
+// of re-deriving an approximation of it. evaluateCondition itself is
+// refactored to call these, not to duplicate their logic — this is a
+// behaviour-preserving extraction, not a semantic change.
+// ---------------------------------------------------------------------
+
+export function combineNot(child: ConditionOutcome): ConditionOutcome {
+  if (child === "match") return "no_match";
+  if (child === "no_match") return "match";
+  return "unknown";
+}
+
+export function combineAnd(results: ConditionOutcome[]): ConditionOutcome {
+  if (results.some((r) => r === "no_match")) return "no_match";
+  if (results.every((r) => r === "match")) return "match";
+  return "unknown";
+}
+
+export function combineOr(results: ConditionOutcome[]): ConditionOutcome {
+  if (results.some((r) => r === "match")) return "match";
+  if (results.every((r) => r === "no_match")) return "no_match";
+  return "unknown";
+}
+
 /**
  * Evaluates a RuleCondition against a plain record view of the input.
  * Semantics (exact, per the closed DSL contract):
@@ -359,13 +387,10 @@ export function evaluateCondition(
     }
     case "not": {
       const child = evaluateCondition(condition.condition, input);
-      const result: ConditionOutcome =
-        child.result === "match"
-          ? "no_match"
-          : child.result === "no_match"
-            ? "match"
-            : "unknown";
-      return { result, missingFields: child.missingFields };
+      return {
+        result: combineNot(child.result),
+        missingFields: child.missingFields,
+      };
     }
     case "and": {
       const children = condition.conditions.map((c) =>
@@ -374,11 +399,10 @@ export function evaluateCondition(
       const missingFields = dedupeSorted(
         children.flatMap((c) => c.missingFields),
       );
-      if (children.some((c) => c.result === "no_match"))
-        return { result: "no_match", missingFields };
-      if (children.every((c) => c.result === "match"))
-        return { result: "match", missingFields };
-      return { result: "unknown", missingFields };
+      return {
+        result: combineAnd(children.map((c) => c.result)),
+        missingFields,
+      };
     }
     case "or": {
       const children = condition.conditions.map((c) =>
@@ -387,11 +411,10 @@ export function evaluateCondition(
       const missingFields = dedupeSorted(
         children.flatMap((c) => c.missingFields),
       );
-      if (children.some((c) => c.result === "match"))
-        return { result: "match", missingFields };
-      if (children.every((c) => c.result === "no_match"))
-        return { result: "no_match", missingFields };
-      return { result: "unknown", missingFields };
+      return {
+        result: combineOr(children.map((c) => c.result)),
+        missingFields,
+      };
     }
   }
 }

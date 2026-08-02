@@ -10,6 +10,11 @@
 // module only exports plain fetch functions and stable query-key
 // helpers.
 
+// Type-only import — accounts-api.ts also imports RoutingOutput (below)
+// from this module, so this is a type-only circular reference, fully
+// erased at compile time (no runtime cycle).
+import type { MqlNotReadyReason } from "@/lib/accounts-api";
+
 // The full routingOutput enum a persisted row can carry (see
 // lib/db/src/schema/enums.ts) — history may in principle contain values
 // beyond the ones this UI can create, so reads are typed against the full
@@ -65,11 +70,15 @@ const DEFAULT_OFFSET = 0;
 // Carries the backend's own `code` (see sendError() in
 // routes/accountDecisions.ts: every error body is `{ error, code }`) so
 // callers can render specific copy per code instead of just the generic
-// message.
+// message. `reasons` is populated only for code
+// "evaluation_not_decision_ready" (see the route's 422 response) — every
+// other error code leaves it undefined. Render reasons verbatim; never
+// recompute or reinterpret them client-side.
 export class AccountDecisionsApiError extends Error {
   constructor(
     message: string,
     public readonly code: string | undefined,
+    public readonly reasons?: MqlNotReadyReason[],
   ) {
     super(message);
     this.name = "AccountDecisionsApiError";
@@ -83,8 +92,9 @@ async function throwForResponse(
   const body = (await res.json().catch(() => ({}))) as {
     error?: string;
     code?: string;
+    reasons?: MqlNotReadyReason[];
   };
-  throw new AccountDecisionsApiError(body.error ?? fallback, body.code);
+  throw new AccountDecisionsApiError(body.error ?? fallback, body.code, body.reasons);
 }
 
 export async function fetchAccountDecisions(args: {

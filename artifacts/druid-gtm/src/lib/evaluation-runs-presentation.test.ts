@@ -31,6 +31,16 @@ function evaluation(overrides: Partial<AccountEvaluation> = {}): AccountEvaluati
     eligibilityOutcome: "eligible",
     createdAt: "2026-08-01T00:00:00.000Z",
     createdBy: null,
+    intentConfigured: false,
+    mqlDecisionReadiness: {
+      ready: false,
+      reasons: [
+        {
+          code: "intent_not_configured",
+          message: "This profile has no configured intent rule.",
+        },
+      ],
+    },
     profileConfigSnapshot: {},
     eligibilityRestrictions: [],
     hardDisqualifiers: [],

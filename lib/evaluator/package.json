@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "tsx --test src/conditions.test.ts src/types.test.ts src/profileConfig.test.ts src/publicationReadiness.test.ts src/configClassification.test.ts src/legacyStarterDetection.test.ts src/profileClassification.test.ts src/businessRuleClassification.test.ts src/rules/identity.test.ts src/rules/fit.test.ts src/rules/intent.test.ts src/rules/actionability.test.ts src/rules/eligibility.test.ts src/evaluate.test.ts src/registry.test.ts"
+    "test": "tsx --test src/conditions.test.ts src/types.test.ts src/profileConfig.test.ts src/publicationReadiness.test.ts src/configClassification.test.ts src/legacyStarterDetection.test.ts src/profileClassification.test.ts src/businessRuleClassification.test.ts src/mqlDecisionReadiness.test.ts src/rules/identity.test.ts src/rules/fit.test.ts src/rules/intent.test.ts src/rules/actionability.test.ts src/rules/eligibility.test.ts src/evaluate.test.ts src/registry.test.ts"
   },
   "dependencies": {
     "zod": "catalog:"

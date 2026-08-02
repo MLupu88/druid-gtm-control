@@ -10,13 +10,15 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Account, AccountEvaluation } from "@workspace/db/schema";
+import type { Account, AccountEvaluation, AccountSnapshot } from "@workspace/db/schema";
 import { IcpProfileConfigV1Schema, isIntentConfigured } from "@workspace/evaluator";
 import {
   listAccounts,
   getAccountById,
   type AccountEvaluationSummary,
+  type AccountEvaluationDetail,
 } from "./accounts.js";
+import { deriveMqlDecisionReadiness } from "./mqlDecisionReadiness.js";
 
 // ---------------------------------------------------------------------
 // Fixtures
@@ -56,12 +58,38 @@ const SYNTHETIC_INTENT_CONFIGURED_SNAPSHOT: unknown = {
   eligibility: { hardDisqualifiers: [], restrictions: [] },
 };
 
+// The snapshot id every syntheticEvaluationSummary/syntheticEvaluation
+// fixture uses by default — matched against SYNTHETIC_SNAPSHOT below so
+// tests can assert the real deriveMqlDecisionReadiness derivation instead
+// of a hand-guessed one.
+const SYNTHETIC_SNAPSHOT_ID = "33333333-3333-4333-8333-333333333333";
+
+type SnapshotRow = Pick<AccountSnapshot, "id" | "source" | "normalizedInput">;
+
+// A recognized (gtm-account-current-state-v1), evidence-bearing snapshot
+// — company.domain/name are non-blank so any fit rule referencing only
+// those two fields resolves; engagement/contact/crm/consent are absent
+// from this fixture's normalizedInput entirely, so any rule referencing
+// them is correctly treated as unevidenced by
+// ./mqlDecisionReadiness.ts's deriveMqlDecisionReadiness.
+function syntheticSnapshotRow(overrides: Partial<SnapshotRow> = {}): SnapshotRow {
+  return {
+    id: SYNTHETIC_SNAPSHOT_ID,
+    source: "gtm-account-current-state-v1",
+    normalizedInput: { company: { domain: "example.test", name: "Example Co" } },
+    ...overrides,
+  };
+}
+
 // The raw shape a DISTINCT ON query row has BEFORE ./accounts.ts's
 // toEvaluationSummary strips profileConfigSnapshot and derives
-// intentConfigured — distinct from AccountEvaluationSummary (the shape
-// listAccounts() actually returns), which has no profileConfigSnapshot
-// and a real intentConfigured boolean instead.
-type RawEvaluationSummaryRow = Omit<AccountEvaluationSummary, "intentConfigured"> & {
+// intentConfigured/mqlDecisionReadiness — distinct from
+// AccountEvaluationSummary (the shape listAccounts() actually returns),
+// which has no profileConfigSnapshot and real derived values instead.
+type RawEvaluationSummaryRow = Omit<
+  AccountEvaluationSummary,
+  "intentConfigured" | "mqlDecisionReadiness"
+> & {
   profileConfigSnapshot: unknown;
 };
 
@@ -95,13 +123,26 @@ function syntheticEvaluationSummary(
 // Mirrors ./accounts.ts's toEvaluationSummary exactly, so tests can
 // assert listAccounts()'s actual output (which is a NEW object, not the
 // same reference as the raw fake-db row) against a truthfully-derived
-// expectation rather than a hand-guessed one.
-function expectedSummary(row: RawEvaluationSummaryRow): AccountEvaluationSummary {
+// expectation rather than a hand-guessed one. `snapshot` mirrors what the
+// service's own batched account_snapshots lookup would have found for
+// this row's snapshotId (undefined when no matching row was returned).
+function expectedSummary(
+  row: RawEvaluationSummaryRow,
+  snapshot: SnapshotRow | undefined,
+): AccountEvaluationSummary {
   const { profileConfigSnapshot, ...rest } = row;
   return {
     ...rest,
     intentConfigured: isIntentConfigured(
       IcpProfileConfigV1Schema.parse(profileConfigSnapshot),
+    ),
+    mqlDecisionReadiness: deriveMqlDecisionReadiness(
+      {
+        status: row.status,
+        evaluationMode: row.evaluationMode,
+        profileConfigSnapshot,
+      },
+      snapshot ?? null,
     ),
   };
 }
@@ -111,13 +152,35 @@ function syntheticEvaluation(
 ): AccountEvaluation {
   return {
     ...syntheticEvaluationSummary(),
-    profileConfigSnapshot: { configSchemaVersion: "v1" },
+    // A schema-VALID minimal config (not the bare { configSchemaVersion: "v1" }
+    // placeholder used elsewhere for a deliberately-invalid-config test) —
+    // getAccountById's mqlDecisionReadiness derivation parses this via
+    // IcpProfileConfigV1Schema for every row, unconditionally.
+    profileConfigSnapshot: {
+      configSchemaVersion: "v1",
+      fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
     eligibilityRestrictions: [],
     hardDisqualifiers: [],
     scoreComponents: [],
     matchedRules: [],
     missingInputs: [],
     ...overrides,
+  };
+}
+
+// Mirrors ./accounts.ts's getAccountById mapping exactly (spread the raw
+// row, attach the real derivation), same intent as expectedSummary above.
+function expectedEvaluationDetail(
+  row: AccountEvaluation,
+  snapshot: SnapshotRow | undefined,
+): AccountEvaluationDetail {
+  return {
+    ...row,
+    mqlDecisionReadiness: deriveMqlDecisionReadiness(row, snapshot ?? null),
   };
 }
 
@@ -220,22 +283,27 @@ test("listAccounts maps latestEvaluation and latestProductionEvaluation independ
     id: "eval-b-production",
     accountId: "acc-b",
   });
+  const snapshot = syntheticSnapshotRow();
   const { db } = makeFakeDb([
     [{ value: 2 }],
     [accountA, accountB],
     [latestA], // latestEvaluation query: only account A has a row
     [latestProductionB], // latestProductionEvaluation query: only account B has a row
     [], // latestDecision query: neither account has a decision
+    [snapshot], // batched account_snapshots lookup for the readiness derivation
   ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
   const itemA = result.items.find((i) => i.account.id === "acc-a");
   const itemB = result.items.find((i) => i.account.id === "acc-b");
-  assert.deepEqual(itemA?.latestEvaluation, expectedSummary(latestA));
+  assert.deepEqual(itemA?.latestEvaluation, expectedSummary(latestA, snapshot));
   assert.equal(itemA?.latestProductionEvaluation, null);
   assert.equal(itemB?.latestEvaluation, null);
-  assert.deepEqual(itemB?.latestProductionEvaluation, expectedSummary(latestProductionB));
+  assert.deepEqual(
+    itemB?.latestProductionEvaluation,
+    expectedSummary(latestProductionB, snapshot),
+  );
 });
 
 test("listAccounts: a preview evaluation newer than the latest production evaluation surfaces separately in each field", async () => {
@@ -250,20 +318,25 @@ test("listAccounts: a preview evaluation newer than the latest production evalua
     evaluationMode: "production",
     createdAt: new Date("2026-01-15T00:00:00Z"),
   });
+  const snapshot = syntheticSnapshotRow();
   const { db } = makeFakeDb([
     [{ value: 1 }],
     [account],
     [previewLatest], // unfiltered DISTINCT ON picks the newest overall: the preview row
     [productionOlder], // production-filtered DISTINCT ON picks the newest production row
     [], // latestDecision query: no decision yet
+    [snapshot], // batched account_snapshots lookup for the readiness derivation
   ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
-  assert.deepEqual(result.items[0]?.latestEvaluation, expectedSummary(previewLatest));
+  assert.deepEqual(
+    result.items[0]?.latestEvaluation,
+    expectedSummary(previewLatest, snapshot),
+  );
   assert.deepEqual(
     result.items[0]?.latestProductionEvaluation,
-    expectedSummary(productionOlder),
+    expectedSummary(productionOlder, snapshot),
   );
 });
 
@@ -273,18 +346,26 @@ test("listAccounts: when the latest evaluation is itself the latest production e
     id: "eval-both",
     evaluationMode: "production",
   });
+  const snapshot = syntheticSnapshotRow();
   const { db } = makeFakeDb([
     [{ value: 1 }],
     [account],
     [evaluation],
     [evaluation],
     [],
+    [snapshot],
   ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
-  assert.deepEqual(result.items[0]?.latestEvaluation, expectedSummary(evaluation));
-  assert.deepEqual(result.items[0]?.latestProductionEvaluation, expectedSummary(evaluation));
+  assert.deepEqual(
+    result.items[0]?.latestEvaluation,
+    expectedSummary(evaluation, snapshot),
+  );
+  assert.deepEqual(
+    result.items[0]?.latestProductionEvaluation,
+    expectedSummary(evaluation, snapshot),
+  );
 });
 
 test("listAccounts derives intentConfigured=true when the evaluation's profileConfigSnapshot has at least one intent rule", async () => {
@@ -292,7 +373,14 @@ test("listAccounts derives intentConfigured=true when the evaluation's profileCo
   const evaluation = syntheticEvaluationSummary({
     profileConfigSnapshot: SYNTHETIC_INTENT_CONFIGURED_SNAPSHOT,
   });
-  const { db } = makeFakeDb([[{ value: 1 }], [account], [evaluation], [evaluation], []]);
+  const { db } = makeFakeDb([
+    [{ value: 1 }],
+    [account],
+    [evaluation],
+    [evaluation],
+    [],
+    [syntheticSnapshotRow()],
+  ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
@@ -311,7 +399,14 @@ test("listAccounts derives intentConfigured=false when the evaluation's profileC
       eligibility: { hardDisqualifiers: [], restrictions: [] },
     },
   });
-  const { db } = makeFakeDb([[{ value: 1 }], [account], [evaluation], [evaluation], []]);
+  const { db } = makeFakeDb([
+    [{ value: 1 }],
+    [account],
+    [evaluation],
+    [evaluation],
+    [],
+    [syntheticSnapshotRow()],
+  ]);
 
   const result = await listAccounts({ db, limit: 50, offset: 0 });
 
@@ -323,7 +418,14 @@ test("listAccounts throws rather than defaulting when a persisted evaluation's p
   const evaluation = syntheticEvaluationSummary({
     profileConfigSnapshot: { configSchemaVersion: "v1" }, // missing fit/intent/actionability/eligibility
   });
-  const { db } = makeFakeDb([[{ value: 1 }], [account], [evaluation], [evaluation], []]);
+  const { db } = makeFakeDb([
+    [{ value: 1 }],
+    [account],
+    [evaluation],
+    [evaluation],
+    [],
+    [syntheticSnapshotRow()],
+  ]);
 
   await assert.rejects(listAccounts({ db, limit: 50, offset: 0 }));
 });
@@ -394,12 +496,16 @@ test("getAccountById returns the account with its exact evaluation rows in deter
     id: "eval-older",
     createdAt: new Date("2026-01-01T00:00:00Z"),
   });
-  const { db, calls } = makeFakeDb([[account], [newer, older]]);
+  const snapshot = syntheticSnapshotRow();
+  const { db, calls } = makeFakeDb([[account], [newer, older], [snapshot]]);
 
   const result = await getAccountById(db, account.id);
 
   assert.equal(result?.account, account);
-  assert.deepEqual(result?.evaluations, [newer, older]);
+  assert.deepEqual(result?.evaluations, [
+    expectedEvaluationDetail(newer, snapshot),
+    expectedEvaluationDetail(older, snapshot),
+  ]);
   const evaluationsOrderByCall = calls.find(
     (c, idx) =>
       c.method === "orderBy" &&

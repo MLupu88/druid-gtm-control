@@ -8,10 +8,10 @@ import { AlertCircle, CheckCircle2 } from "lucide-react";
 import {
   createAccountDecision,
   accountDecisionsQueryKey,
-  AccountDecisionsApiError,
   type CreatableRoutingOutput,
 } from "@/lib/account-decisions-api";
 import { accountDetailQueryKey, type AccountEvaluation } from "@/lib/accounts-api";
+import { describeAccountDecisionError } from "@/lib/account-decisions-presentation";
 
 interface EffectiveSubmission {
   accountEvaluationId: string;
@@ -29,23 +29,6 @@ function sameSubmission(a: EffectiveSubmission, b: EffectiveSubmission): boolean
     a.routingOutput === b.routingOutput &&
     a.routingReason === b.routingReason
   );
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof AccountDecisionsApiError) {
-    switch (err.code) {
-      case "operator_identity_required":
-        return "Your signed-in session doesn't have a usable operator email configured, so this decision can't be attributed to you. Ask an admin to configure a named operator identity.";
-      case "evaluation_not_eligible":
-      case "record_not_found":
-        return "This evaluation has changed or is no longer eligible for a decision. Refresh the page and try again.";
-      case "idempotency_conflict":
-        return "This submission conflicts with a previous request. Change the reason (or refresh the page) and try again.";
-      default:
-        return err.message;
-    }
-  }
-  return err instanceof Error ? err.message : "Could not record this decision.";
 }
 
 interface DecisionControlsProps {
@@ -86,7 +69,7 @@ export function DecisionControls({
         routingReason: variables.routingReason,
       });
       setLastOutcome("error");
-      setErrorMessage(describeError(err));
+      setErrorMessage(describeAccountDecisionError(err));
     },
     onSettled: () => {
       isSubmittingRef.current = false;
@@ -111,6 +94,11 @@ export function DecisionControls({
   }
 
   const evaluationId = latestCompletedProductionEvaluation.id;
+  // Server-derived, authoritative — never recomputed here. See
+  // @/lib/accounts-api.ts's MqlDecisionReadiness and
+  // artifacts/api-server/src/services/mqlDecisionReadiness.ts (the single
+  // source of truth this mirrors verbatim).
+  const mqlReadiness = latestCompletedProductionEvaluation.mqlDecisionReadiness;
 
   function submit(routingOutput: CreatableRoutingOutput) {
     if (isSubmittingRef.current) return;
@@ -159,10 +147,35 @@ export function DecisionControls({
           />
         </div>
 
+        {!mqlReadiness.ready && (
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 space-y-1">
+            <p className="text-xs font-semibold text-amber-300">
+              Promote to MQL is unavailable
+            </p>
+            {mqlReadiness.reasons.length > 0 ? (
+              <ul className="text-[11px] text-amber-200/90 leading-relaxed list-disc list-inside space-y-0.5">
+                {mqlReadiness.reasons.map((reason, index) => (
+                  <li key={`${reason.code}-${index}`}>{reason.message}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                This evaluation is not decision-ready for MQL, but no specific reason was
+                provided. Refresh the page and try again.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col sm:flex-row gap-2">
           <Button
             onClick={() => submit("mql")}
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !mqlReadiness.ready}
+            title={
+              mqlReadiness.ready
+                ? undefined
+                : "Promote to MQL is unavailable for this evaluation (see reasons above)."
+            }
             className="flex-1 bg-primary text-primary-foreground hover:bg-[#00c853] shadow-lg shadow-primary/20 disabled:opacity-50"
           >
             Promote to MQL

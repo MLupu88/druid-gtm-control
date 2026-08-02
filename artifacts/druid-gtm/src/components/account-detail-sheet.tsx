@@ -66,6 +66,15 @@ const CANONICAL_DECISION_BUTTON_KEYS: ReadonlySet<ButtonKey> = new Set([
   "dismiss",
 ]);
 
+// The subset of CANONICAL_DECISION_BUTTON_KEYS additionally gated on
+// server-derived MQL decision-readiness (see getDisabled below). dismiss
+// is deliberately excluded — non-MQL decisions remain unaffected by
+// mqlDecisionReadiness.
+const MQL_DECISION_BUTTON_KEYS: ReadonlySet<ButtonKey> = new Set([
+  "promote_mql",
+  "promote_mql_owner",
+]);
+
 // Activation-style buttons — split into an active section vs. an unavailable section
 // below based on getDisabled(). approve_email/approve_linkedin are active once the
 // engine is live and the row's gate passes (self-serve LinkedIn export / persisted email
@@ -138,14 +147,18 @@ export function AccountDetailSheet({
   });
   // account_evaluations rows arrive ordered createdAt desc, id desc (see
   // services/accounts.ts's getAccountById), so the first completed +
-  // production match is genuinely the latest one.
-  const eligibleAccountEvaluationId = useMemo(() => {
+  // production match is genuinely the latest one. Kept as the full
+  // evaluation (not just its id) so getDisabled can also read its
+  // server-derived mqlDecisionReadiness below.
+  const eligibleAccountEvaluation = useMemo(() => {
     const evaluations = canonicalDetailQ.data?.evaluations ?? [];
-    const match = evaluations.find(
-      (e) => e.status === "completed" && e.evaluationMode === "production",
+    return (
+      evaluations.find(
+        (e) => e.status === "completed" && e.evaluationMode === "production",
+      ) ?? null
     );
-    return match?.id ?? null;
   }, [canonicalDetailQ.data]);
+  const eligibleAccountEvaluationId = eligibleAccountEvaluation?.id ?? null;
 
   const outputType = rowOutputType(row, source);
   const outputMeta = OUTPUT_TYPE_LABELS[outputType];
@@ -233,6 +246,27 @@ export function AccountDetailSheet({
           disabled: true,
           reason:
             "This account has no completed production evaluation yet, so a decision cannot be recorded.",
+        };
+      }
+
+      // promote_mql/promote_mql_owner ONLY: also require server-derived
+      // MQL decision-readiness (see @/lib/accounts-api.ts's
+      // MqlDecisionReadiness and
+      // artifacts/api-server/src/services/mqlDecisionReadiness.ts, the
+      // single source of truth this reads verbatim — never recomputed
+      // here). dismiss is unaffected: it is in
+      // CANONICAL_DECISION_BUTTON_KEYS but not MQL_DECISION_BUTTON_KEYS.
+      if (
+        MQL_DECISION_BUTTON_KEYS.has(btnKey) &&
+        eligibleAccountEvaluation &&
+        !eligibleAccountEvaluation.mqlDecisionReadiness.ready
+      ) {
+        const [firstReason] = eligibleAccountEvaluation.mqlDecisionReadiness.reasons;
+        return {
+          disabled: true,
+          reason:
+            firstReason?.message ??
+            "This evaluation is not decision-ready for MQL, but no specific reason was provided.",
         };
       }
     }

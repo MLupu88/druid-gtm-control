@@ -10,6 +10,11 @@
 //
 // No evaluation logic is computed or re-run — every value returned is a
 // stored column read verbatim from accounts/account_evaluations.
+// mqlDecisionReadiness is the one exception, on the same footing as
+// intentConfigured below: both are derived at read time from a row's own
+// already-persisted data (profileConfigSnapshot, plus — for
+// mqlDecisionReadiness — its referenced account_snapshots row), never
+// re-running the evaluator itself.
 
 import { and, count, desc, eq, inArray } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -17,14 +22,42 @@ import {
   accounts,
   accountEvaluations,
   accountDecisions,
+  accountSnapshots,
   type Account,
   type AccountEvaluation,
   type AccountDecision,
+  type AccountSnapshot,
 } from "@workspace/db/schema";
 import type * as schema from "@workspace/db/schema";
-import { isIntentConfigured, IcpProfileConfigV1Schema } from "@workspace/evaluator";
+import {
+  isIntentConfigured,
+  IcpProfileConfigV1Schema,
+  type MqlDecisionReadiness,
+} from "@workspace/evaluator";
+import { deriveMqlDecisionReadiness } from "./mqlDecisionReadiness.js";
 
 type Db = NodePgDatabase<typeof schema>;
+
+type SnapshotForReadiness = Pick<AccountSnapshot, "id" | "source" | "normalizedInput">;
+
+const SNAPSHOT_READINESS_COLUMNS = {
+  id: accountSnapshots.id,
+  source: accountSnapshots.source,
+  normalizedInput: accountSnapshots.normalizedInput,
+} as const;
+
+/** Batch-fetches just the columns deriveMqlDecisionReadiness needs for a set of snapshot ids, keyed by id — one query regardless of how many evaluations reference them, never per-row. */
+async function loadSnapshotsForReadiness(
+  db: Db,
+  snapshotIds: string[],
+): Promise<Map<string, SnapshotForReadiness>> {
+  if (snapshotIds.length === 0) return new Map();
+  const rows = await db
+    .select(SNAPSHOT_READINESS_COLUMNS)
+    .from(accountSnapshots)
+    .where(inArray(accountSnapshots.id, snapshotIds));
+  return new Map(rows.map((row) => [row.id, row]));
+}
 
 // ---------------------------------------------------------------------
 // List read-model. Deliberately excludes every jsonb column
@@ -62,6 +95,8 @@ export type AccountEvaluationSummary = Pick<
 > & {
   /** Whether the profile config this evaluation actually ran against had at least one configured intent rule — see @workspace/evaluator's isIntentConfigured. False means intentTier necessarily resolved to the profile's fallback band, never a real evaluated buying-intent signal. */
   intentConfigured: boolean;
+  /** Server-derived, authoritative result of @workspace/evaluator's evaluateMqlDecisionReadiness (via ./mqlDecisionReadiness.ts's deriveMqlDecisionReadiness) — whether this evaluation has enough evidence-backed, action-relevant fit/intent condition resolution to support a Promote to MQL decision. The frontend must render this verbatim, never recompute it. */
+  mqlDecisionReadiness: MqlDecisionReadiness;
 };
 
 // Selected once and reused for both DISTINCT ON queries below, so the two
@@ -104,9 +139,19 @@ const EVALUATION_SUMMARY_QUERY_COLUMNS = {
 // the type, since a false/silent default here would risk showing "Intent
 // not configured" for corrupted or otherwise-unexpected stored data
 // instead of surfacing the problem.
-function toEvaluationSummary<T extends { profileConfigSnapshot: unknown }>(
+function toEvaluationSummary<
+  T extends {
+    profileConfigSnapshot: unknown;
+    status: AccountEvaluation["status"];
+    evaluationMode: AccountEvaluation["evaluationMode"];
+  },
+>(
   row: T,
-): Omit<T, "profileConfigSnapshot"> & { intentConfigured: boolean } {
+  snapshot: SnapshotForReadiness | undefined,
+): Omit<T, "profileConfigSnapshot"> & {
+  intentConfigured: boolean;
+  mqlDecisionReadiness: MqlDecisionReadiness;
+} {
   const { profileConfigSnapshot, ...rest } = row;
   const parsed = IcpProfileConfigV1Schema.safeParse(profileConfigSnapshot);
   if (!parsed.success) {
@@ -114,7 +159,19 @@ function toEvaluationSummary<T extends { profileConfigSnapshot: unknown }>(
       "Persisted account evaluation contains an invalid profileConfigSnapshot",
     );
   }
-  return { ...rest, intentConfigured: isIntentConfigured(parsed.data) };
+  const mqlDecisionReadiness = deriveMqlDecisionReadiness(
+    {
+      status: row.status,
+      evaluationMode: row.evaluationMode,
+      profileConfigSnapshot,
+    },
+    snapshot ?? null,
+  );
+  return {
+    ...rest,
+    intentConfigured: isIntentConfigured(parsed.data),
+    mqlDecisionReadiness,
+  };
 }
 
 // Compact summary of an account's most recent canonical decision (any
@@ -236,11 +293,24 @@ export async function listAccounts(
         ),
     ]);
 
+  const snapshotById = await loadSnapshotsForReadiness(db, [
+    ...new Set([
+      ...latestRows.map((row) => row.snapshotId),
+      ...latestProductionRows.map((row) => row.snapshotId),
+    ]),
+  ]);
+
   const latestByAccountId = new Map(
-    latestRows.map((row) => [row.accountId, toEvaluationSummary(row)]),
+    latestRows.map((row) => [
+      row.accountId,
+      toEvaluationSummary(row, snapshotById.get(row.snapshotId)),
+    ]),
   );
   const latestProductionByAccountId = new Map(
-    latestProductionRows.map((row) => [row.accountId, toEvaluationSummary(row)]),
+    latestProductionRows.map((row) => [
+      row.accountId,
+      toEvaluationSummary(row, snapshotById.get(row.snapshotId)),
+    ]),
   );
   const latestDecisionByAccountId = new Map(
     latestDecisionRows.map(({ accountId, ...decision }) => [
@@ -267,10 +337,18 @@ export async function listAccounts(
 // above). No recomputation: evaluations are returned exactly as persisted.
 // ---------------------------------------------------------------------
 
+// AccountEvaluation + mqlDecisionReadiness only — every other stored field
+// is still returned exactly as persisted (see the module comment above),
+// this is the one derived addition, on the same footing as
+// AccountEvaluationSummary.mqlDecisionReadiness above.
+export type AccountEvaluationDetail = AccountEvaluation & {
+  mqlDecisionReadiness: MqlDecisionReadiness;
+};
+
 export interface AccountDetail {
   account: Account;
   /** Ordered by createdAt descending, then id descending. */
-  evaluations: AccountEvaluation[];
+  evaluations: AccountEvaluationDetail[];
 }
 
 export async function getAccountById(
@@ -284,11 +362,24 @@ export async function getAccountById(
     .limit(1);
   if (!account) return undefined;
 
-  const evaluations = await db
+  const evaluationRows = await db
     .select()
     .from(accountEvaluations)
     .where(eq(accountEvaluations.accountId, accountId))
     .orderBy(desc(accountEvaluations.createdAt), desc(accountEvaluations.id));
+
+  const snapshotById = await loadSnapshotsForReadiness(
+    db,
+    [...new Set(evaluationRows.map((row) => row.snapshotId))],
+  );
+
+  const evaluations: AccountEvaluationDetail[] = evaluationRows.map((row) => ({
+    ...row,
+    mqlDecisionReadiness: deriveMqlDecisionReadiness(
+      row,
+      snapshotById.get(row.snapshotId) ?? null,
+    ),
+  }));
 
   return { account, evaluations };
 }

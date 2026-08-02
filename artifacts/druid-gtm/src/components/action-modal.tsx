@@ -23,9 +23,9 @@ import { MessageComposer } from "@/components/message-composer";
 import { copyText, downloadText } from "@/lib/clipboard";
 import {
   createAccountDecision,
-  AccountDecisionsApiError,
   type CreatableRoutingOutput,
 } from "@/lib/account-decisions-api";
+import { describeAccountDecisionError } from "@/lib/account-decisions-presentation";
 
 interface ActionModalProps {
   open: boolean;
@@ -212,9 +212,10 @@ export function ActionModal({
         });
       } catch (err) {
         setErrorMessage(
-          err instanceof AccountDecisionsApiError
-            ? err.message
-            : "Could not record this decision. Please try again.",
+          describeAccountDecisionError(
+            err,
+            "Could not record this decision. Please try again.",
+          ),
         );
         setPhase("error");
         return;
