@@ -12,10 +12,17 @@ import {
   humanizeVersionStatus,
   selectDefaultVersionId,
   summarizeVersionConfig,
+  classificationLabel,
+  classificationBadgeVariant,
+  describeTargetCriterion,
+  buildTargetSummary,
+  targetSummaryFallback,
+  describeProfileTargetSummary,
 } from "./icp-profile-presentation.js";
 import type {
   IcpProfileListItem,
   IcpProfileVersionSummary,
+  TargetCriterion,
 } from "./icp-profiles-api.js";
 
 // ---------------------------------------------------------------------
@@ -50,6 +57,8 @@ function syntheticProfile(
     activeVersion: null,
     draftVersion: null,
     latestVersion: null,
+    classification: "no_active_definition",
+    targetCriteria: [],
     ...overrides,
   };
 }
@@ -244,4 +253,110 @@ test("summarizeVersionConfig reports null only for the specific array that's act
   assert.equal(summary?.fitRuleCount, 1);
   assert.equal(summary?.fitTierCount, null);
   assert.equal(summary?.intentRuleCount, null);
+});
+
+// ---------------------------------------------------------------------
+// classificationLabel / describeTargetCriterion / buildTargetSummary
+// ---------------------------------------------------------------------
+
+test("classificationLabel covers every ProfileClassification with plain business language, never a raw code", () => {
+  assert.equal(classificationLabel("no_active_definition"), "No active definition");
+  assert.equal(classificationLabel("legacy_starter"), "Legacy starter");
+  assert.equal(classificationLabel("incomplete"), "Incomplete");
+  assert.equal(classificationLabel("fit_only"), "Fit-only");
+  assert.equal(classificationLabel("fit_plus_intent"), "Fit + intent");
+});
+
+test("classificationBadgeVariant maps every classification to its exact expected variant", () => {
+  assert.equal(classificationBadgeVariant("fit_plus_intent"), "default");
+  assert.equal(classificationBadgeVariant("fit_only"), "outline");
+  assert.equal(classificationBadgeVariant("legacy_starter"), "secondary");
+  assert.equal(classificationBadgeVariant("incomplete"), "secondary");
+  assert.equal(classificationBadgeVariant("no_active_definition"), "outline");
+});
+
+test("describeTargetCriterion humanizes the field label and prose-joins two values with 'or'", () => {
+  const criterion: TargetCriterion = {
+    field: "company.industry",
+    operator: "in",
+    values: ["Banking", "Insurance"],
+  };
+  assert.equal(describeTargetCriterion(criterion), "Industry: Banking or Insurance");
+});
+
+test("describeTargetCriterion handles a single eq value with no connective word", () => {
+  const criterion: TargetCriterion = {
+    field: "company.region",
+    operator: "eq",
+    values: ["EMEA"],
+  };
+  assert.equal(describeTargetCriterion(criterion), "Region: EMEA");
+});
+
+test("describeTargetCriterion Oxford-joins three or more values", () => {
+  const criterion: TargetCriterion = {
+    field: "company.industry",
+    operator: "in",
+    values: ["Banking", "Insurance", "Healthcare"],
+  };
+  assert.equal(describeTargetCriterion(criterion), "Industry: Banking, Insurance, or Healthcare");
+});
+
+test("buildTargetSummary returns null (never a fabricated sentence) when there are no target criteria", () => {
+  assert.equal(buildTargetSummary([]), null);
+});
+
+test("buildTargetSummary joins multiple criteria into one compact line", () => {
+  const criteria: TargetCriterion[] = [
+    { field: "company.industry", operator: "in", values: ["Banking", "Insurance"] },
+    { field: "company.region", operator: "eq", values: ["EMEA"] },
+  ];
+  assert.equal(
+    buildTargetSummary(criteria),
+    "Industry: Banking or Insurance · Region: EMEA",
+  );
+});
+
+test("targetSummaryFallback gives a specific, truthful reason per classification, never a generic placeholder", () => {
+  assert.equal(targetSummaryFallback("no_active_definition"), "No active target definition");
+  assert.equal(
+    targetSummaryFallback("legacy_starter"),
+    "Legacy starter only checks that a company domain exists",
+  );
+  assert.equal(
+    targetSummaryFallback("incomplete"),
+    "No meaningful target company criteria configured",
+  );
+  assert.equal(
+    targetSummaryFallback("fit_only"),
+    "Target criteria use advanced rules — open the profile to review",
+  );
+  assert.equal(
+    targetSummaryFallback("fit_plus_intent"),
+    "Target criteria use advanced rules — open the profile to review",
+  );
+});
+
+test("describeProfileTargetSummary returns 'Targets: ' plus the compact criteria summary when criteria exist", () => {
+  const profile = syntheticProfile({
+    classification: "fit_only",
+    targetCriteria: [{ field: "company.region", operator: "eq", values: ["EMEA"] }],
+  });
+  assert.equal(describeProfileTargetSummary(profile), "Targets: Region: EMEA");
+});
+
+test("describeProfileTargetSummary falls back to the classification-specific reason when there are no criteria", () => {
+  const profile = syntheticProfile({ classification: "incomplete", targetCriteria: [] });
+  assert.equal(
+    describeProfileTargetSummary(profile),
+    "No meaningful target company criteria configured",
+  );
+});
+
+test("describeProfileTargetSummary falls back for fit_only/fit_plus_intent profiles whose only criteria are advanced (compound) rules — targetCriteria is empty even though the profile isn't 'incomplete'", () => {
+  const profile = syntheticProfile({ classification: "fit_only", targetCriteria: [] });
+  assert.equal(
+    describeProfileTargetSummary(profile),
+    "Target criteria use advanced rules — open the profile to review",
+  );
 });

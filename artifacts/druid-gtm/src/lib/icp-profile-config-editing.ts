@@ -13,14 +13,27 @@
 // IcpProfileConfigV1Schema (the single source of truth) rather than
 // reimplementing any of its rules.
 
-import type {
-  IcpProfileConfigV1,
-  WeightedRule,
-  ConditionRule,
-  Tier,
-  RuleCondition,
-  FieldAllowlist,
+import {
+  WEIGHT_PRESET_VALUES,
+  WEIGHT_PRESET_ORDER,
+  weightPresetForPoints,
+  type IcpProfileConfigV1,
+  type WeightedRule,
+  type ConditionRule,
+  type Tier,
+  type RuleCondition,
+  type FieldAllowlist,
+  type WeightPresetKey,
 } from "@workspace/evaluator";
+
+// Re-exported so existing call sites (../components/icp-rule-list-section.tsx,
+// ../components/icp-profile-summary-card.tsx) keep importing the preset
+// values/helper from this file unchanged — @workspace/evaluator is now
+// the single source of truth for the numbers themselves (also used by
+// its own isSimpleFitRule/isSimpleIntentRule classification), not a
+// second, locally duplicated copy.
+export { WEIGHT_PRESET_VALUES, WEIGHT_PRESET_ORDER, weightPresetForPoints };
+export type { WeightPresetKey };
 
 // ---------------------------------------------------------------------
 // Rule/tier id generation. RuleIdSchema/TierCodeSchema both require
@@ -78,44 +91,22 @@ export function buildStarterProfileConfig(): IcpProfileConfigV1 {
 }
 
 // ---------------------------------------------------------------------
-// Business-friendly weight presets. A rule's `points` field is a plain
-// number with no fixed scale (see profileConfig.ts) — most authors don't
-// need to pick an arbitrary integer, they need to say how much a
-// criterion matters. These three documented values are the only thing a
-// "preset" ever means; picking one always sets `points` to exactly this
-// number, deterministically. An existing rule whose points value doesn't
-// match any of these three is presented as "Advanced" (see
-// ../components/icp-rule-list-section.tsx) — its value is never silently
-// snapped to the nearest preset.
+// Business-friendly weight-preset display labels. The numeric values
+// themselves (WEIGHT_PRESET_VALUES/WEIGHT_PRESET_ORDER/
+// weightPresetForPoints, re-exported above from @workspace/evaluator)
+// are shared with the business-editing classifier
+// (isSimpleFitRule/isSimpleIntentRule) — only the plain-language display
+// strings live here, since @workspace/evaluator has no UI/copy concerns.
+// An existing rule whose points value doesn't match any of these three
+// is presented as "Advanced" (see ../components/icp-rule-list-section.tsx)
+// — its value is never silently snapped to the nearest preset.
 // ---------------------------------------------------------------------
-
-export const WEIGHT_PRESET_VALUES = {
-  supporting: 5,
-  important: 15,
-  critical: 30,
-} as const;
-
-export type WeightPresetKey = keyof typeof WEIGHT_PRESET_VALUES;
-
-export const WEIGHT_PRESET_ORDER: WeightPresetKey[] = [
-  "supporting",
-  "important",
-  "critical",
-];
 
 export const WEIGHT_PRESET_LABELS: Record<WeightPresetKey, string> = {
   supporting: "Supporting",
   important: "Important",
   critical: "Critical",
 };
-
-/** Returns the preset key whose documented value exactly matches `points`, or null when it doesn't match any preset (i.e. an "Advanced"/custom value). */
-export function weightPresetForPoints(points: number): WeightPresetKey | null {
-  for (const key of WEIGHT_PRESET_ORDER) {
-    if (WEIGHT_PRESET_VALUES[key] === points) return key;
-  }
-  return null;
-}
 
 // ---------------------------------------------------------------------
 // Default leaf condition for a newly-added rule — "is present" against

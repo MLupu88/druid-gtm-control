@@ -19,7 +19,10 @@ import type {
   IcpProfileListItem,
   IcpProfileVersion,
   IcpProfileVersionStatus,
+  ProfileClassification,
+  TargetCriterion,
 } from "./icp-profiles-api";
+import { humanizeFieldLabel } from "./icp-profile-config-validation";
 
 // ---------------------------------------------------------------------
 // List-page badges. Deliberately independent literal union (not imported
@@ -170,6 +173,116 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function arrayLengthOrNull(value: unknown): number | null {
   return Array.isArray(value) ? value.length : null;
+}
+
+// ---------------------------------------------------------------------
+// Classification labels + compact plain-language target summary. Both
+// are pure presentation over fields the list endpoint already computes
+// server-side (see artifacts/api-server/src/services/icpProfiles.ts's
+// buildProfileListItem and @workspace/evaluator's
+// classifyProfileConfig/targetCriteria) — nothing here re-derives a
+// classification or re-inspects rules, and no points, thresholds, or
+// technical rule counts are ever shown.
+// ---------------------------------------------------------------------
+
+export const PROFILE_CLASSIFICATION_LABELS: Record<ProfileClassification, string> = {
+  no_active_definition: "No active definition",
+  legacy_starter: "Legacy starter",
+  incomplete: "Incomplete",
+  fit_only: "Fit-only",
+  fit_plus_intent: "Fit + intent",
+};
+
+export function classificationLabel(classification: ProfileClassification): string {
+  return PROFILE_CLASSIFICATION_LABELS[classification];
+}
+
+// Reuses the existing 3-variant ProfileBadgeVariant union (see
+// deriveProfileBadges above) rather than inventing a fourth "warning"
+// color — "legacy_starter" and "incomplete" both signal "this profile
+// needs attention before it does anything useful", so both get the same
+// non-default treatment as an ordinary secondary badge; "fit_plus_intent"
+// is the only classification that earns the primary/default treatment.
+export function classificationBadgeVariant(
+  classification: ProfileClassification,
+): ProfileBadgeVariant {
+  switch (classification) {
+    case "fit_plus_intent":
+      return "default";
+    case "fit_only":
+      return "outline";
+    case "legacy_starter":
+    case "incomplete":
+      return "secondary";
+    case "no_active_definition":
+      return "outline";
+  }
+}
+
+// Oxford-style join ("Banking", "Banking or Insurance", "Banking,
+// Insurance, or Healthcare") — mirrors ../lib/icp-profile-business-
+// summary.ts's identical private helper; kept separate here rather than
+// imported so this module's own stated independence from rule-editing
+// concerns stays intact.
+function joinValuesAsProse(values: (string | number | boolean)[]): string {
+  const formatted = values.map((value) =>
+    typeof value === "boolean" ? (value ? "true" : "false") : String(value),
+  );
+  if (formatted.length === 0) return "";
+  if (formatted.length === 1) return formatted[0]!;
+  if (formatted.length === 2) return `${formatted[0]} or ${formatted[1]}`;
+  return `${formatted.slice(0, -1).join(", ")}, or ${formatted[formatted.length - 1]}`;
+}
+
+/** One short readable clause per criterion, e.g. "Industry: Banking or Insurance" — field label plus its actually configured values, nothing invented. */
+export function describeTargetCriterion(criterion: TargetCriterion): string {
+  return `${humanizeFieldLabel(criterion.field)}: ${joinValuesAsProse(criterion.values)}`;
+}
+
+/**
+ * Compact plain-language target summary for the profile-library list —
+ * one clause per configured target criterion, joined for a single-line
+ * display. Null when there are no simple, directly supported target
+ * criteria yet — never a fabricated "no criteria" sentence; callers
+ * should render their own truthful empty state for that case.
+ */
+export function buildTargetSummary(criteria: TargetCriterion[]): string | null {
+  if (criteria.length === 0) return null;
+  return criteria.map(describeTargetCriterion).join(" · ");
+}
+
+// Truthful fallback text for the target-summary line when
+// buildTargetSummary() has nothing to show — one per classification, so
+// the reason is always specific ("no active version" reads differently
+// from "this profile is the legacy starter" or "criteria are too
+// advanced to summarize compactly"), never a single generic "—".
+const TARGET_SUMMARY_FALLBACKS: Record<ProfileClassification, string> = {
+  no_active_definition: "No active target definition",
+  legacy_starter: "Legacy starter only checks that a company domain exists",
+  incomplete: "No meaningful target company criteria configured",
+  fit_only: "Target criteria use advanced rules — open the profile to review",
+  fit_plus_intent: "Target criteria use advanced rules — open the profile to review",
+};
+
+export function targetSummaryFallback(classification: ProfileClassification): string {
+  return TARGET_SUMMARY_FALLBACKS[classification];
+}
+
+/**
+ * The complete display line the profile-library list should render in
+ * the target-summary position — callers render this string directly,
+ * with no further prefixing or null-check/fallback branching of their
+ * own:
+ *   - criteria exist: "Targets: " + buildTargetSummary()'s compact summary.
+ *   - no criteria: the classification-specific fallback, unprefixed
+ *     (it's already a complete sentence, e.g. "No active target
+ *     definition" — prepending "Targets:" to it would read oddly).
+ */
+export function describeProfileTargetSummary(
+  profile: Pick<IcpProfileListItem, "classification" | "targetCriteria">,
+): string {
+  const summary = buildTargetSummary(profile.targetCriteria);
+  return summary !== null ? `Targets: ${summary}` : targetSummaryFallback(profile.classification);
 }
 
 // Returns null (not a summary of all-nulls) when `config` itself isn't

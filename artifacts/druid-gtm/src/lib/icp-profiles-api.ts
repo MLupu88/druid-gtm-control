@@ -35,7 +35,13 @@
 // components; this module only exports plain fetch functions and stable
 // query-key helpers.
 
-import type { IcpProfileConfigV1 } from "@workspace/evaluator";
+import type {
+  IcpProfileConfigV1,
+  ProfileClassification,
+  TargetCriterion,
+} from "@workspace/evaluator";
+
+export type { ProfileClassification, TargetCriterion };
 
 export type IcpProfileVersionStatus = "draft" | "published";
 
@@ -59,6 +65,10 @@ export interface IcpProfileListItem {
   activeVersion: IcpProfileVersionSummary | null;
   draftVersion: IcpProfileVersionSummary | null;
   latestVersion: IcpProfileVersionSummary | null;
+  /** Derived server-side from the active version's config — see @workspace/evaluator's classifyProfileConfig. "no_active_definition" whenever activeVersion is null. */
+  classification: ProfileClassification;
+  /** Structured target-company criteria from the active version's simple fit rules — see @workspace/evaluator's targetCriteria. Never points, rule ids, or thresholds. */
+  targetCriteria: TargetCriterion[];
 }
 
 // Carries the backend's own `code` (see sendError() in

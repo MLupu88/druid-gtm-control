@@ -69,6 +69,8 @@ export interface AccountEvaluationSummary {
   eligibilityOutcome: EligibilityOutcome | null;
   createdAt: string;
   createdBy: string | null;
+  /** Derived server-side from the evaluation's own profileConfigSnapshot (see services/accounts.ts's toEvaluationSummary) — never the full config. False means intentTier necessarily resolved to the profile's fallback band, not a real evaluated buying-intent signal; render "Intent not configured" instead of intentTier in that case. */
+  intentConfigured: boolean;
 }
 
 // The full, exact persisted row — only ever present on the detail

@@ -22,6 +22,7 @@ import {
   type AccountDecision,
 } from "@workspace/db/schema";
 import type * as schema from "@workspace/db/schema";
+import { isIntentConfigured, IcpProfileConfigV1Schema } from "@workspace/evaluator";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -33,6 +34,11 @@ type Db = NodePgDatabase<typeof schema>;
 // (getAccountById) returns full rows instead.
 // ---------------------------------------------------------------------
 
+// intentConfigured is DERIVED at read time from the row's own
+// profileConfigSnapshot (see toEvaluationSummary below) — never a stored
+// column, so no database migration was needed to add it. The raw
+// snapshot itself is discarded before the summary leaves this module, so
+// list responses still never carry a jsonb config payload.
 export type AccountEvaluationSummary = Pick<
   AccountEvaluation,
   | "id"
@@ -53,7 +59,10 @@ export type AccountEvaluationSummary = Pick<
   | "eligibilityOutcome"
   | "createdAt"
   | "createdBy"
->;
+> & {
+  /** Whether the profile config this evaluation actually ran against had at least one configured intent rule — see @workspace/evaluator's isIntentConfigured. False means intentTier necessarily resolved to the profile's fallback band, never a real evaluated buying-intent signal. */
+  intentConfigured: boolean;
+};
 
 // Selected once and reused for both DISTINCT ON queries below, so the two
 // query shapes can never accidentally drift apart.
@@ -77,6 +86,36 @@ const EVALUATION_SUMMARY_COLUMNS = {
   createdAt: accountEvaluations.createdAt,
   createdBy: accountEvaluations.createdBy,
 } as const;
+
+// Query-only superset of EVALUATION_SUMMARY_COLUMNS: adds
+// profileConfigSnapshot so toEvaluationSummary has something to derive
+// intentConfigured from. Never returned to a caller as-is — the raw
+// snapshot is stripped back off before the row leaves this module.
+const EVALUATION_SUMMARY_QUERY_COLUMNS = {
+  ...EVALUATION_SUMMARY_COLUMNS,
+  profileConfigSnapshot: accountEvaluations.profileConfigSnapshot,
+} as const;
+
+// profileConfigSnapshot is jsonb (`unknown` at the type level). Every row
+// SHOULD have been written by evaluateAndPersist() from a config that
+// already passed IcpProfileConfigV1Schema validation (see
+// lib/db/src/schema/accountEvaluations.ts's `.notNull()` column and own
+// module comment) — but this re-validates rather than blindly asserting
+// the type, since a false/silent default here would risk showing "Intent
+// not configured" for corrupted or otherwise-unexpected stored data
+// instead of surfacing the problem.
+function toEvaluationSummary<T extends { profileConfigSnapshot: unknown }>(
+  row: T,
+): Omit<T, "profileConfigSnapshot"> & { intentConfigured: boolean } {
+  const { profileConfigSnapshot, ...rest } = row;
+  const parsed = IcpProfileConfigV1Schema.safeParse(profileConfigSnapshot);
+  if (!parsed.success) {
+    throw new Error(
+      "Persisted account evaluation contains an invalid profileConfigSnapshot",
+    );
+  }
+  return { ...rest, intentConfigured: isIntentConfigured(parsed.data) };
+}
 
 // Compact summary of an account's most recent canonical decision (any
 // routingOutput, any referenced evaluation) — just enough for the
@@ -147,7 +186,7 @@ export async function listAccounts(
       db
         .selectDistinctOn(
           [accountEvaluations.accountId],
-          EVALUATION_SUMMARY_COLUMNS,
+          EVALUATION_SUMMARY_QUERY_COLUMNS,
         )
         .from(accountEvaluations)
         .where(inArray(accountEvaluations.accountId, accountIds))
@@ -159,7 +198,7 @@ export async function listAccounts(
       db
         .selectDistinctOn(
           [accountEvaluations.accountId],
-          EVALUATION_SUMMARY_COLUMNS,
+          EVALUATION_SUMMARY_QUERY_COLUMNS,
         )
         .from(accountEvaluations)
         .where(
@@ -198,10 +237,10 @@ export async function listAccounts(
     ]);
 
   const latestByAccountId = new Map(
-    latestRows.map((row) => [row.accountId, row]),
+    latestRows.map((row) => [row.accountId, toEvaluationSummary(row)]),
   );
   const latestProductionByAccountId = new Map(
-    latestProductionRows.map((row) => [row.accountId, row]),
+    latestProductionRows.map((row) => [row.accountId, toEvaluationSummary(row)]),
   );
   const latestDecisionByAccountId = new Map(
     latestDecisionRows.map(({ accountId, ...decision }) => [

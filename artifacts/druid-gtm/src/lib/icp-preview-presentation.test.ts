@@ -20,7 +20,48 @@ import {
   hasIdentityNotPersonAddressableRestriction,
   deriveActionabilityState,
   ACTIONABILITY_STATE_LABELS,
+  evaluationIntentConfigured,
 } from "./icp-preview-presentation.js";
+
+function validConfigWithIntentRules(hasRules: boolean): unknown {
+  return {
+    configSchemaVersion: "v1",
+    fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+    intent: {
+      rules: hasRules
+        ? [
+            {
+              id: "has_engagement",
+              description: "Has engagement",
+              points: 5,
+              condition: { op: "exists", field: "engagement.sources" },
+            },
+          ]
+        : [],
+      tiers: [{ code: "floor", minScore: 0 }],
+    },
+    actionability: { rules: [] },
+    eligibility: { hardDisqualifiers: [], restrictions: [] },
+  };
+}
+
+// ---------------------------------------------------------------------
+// Fit-only truthfulness — evaluationIntentConfigured
+// ---------------------------------------------------------------------
+
+test("evaluationIntentConfigured is true when the snapshot has at least one intent rule", () => {
+  assert.equal(evaluationIntentConfigured(validConfigWithIntentRules(true)), true);
+});
+
+test("evaluationIntentConfigured is false when the snapshot has zero intent rules", () => {
+  assert.equal(evaluationIntentConfigured(validConfigWithIntentRules(false)), false);
+});
+
+test("evaluationIntentConfigured is null (never a guessed true/false) for a snapshot that doesn't parse as a real config", () => {
+  assert.equal(evaluationIntentConfigured({ configSchemaVersion: "v1" }), null);
+  assert.equal(evaluationIntentConfigured(null), null);
+  assert.equal(evaluationIntentConfigured("not an object"), null);
+});
 
 // ---------------------------------------------------------------------
 // Humanized dimension/metric terminology

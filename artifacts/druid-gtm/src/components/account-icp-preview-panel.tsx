@@ -60,6 +60,11 @@ import {
   hasIdentityNotPersonAddressableRestriction,
   deriveActionabilityState,
   ACTIONABILITY_STATE_LABELS,
+  evaluationIntentConfigured,
+  INTENT_NOT_CONFIGURED_LABEL,
+  INTENT_NOT_CONFIGURED_EXPLANATION,
+  INTENT_CONFIGURATION_UNAVAILABLE_LABEL,
+  INTENT_CONFIGURATION_UNAVAILABLE_EXPLANATION,
   type MissingInputCategory,
   type ReasonEntry,
 } from "@/lib/icp-preview-presentation";
@@ -271,6 +276,7 @@ function FailedEvaluationState({ evaluation }: { evaluation: AccountEvaluation }
 function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluation }) {
   const fitBand = humanizeTierLabel(evaluation.fitTier);
   const intentBand = humanizeTierLabel(evaluation.intentTier);
+  const intentConfigured = evaluationIntentConfigured(evaluation.profileConfigSnapshot);
   const actionabilityState = deriveActionabilityState(
     evaluation.actionabilityScore,
     evaluation.missingInputs,
@@ -334,15 +340,31 @@ function CompletedEvaluationDetails({ evaluation }: { evaluation: AccountEvaluat
             Buying intent
           </p>
           <p className="text-lg font-semibold text-foreground mt-0.5">
-            {intentBand ? intentBand.label : "No band resolved"}
+            {intentConfigured === false
+              ? INTENT_NOT_CONFIGURED_LABEL
+              : intentConfigured === null
+                ? INTENT_CONFIGURATION_UNAVAILABLE_LABEL
+                : intentBand
+                  ? intentBand.label
+                  : "No band resolved"}
           </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {formatScorePoints(evaluation.intentScore)}
-          </p>
-          <MetricExplanation>
-            How much recent engagement — site visits, repeat activity — suggests active
-            buying interest right now.
-          </MetricExplanation>
+          {intentConfigured === true && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {formatScorePoints(evaluation.intentScore)}
+            </p>
+          )}
+          {intentConfigured === false && (
+            <MetricExplanation>{INTENT_NOT_CONFIGURED_EXPLANATION}</MetricExplanation>
+          )}
+          {intentConfigured === null && (
+            <MetricExplanation>{INTENT_CONFIGURATION_UNAVAILABLE_EXPLANATION}</MetricExplanation>
+          )}
+          {intentConfigured === true && (
+            <MetricExplanation>
+              How much recent engagement — site visits, repeat activity — suggests active
+              buying interest right now.
+            </MetricExplanation>
+          )}
         </div>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">

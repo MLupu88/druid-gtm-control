@@ -12,7 +12,14 @@ import { LegacyStarterWarning } from "@/components/legacy-starter-warning";
 import { fetchIcpProfiles, icpProfilesListQueryKey, type IcpProfileListItem } from "@/lib/icp-profiles-api";
 import type { AccountEvaluation } from "@/lib/accounts-api";
 import { groupEvaluationRuns, resolveEvaluationProfileInfo } from "@/lib/evaluation-runs-presentation";
-import { humanizeTierLabel, eligibilityLabel, eligibilityBadgeVariant } from "@/lib/icp-preview-presentation";
+import {
+  humanizeTierLabel,
+  eligibilityLabel,
+  eligibilityBadgeVariant,
+  evaluationIntentConfigured,
+  INTENT_NOT_CONFIGURED_LABEL,
+  INTENT_CONFIGURATION_UNAVAILABLE_LABEL,
+} from "@/lib/icp-preview-presentation";
 import { isLegacyStarterIcpConfig } from "@/lib/icp-legacy-starter-detection";
 
 // "Evaluation runs" — a presentation-only reorganization of exactly the
@@ -79,6 +86,25 @@ function EvaluationRunCard({
               ) : null;
             })()}
             {(() => {
+              const intentConfigured = evaluationIntentConfigured(
+                evaluation.profileConfigSnapshot,
+              );
+              if (intentConfigured === false) {
+                return (
+                  <span className="text-foreground">
+                    <span className="text-muted-foreground">Intent:</span>{" "}
+                    {INTENT_NOT_CONFIGURED_LABEL}
+                  </span>
+                );
+              }
+              if (intentConfigured === null) {
+                return (
+                  <span className="text-foreground">
+                    <span className="text-muted-foreground">Intent:</span>{" "}
+                    {INTENT_CONFIGURATION_UNAVAILABLE_LABEL}
+                  </span>
+                );
+              }
               const intentBand = humanizeTierLabel(evaluation.intentTier);
               return intentBand ? (
                 <span className="text-foreground">

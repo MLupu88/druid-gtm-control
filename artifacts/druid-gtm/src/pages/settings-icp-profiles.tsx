@@ -19,7 +19,13 @@ import {
   icpProfilesListQueryKey,
   type IcpProfileListItem,
 } from "@/lib/icp-profiles-api";
-import { deriveProfileBadges, latestProfileActivityAt } from "@/lib/icp-profile-presentation";
+import {
+  deriveProfileBadges,
+  latestProfileActivityAt,
+  classificationLabel,
+  classificationBadgeVariant,
+  describeProfileTargetSummary,
+} from "@/lib/icp-profile-presentation";
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -59,6 +65,7 @@ function ListErrorState({ error, onRetry }: { error: unknown; onRetry: () => voi
 function ProfileRow({ profile }: { profile: IcpProfileListItem }) {
   const badges = deriveProfileBadges(profile);
   const lastUpdated = latestProfileActivityAt(profile);
+  const targetSummary = describeProfileTargetSummary(profile);
 
   return (
     <Link href={`/settings/icp-profiles/${profile.id}`}>
@@ -69,6 +76,12 @@ function ProfileRow({ profile }: { profile: IcpProfileListItem }) {
               <span className="text-sm font-semibold text-foreground truncate">
                 {profile.name}
               </span>
+              <Badge
+                variant={classificationBadgeVariant(profile.classification)}
+                className="text-[10px] px-1.5 py-0"
+              >
+                {classificationLabel(profile.classification)}
+              </Badge>
               {badges.map((badge) => (
                 <Badge
                   key={badge.key}
@@ -84,6 +97,9 @@ function ProfileRow({ profile }: { profile: IcpProfileListItem }) {
                 {profile.description}
               </p>
             )}
+            <p className="text-xs text-foreground/80 mt-1 leading-relaxed line-clamp-2">
+              {targetSummary}
+            </p>
             <p className="text-[11px] text-muted-foreground/60 mt-1.5">
               Last updated {formatDateTime(lastUpdated)}
             </p>

@@ -34,6 +34,7 @@ import {
   VersionNotFoundError,
   VersionBelongsToAnotherProfileError,
   VersionNotPublishedError,
+  NotReadyForPublishError,
 } from "./icpProfiles.js";
 import type { IcpProfile, IcpProfileVersion } from "@workspace/db/schema";
 
@@ -41,16 +42,23 @@ import type { IcpProfile, IcpProfileVersion } from "@workspace/db/schema";
 // Fixtures
 // ---------------------------------------------------------------------
 
+// Uses an explicit `eq` match on company.domain (not a bare `exists`
+// check) so this fixture carries meaningful target-company criteria per
+// evaluatePublicationReadiness's rules — a plain "domain exists" rule
+// alone would make every publishDraft() test below using this fixture
+// fail with NotReadyForPublishError. See
+// "evaluatePublicationReadiness" tests further down for the
+// exists-only/insufficient case specifically.
 function syntheticProfileConfig() {
   return {
     configSchemaVersion: "v1",
     fit: {
       rules: [
         {
-          id: "has_domain",
-          description: "Has a domain",
+          id: "domain_match",
+          description: "Domain matches example.com",
           points: 10,
-          condition: { op: "exists", field: "company.domain" },
+          condition: { op: "eq", field: "company.domain", value: "example.com" },
         },
       ],
       tiers: [{ code: "base", minScore: 0 }],
@@ -196,6 +204,85 @@ test("buildProfileListItem reports null active/draft/latest when the profile has
   assert.equal(item.activeVersion, null);
   assert.equal(item.draftVersion, null);
   assert.equal(item.latestVersion, null);
+});
+
+test("buildProfileListItem classifies no_active_definition (and empty targetCriteria) when there is no active version, even if a draft exists", () => {
+  const profile = syntheticProfile({ activeVersionId: null });
+  const draft = syntheticVersion({ id: "v-draft", status: "draft" });
+  const item = buildProfileListItem(profile, [draft]);
+  assert.equal(item.classification, "no_active_definition");
+  assert.deepEqual(item.targetCriteria, []);
+});
+
+test("buildProfileListItem classifies fit_only from the active version's config and extracts its target criteria (draft's config is never used)", () => {
+  const profile = syntheticProfile({ activeVersionId: "v-active" });
+  const activeVersion = syntheticVersion({
+    id: "v-active",
+    status: "published",
+    config: {
+      configSchemaVersion: "v1",
+      fit: {
+        rules: [
+          {
+            id: "industry_match",
+            description: "Industry is Banking",
+            points: 20,
+            condition: { op: "eq", field: "company.industry", value: "Banking" },
+          },
+        ],
+        tiers: [{ code: "base", minScore: 0 }],
+      },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
+  });
+  const draft = syntheticVersion({
+    id: "v-draft",
+    status: "draft",
+    config: {
+      configSchemaVersion: "v1",
+      fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
+  });
+
+  const item = buildProfileListItem(profile, [activeVersion, draft]);
+
+  assert.equal(item.classification, "fit_only");
+  assert.deepEqual(item.targetCriteria, [
+    { field: "company.industry", operator: "eq", values: ["Banking"] },
+  ]);
+});
+
+test("buildProfileListItem classifies legacy_starter when the active version matches the exact legacy signature", () => {
+  const profile = syntheticProfile({ activeVersionId: "v-active" });
+  const activeVersion = syntheticVersion({
+    id: "v-active",
+    status: "published",
+    config: {
+      configSchemaVersion: "v1",
+      fit: {
+        rules: [
+          {
+            id: "has_domain",
+            description: "Has a domain",
+            points: 10,
+            condition: { op: "exists", field: "company.domain" },
+          },
+        ],
+        tiers: [{ code: "base", minScore: 0 }],
+      },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
+  });
+
+  const item = buildProfileListItem(profile, [activeVersion]);
+  assert.equal(item.classification, "legacy_starter");
 });
 
 test("buildProfileListItem resolves activeVersion via activeVersionId, draftVersion via status, and latestVersion via highest versionNumber", () => {
@@ -589,6 +676,69 @@ test("publishDraft sets status=published and a publishedAt timestamp", async () 
   const setArgs = setCall!.args[0] as Record<string, unknown>;
   assert.equal(setArgs.status, "published");
   assert.ok(setArgs.publishedAt instanceof Date);
+});
+
+test("publishDraft throws NotReadyForPublishError with meaningful_target_required when every fit rule is exists-only", async () => {
+  const profile = syntheticProfile();
+  const draft = syntheticVersion({
+    config: {
+      configSchemaVersion: "v1",
+      fit: {
+        rules: [
+          {
+            id: "has_domain",
+            description: "Has a domain",
+            points: 10,
+            condition: { op: "exists", field: "company.domain" },
+          },
+        ],
+        tiers: [{ code: "base", minScore: 0 }],
+      },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
+  });
+  const { db, calls } = makeFakeTransactionalDb([[profile], [draft]]);
+
+  await assert.rejects(publishDraft(db, profile.id), (error: unknown) => {
+    assert.ok(error instanceof NotReadyForPublishError);
+    assert.equal(error.reasons.length, 1);
+    assert.equal(error.reasons[0]!.code, "meaningful_target_required");
+    return true;
+  });
+  // Never reaches the UPDATE — no "set" call should have been recorded.
+  assert.equal(calls.some((c) => c.method === "set"), false);
+});
+
+test("publishDraft throws NotReadyForPublishError when fit has no rules at all", async () => {
+  const profile = syntheticProfile();
+  const draft = syntheticVersion({
+    config: {
+      configSchemaVersion: "v1",
+      fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
+  });
+  const { db } = makeFakeTransactionalDb([[profile], [draft]]);
+
+  await assert.rejects(publishDraft(db, profile.id), NotReadyForPublishError);
+});
+
+test("publishDraft succeeds for a fit-only draft (no intent/actionability/eligibility rules) with a meaningful fit rule", async () => {
+  const profile = syntheticProfile();
+  const draft = syntheticVersion();
+  const published = {
+    ...draft,
+    status: "published" as const,
+    publishedAt: new Date(),
+  };
+  const { db } = makeFakeTransactionalDb([[profile], [draft], [published]]);
+
+  const result = await publishDraft(db, profile.id);
+  assert.equal(result, published);
 });
 
 // ---------------------------------------------------------------------

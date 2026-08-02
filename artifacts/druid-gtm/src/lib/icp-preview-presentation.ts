@@ -17,6 +17,10 @@
 // for a collapsed technical-details view, never discarded.
 
 import { humanizeToken } from "@workspace/gtm-shared";
+import {
+  isIntentConfigured as isIntentConfiguredCanonical,
+  IcpProfileConfigV1Schema,
+} from "@workspace/evaluator";
 
 // ---------------------------------------------------------------------
 // Dimension labels — mirrors lib/evaluator/src/types.ts's `Dimension`
@@ -68,6 +72,59 @@ export function humanizeTierLabel(tier: string | null): TierLabel | null {
   if (tier === null || tier.trim() === "") return null;
   return { label: `Configured band: ${humanizeToken(tier)}`, raw: tier };
 }
+
+// ---------------------------------------------------------------------
+// Fit-only truthfulness. When a profile has zero configured intent rules,
+// every account's intentTier still resolves to a real value (the
+// profile's fallback band — see lib/evaluator/src/rules/scoring.ts) even
+// though nothing about buying intent was actually evaluated. Showing
+// that fallback tier as if it were a real signal would misrepresent a
+// fit-only profile as having assessed intent.
+//
+// evaluationIntentConfigured() below is used by preview/official
+// evaluation detail (../components/account-icp-preview-panel.tsx) and
+// evaluation runs (../components/evaluation-runs-list.tsx), which both
+// have the evaluation's full profileConfigSnapshot in hand. Account-list
+// rows (../pages/accounts.tsx) do NOT call this function — that surface
+// only has the lightweight AccountEvaluationSummary, which never carries
+// the full config snapshot; it instead reads the server-derived
+// AccountEvaluationSummary.intentConfigured boolean directly (see
+// ../lib/accounts-api.ts and artifacts/api-server/src/services/
+// accounts.ts's toEvaluationSummary), computed from the exact same
+// @workspace/evaluator isIntentConfigured this function delegates to.
+// ---------------------------------------------------------------------
+
+/**
+ * Whether the ICP profile config an evaluation actually ran against had
+ * at least one configured intent rule — delegates the actual definition
+ * to @workspace/evaluator's isIntentConfigured (the single source of
+ * truth also used server-side and in profile-list classification), never
+ * reimplemented here. `profileConfigSnapshot` arrives as `unknown` jsonb;
+ * this re-validates it against the canonical schema rather than
+ * duck-typing or blindly trusting its shape.
+ *
+ * Three explicit states, never collapsed into two:
+ *   - true  — at least one intent rule is configured; show the evaluated tier.
+ *   - false — zero intent rules are configured; show "Intent not configured".
+ *   - null  — the snapshot doesn't parse as a real IcpProfileConfigV1 at
+ *     all (should not happen for a real persisted evaluation, but never
+ *     assumed); show "Intent configuration unavailable" rather than
+ *     silently falling back to the tier display, which could misrepresent
+ *     unreadable data as a real evaluated signal.
+ */
+export function evaluationIntentConfigured(profileConfigSnapshot: unknown): boolean | null {
+  const parsed = IcpProfileConfigV1Schema.safeParse(profileConfigSnapshot);
+  if (!parsed.success) return null;
+  return isIntentConfiguredCanonical(parsed.data);
+}
+
+export const INTENT_NOT_CONFIGURED_LABEL = "Intent not configured";
+export const INTENT_NOT_CONFIGURED_EXPLANATION =
+  "This profile has no buying-intent rules configured, so this account's buying intent was not evaluated.";
+
+export const INTENT_CONFIGURATION_UNAVAILABLE_LABEL = "Intent configuration unavailable";
+export const INTENT_CONFIGURATION_UNAVAILABLE_EXPLANATION =
+  "This evaluation's saved profile configuration could not be read, so whether buying intent was actually configured can't be confirmed.";
 
 // Scores are arbitrary-scale rule-point totals (see
 // lib/evaluator/src/profileConfig.ts: tiers are defined by minScore

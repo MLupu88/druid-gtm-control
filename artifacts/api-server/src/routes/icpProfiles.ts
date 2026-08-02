@@ -34,6 +34,7 @@ import {
   NoDraftVersionError,
   VersionNotPublishedError,
   InvalidProfileConfigError,
+  NotReadyForPublishError,
   type CreateProfileArgs,
   type UpdateDraftArgs,
   type CloneVersionArgs,
@@ -326,6 +327,20 @@ export function createIcpProfilesRouter(deps: IcpProfilesRouterDeps): IRouter {
       }
       if (err instanceof NoDraftVersionError) {
         sendError(res, 409, "no_draft_version", err.message);
+        return;
+      }
+      if (err instanceof NotReadyForPublishError) {
+        // Schema-valid draft that fails publication-readiness rules — 422,
+        // not 409 (no conflicting concurrent state, unlike no_draft_version
+        // above). Carries structured `reasons` (see @workspace/evaluator's
+        // NotReadyForPublishReason) alongside the usual {error, code}
+        // shape every other error response uses — sendError() has no way
+        // to attach extra fields, so this one response is built directly.
+        res.status(422).json({
+          error: err.message,
+          code: "not_ready_for_publish",
+          reasons: err.reasons,
+        });
         return;
       }
       req.log?.error(

@@ -19,6 +19,7 @@ import {
   NoDraftVersionError,
   VersionNotPublishedError,
   InvalidProfileConfigError,
+  NotReadyForPublishError,
   type ActivateVersionResult,
   type ProfileDetail,
   type ProfileListItem,
@@ -339,6 +340,8 @@ test("GET / returns 200 with the list from the service", async () => {
       activeVersion: null,
       draftVersion: null,
       latestVersion: null,
+      classification: "no_active_definition",
+      targetCriteria: [],
     },
   ];
   const listProfilesFn = mock.fn(async () => list);
@@ -668,6 +671,32 @@ test("POST /:profileId/publish maps NoDraftVersionError to 409", async () => {
     const body = await readJson(res);
     assert.equal(res.status, 409);
     assert.equal(body.code, "no_draft_version");
+  });
+});
+
+test("POST /:profileId/publish maps NotReadyForPublishError to 422 with structured reasons", async () => {
+  const publishDraftFn = mock.fn(async () => {
+    throw new NotReadyForPublishError([
+      {
+        code: "meaningful_target_required",
+        message: "Add at least one target company criterion worth more than zero points.",
+      },
+    ]);
+  });
+  const app = buildTestApp({ publishDraftFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_PROFILE_ID}/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const body = await readJson(res);
+    assert.equal(res.status, 422);
+    assert.equal(body.code, "not_ready_for_publish");
+    const reasons = body.reasons as { code: string; message: string }[];
+    assert.equal(reasons.length, 1);
+    assert.equal(reasons[0]!.code, "meaningful_target_required");
   });
 });
 
