@@ -45,6 +45,33 @@ export type IdentityResolutionLevel =
 export type IdentityConfidence = "low" | "medium" | "high";
 export type EligibilityOutcome = "eligible" | "restricted" | "ineligible";
 
+// Mirrors @workspace/evaluator's MqlNotReadyReasonCode/MqlNotReadyReason —
+// hand-declared here (not imported) since this package has no dependency
+// on @workspace/evaluator; the shape is verified directly against
+// services/mqlDecisionReadiness.ts and services/accounts.ts.
+export type MqlNotReadyReasonCode =
+  | "official_evaluation_required"
+  | "intent_not_configured"
+  | "snapshot_evidence_unknown"
+  | "required_condition_unresolved";
+
+export interface MqlNotReadyReason {
+  code: MqlNotReadyReasonCode;
+  message: string;
+  dimension?: "fit" | "intent";
+  ruleId?: string;
+  fields?: string[];
+}
+
+// Server-derived, authoritative — never recompute this client-side. See
+// services/mqlDecisionReadiness.ts's deriveMqlDecisionReadiness (the
+// single source of truth) and services/accounts.ts (where it is attached
+// to every evaluation summary/detail row).
+export interface MqlDecisionReadiness {
+  ready: boolean;
+  reasons: MqlNotReadyReason[];
+}
+
 // Scalar-only summary — list responses never include the jsonb payload
 // fields (profileConfigSnapshot/eligibilityRestrictions/hardDisqualifiers/
 // scoreComponents/matchedRules/missingInputs); see
@@ -71,6 +98,8 @@ export interface AccountEvaluationSummary {
   createdBy: string | null;
   /** Derived server-side from the evaluation's own profileConfigSnapshot (see services/accounts.ts's toEvaluationSummary) — never the full config. False means intentTier necessarily resolved to the profile's fallback band, not a real evaluated buying-intent signal; render "Intent not configured" instead of intentTier in that case. */
   intentConfigured: boolean;
+  /** Server-derived, authoritative result of whether this evaluation has enough evidence-backed, action-relevant fit/intent condition resolution to support a "Promote to MQL" decision. Render this verbatim (ready + reasons) — never recompute it from missingInputs, scores, or tiers. */
+  mqlDecisionReadiness: MqlDecisionReadiness;
 }
 
 // The full, exact persisted row — only ever present on the detail

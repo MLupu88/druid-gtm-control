@@ -30,12 +30,15 @@ import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   accountDecisions,
   accountEvaluations,
+  accountSnapshots,
   decisionPolicyVersions,
   type AccountDecision,
   type AccountEvaluation,
   type DecisionPolicyVersion,
 } from "@workspace/db/schema";
 import type * as schema from "@workspace/db/schema";
+import type { MqlNotReadyReason } from "@workspace/evaluator";
+import { deriveMqlDecisionReadiness } from "./mqlDecisionReadiness.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -171,6 +174,23 @@ export class IdempotencyKeyConflictError extends Error {
   }
 }
 
+// Thrown only for routingOutput "mql", only for a BRAND NEW decision (see
+// the idempotent-replay-first ordering in createAccountDecision below,
+// which guarantees an already-persisted decision — including one recorded
+// before this gate existed — is returned as a replay and never re-checked
+// against it). Never thrown for "sales_review"/"dismissed".
+export class EvaluationNotDecisionReadyError extends Error {
+  constructor(
+    public readonly accountEvaluationId: string,
+    public readonly reasons: MqlNotReadyReason[],
+  ) {
+    super(
+      `accountEvaluation "${accountEvaluationId}" is not decision-ready for an MQL decision.`,
+    );
+    this.name = "EvaluationNotDecisionReadyError";
+  }
+}
+
 // ---------------------------------------------------------------------
 // Create — the only write path this service exposes. One immutable
 // account_decisions row per (successful) call; idempotency-key replays
@@ -219,8 +239,21 @@ export interface CreateAccountDecisionResult extends AccountDecisionWithAccountI
  * that evaluation's own eligibility output, resolves the manual policy
  * version, and inserts using idempotencyKey as the row's id.
  *
- * On an id conflict (the same Idempotency-Key reused), the existing row
- * is compared against this call's accountEvaluationId/routingOutput/
+ * Idempotent replay is checked FIRST, before any other validation
+ * (including the MQL decision-readiness gate below): a request whose
+ * Idempotency-Key already identifies a persisted decision returns that
+ * decision verbatim (created:false) without re-running eligibility or
+ * readiness checks against it. This guarantees a decision recorded before
+ * the MQL-readiness gate existed — or any other future check — is never
+ * retroactively invalidated by replaying its own idempotency key. Only
+ * once no existing row is found does this function fetch the referenced
+ * evaluation, validate it, and (for routingOutput "mql" only) run the MQL
+ * decision-readiness gate, before finally inserting.
+ *
+ * On an id conflict at insert time (a genuinely new key raced by a
+ * concurrent identical request — the up-front check above only rules out
+ * a pre-existing row, it does not itself prevent a race), the existing
+ * row is compared against this call's accountEvaluationId/routingOutput/
  * normalized routingReason/createdBy: an exact match returns the existing
  * row with created:false; any mismatch throws IdempotencyKeyConflictError
  * — no row is ever overwritten (account_decisions is insert-only) and no
@@ -237,6 +270,35 @@ export async function createAccountDecision(
     throw new Error(
       "createAccountDecision: createdBy is required and must be a non-empty string.",
     );
+  }
+
+  const [existingRow] = await db
+    .select({
+      decision: accountDecisions,
+      accountId: accountEvaluations.accountId,
+    })
+    .from(accountDecisions)
+    .innerJoin(
+      accountEvaluations,
+      eq(accountDecisions.accountEvaluationId, accountEvaluations.id),
+    )
+    .where(eq(accountDecisions.id, idempotencyKey))
+    .limit(1);
+  if (existingRow) {
+    const { decision } = existingRow;
+    const matches =
+      decision.accountEvaluationId === accountEvaluationId &&
+      decision.routingOutput === routingOutput &&
+      decision.routingReason === routingReason &&
+      decision.createdBy === createdBy;
+    if (!matches) {
+      throw new IdempotencyKeyConflictError(idempotencyKey);
+    }
+    return {
+      decision,
+      accountId: existingRow.accountId,
+      created: false,
+    };
   }
 
   const [evaluation] = await db
@@ -256,6 +318,25 @@ export async function createAccountDecision(
       evaluation.status,
       evaluation.evaluationMode,
     );
+  }
+
+  // MQL-only decision-readiness gate — sales_review/dismissed never reach
+  // this branch, so their behavior is completely unchanged. Only a
+  // brand-new "mql" decision (never a replay — see above) can be rejected
+  // here.
+  if (routingOutput === "mql") {
+    const [snapshot] = await db
+      .select()
+      .from(accountSnapshots)
+      .where(eq(accountSnapshots.id, evaluation.snapshotId))
+      .limit(1);
+    const readiness = deriveMqlDecisionReadiness(evaluation, snapshot ?? null);
+    if (!readiness.ready) {
+      throw new EvaluationNotDecisionReadyError(
+        accountEvaluationId,
+        readiness.reasons,
+      );
+    }
   }
 
   const overallDecisionGate = deriveOverallDecisionGate(evaluation);

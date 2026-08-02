@@ -35,6 +35,7 @@ import {
   getAccountDecisionById,
   AccountEvaluationNotFoundError,
   AccountEvaluationNotEligibleError,
+  EvaluationNotDecisionReadyError,
   IdempotencyKeyConflictError,
   type OverallDecisionGate,
 } from "./accountDecisions.js";
@@ -45,6 +46,46 @@ type Db = NodePgDatabase<typeof schema>;
 // Fixtures
 // ---------------------------------------------------------------------
 
+// Schema-VALID minimal config (not the { configSchemaVersion: "v1" }
+// placeholder used elsewhere for a deliberately-invalid-config test) —
+// createAccountDecision's MQL-readiness gate parses profileConfigSnapshot
+// via IcpProfileConfigV1Schema for every "mql" attempt, so a fixture used
+// in this file must always be parseable. Zero intent rules means
+// intent_not_configured always fires — i.e. this fixture, used as-is, is
+// deliberately NOT decision-ready. There is no genuinely decision-ready
+// ("mql", ready:true) fixture in this file: intent.rules[].condition may
+// only reference INTENT_FIELD_ALLOWLIST fields (engagement.* —
+// profileConfig.ts), and the one recognized snapshot source
+// (gtm-account-current-state-v1) never marks any engagement.* field as
+// evidence-backed (only company.domain/company.name, and only when
+// non-blank — see ../services/mqlDecisionReadiness.ts). Since every leaf
+// of an intent condition must be an engagement.* field, no intent rule
+// can structurally ever resolve under the current evidence policy —
+// meaning ready:true is currently unreachable for any evaluation with a
+// real intent rule, not just unlikely. ready:true coverage of the pure
+// classifier itself (using a synthetic, non-production evidence set) is
+// exercised instead by lib/evaluator/src/mqlDecisionReadiness.test.ts.
+// Tests here either use a non-"mql" routingOutput (entirely unaffected by
+// the gate) or assert the gate's rejection directly.
+const NOT_DECISION_READY_PROFILE_CONFIG_SNAPSHOT = {
+  configSchemaVersion: "v1",
+  fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+  intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+  actionability: { rules: [] },
+  eligibility: { hardDisqualifiers: [], restrictions: [] },
+};
+
+function syntheticSnapshotRow(
+  overrides: Partial<{ id: string; source: string; normalizedInput: unknown }> = {},
+) {
+  return {
+    id: "33333333-3333-4333-8333-333333333333",
+    source: "gtm-account-current-state-v1",
+    normalizedInput: { company: { domain: "example.test", name: "Example Co" } },
+    ...overrides,
+  };
+}
+
 function syntheticEvaluation(
   overrides: Partial<AccountEvaluation> = {},
 ): AccountEvaluation {
@@ -53,7 +94,7 @@ function syntheticEvaluation(
     accountId: "11111111-1111-4111-8111-111111111111",
     snapshotId: "33333333-3333-4333-8333-333333333333",
     profileVersionId: "44444444-4444-4444-8444-444444444444",
-    profileConfigSnapshot: { configSchemaVersion: "v1" },
+    profileConfigSnapshot: NOT_DECISION_READY_PROFILE_CONFIG_SNAPSHOT,
     evaluatorVersionId: "55555555-5555-4555-8555-555555555555",
     evaluationMode: "production",
     status: "completed",
@@ -342,7 +383,10 @@ test("resolveManualDecisionPolicyVersion throws if the insert conflicted but no 
 // ---------------------------------------------------------------------
 
 test("createAccountDecision throws AccountEvaluationNotFoundError when the referenced evaluation does not exist, and touches nothing else", async () => {
-  const { db, calls } = makeFakeDb([[]]);
+  const { db, calls } = makeFakeDb([
+    [], // no existing decision for this idempotency key
+    [], // evaluation lookup finds nothing
+  ]);
 
   await assert.rejects(
     createAccountDecision({
@@ -354,13 +398,13 @@ test("createAccountDecision throws AccountEvaluationNotFoundError when the refer
     }),
     AccountEvaluationNotFoundError,
   );
-  assert.equal(calls.filter((c) => c.method === "select").length, 1);
+  assert.equal(calls.filter((c) => c.method === "select").length, 2);
   assert.equal(calls.filter((c) => c.method === "insert").length, 0);
 });
 
 test("createAccountDecision throws AccountEvaluationNotEligibleError for a preview evaluation, and touches nothing else", async () => {
   const evaluation = syntheticEvaluation({ evaluationMode: "preview" });
-  const { db, calls } = makeFakeDb([[evaluation]]);
+  const { db, calls } = makeFakeDb([[], [evaluation]]);
 
   await assert.rejects(
     createAccountDecision({
@@ -388,7 +432,7 @@ test("createAccountDecision throws AccountEvaluationNotEligibleError for a faile
     actionabilityScore: null,
     eligibilityOutcome: null,
   });
-  const { db, calls } = makeFakeDb([[evaluation]]);
+  const { db, calls } = makeFakeDb([[], [evaluation]]);
 
   await assert.rejects(
     createAccountDecision({
@@ -401,6 +445,69 @@ test("createAccountDecision throws AccountEvaluationNotEligibleError for a faile
     AccountEvaluationNotEligibleError,
   );
   assert.equal(calls.filter((c) => c.method === "insert").length, 0);
+});
+
+// ---------------------------------------------------------------------
+// createAccountDecision — MQL decision-readiness gate
+// ---------------------------------------------------------------------
+
+test("createAccountDecision rejects a brand-new \"mql\" decision with EvaluationNotDecisionReadyError (reasons include intent_not_configured) when the evaluation is not decision-ready, and never inserts", async () => {
+  const evaluation = syntheticEvaluation();
+  const { db, calls } = makeFakeDb([
+    [], // no existing decision for this idempotency key
+    [evaluation], // evaluation lookup
+    [syntheticSnapshotRow()], // snapshot lookup for the MQL readiness gate
+  ]);
+
+  await assert.rejects(
+    createAccountDecision({
+      db,
+      idempotencyKey: "88888888-8888-4888-8888-888888888811",
+      accountEvaluationId: evaluation.id,
+      routingOutput: "mql",
+      createdBy: "operator@example.test",
+    }),
+    (err: unknown) => {
+      assert.ok(err instanceof EvaluationNotDecisionReadyError);
+      assert.ok(
+        err.reasons.some((r) => r.code === "intent_not_configured"),
+        "expected an intent_not_configured reason",
+      );
+      return true;
+    },
+  );
+  assert.equal(calls.filter((c) => c.method === "insert").length, 0);
+});
+
+test("createAccountDecision allows \"sales_review\" on the exact same not-decision-ready evaluation that would reject \"mql\" — non-MQL decisions are unaffected", async () => {
+  const evaluation = syntheticEvaluation();
+  const policyVersion = syntheticDecisionPolicyVersion();
+  const insertedDecision = syntheticDecision({
+    accountEvaluationId: evaluation.id,
+    routingOutput: "sales_review",
+  });
+  const { db, calls } = makeFakeDb([
+    [], // no existing decision
+    [evaluation], // evaluation lookup
+    [], // policy version insert conflicts
+    [policyVersion], // policy version select fallback
+    [insertedDecision], // decision insert succeeds
+  ]);
+
+  const result = await createAccountDecision({
+    db,
+    idempotencyKey: insertedDecision.id,
+    accountEvaluationId: evaluation.id,
+    routingOutput: "sales_review",
+    createdBy: "operator@example.test",
+  });
+
+  assert.equal(result.created, true);
+  // Three selects total: the up-front existing-decision check, the
+  // evaluation lookup, and the normal decision-policy-version fallback
+  // lookup — no account_snapshots query at all, since the MQL gate never
+  // runs for a non-"mql" routingOutput.
+  assert.equal(calls.filter((c) => c.method === "select").length, 3);
 });
 
 test("createAccountDecision throws when createdBy is an empty/whitespace-only string, before touching the database", async () => {
@@ -429,14 +536,20 @@ test("createAccountDecision inserts exactly the expected row and returns created
     eligibilityRestrictions: ["needs_review"],
   });
   const policyVersion = syntheticDecisionPolicyVersion();
+  // routingOutput is "sales_review" (not "mql") deliberately — this test
+  // is about policy-version/insert mechanics and overallDecisionGate
+  // mapping, which are identical for every routingOutput; using a non-mql
+  // output keeps it independent of the MQL-readiness gate exercised
+  // separately above.
   const insertedDecision = syntheticDecision({
     accountEvaluationId: evaluation.id,
     overallDecisionGate: "restricted",
-    routingOutput: "mql",
+    routingOutput: "sales_review",
     routingReason: "Strong signal, needs review",
   });
   const { db, calls } = makeFakeDb([
-    [evaluation],
+    [], // no existing decision for this idempotency key
+    [evaluation], // evaluation lookup
     [], // policy version insert conflicts
     [policyVersion], // policy version select fallback
     [insertedDecision], // decision insert succeeds
@@ -446,7 +559,7 @@ test("createAccountDecision inserts exactly the expected row and returns created
     db,
     idempotencyKey: insertedDecision.id,
     accountEvaluationId: evaluation.id,
-    routingOutput: "mql",
+    routingOutput: "sales_review",
     routingReason: "Strong signal, needs review",
     createdBy: "operator@example.test",
   });
@@ -468,7 +581,7 @@ test("createAccountDecision inserts exactly the expected row and returns created
     operationalContextSnapshot: { source: "manual_operator_decision" },
     channelAvailability: {},
     blockers: [],
-    routingOutput: "mql",
+    routingOutput: "sales_review",
     routingReason: "Strong signal, needs review",
     overallDecisionGate: "restricted",
     createdBy: "operator@example.test",
@@ -484,6 +597,7 @@ test("createAccountDecision accepts routingOutput \"dismissed\" and inserts exac
     routingReason: "Not a fit right now",
   });
   const { db, calls } = makeFakeDb([
+    [], // no existing decision
     [evaluation],
     [policyVersion],
     [insertedDecision],
@@ -516,6 +630,7 @@ test("createAccountDecision normalizes an omitted routingReason to null on inser
     routingReason: null,
   });
   const { db, calls } = makeFakeDb([
+    [], // no existing decision
     [evaluation],
     [policyVersion],
     [insertedDecision],
@@ -542,9 +657,17 @@ test("createAccountDecision normalizes an omitted routingReason to null on inser
 
 // ---------------------------------------------------------------------
 // createAccountDecision — idempotency
+//
+// All of these now model the up-front existing-decision lookup
+// (createAccountDecision's FIRST db call) finding a match immediately —
+// a single joined {decision, accountId} row, exactly what the real
+// innerJoin-based query returns. No evaluation lookup, no MQL-readiness
+// gate, and no insert attempt ever happens on this path; see the
+// dedicated replay test below for explicit proof that this holds even
+// when the referenced evaluation would fail the MQL-readiness gate.
 // ---------------------------------------------------------------------
 
-test("createAccountDecision: same idempotency key + same effective request returns created:false with the existing row", async () => {
+test("createAccountDecision: same idempotency key + same effective request returns created:false with the existing row, without ever fetching the evaluation or attempting an insert", async () => {
   const evaluation = syntheticEvaluation();
   const idempotencyKey = "88888888-8888-4888-8888-888888888805";
   const existing = syntheticDecision({
@@ -554,11 +677,8 @@ test("createAccountDecision: same idempotency key + same effective request retur
     routingReason: null,
     createdBy: "operator@example.test",
   });
-  const { db } = makeFakeDb([
-    [evaluation],
-    [syntheticDecisionPolicyVersion()],
-    [], // decision insert conflicts
-    [existing], // decision select fallback
+  const { db, calls } = makeFakeDb([
+    [{ decision: existing, accountId: evaluation.accountId }],
   ]);
 
   const result = await createAccountDecision({
@@ -573,6 +693,8 @@ test("createAccountDecision: same idempotency key + same effective request retur
   assert.equal(result.created, false);
   assert.deepEqual(result.decision, existing);
   assert.equal(result.accountId, evaluation.accountId);
+  assert.equal(calls.filter((c) => c.method === "select").length, 1);
+  assert.equal(calls.filter((c) => c.method === "insert").length, 0);
 });
 
 test("createAccountDecision: an explicit null routingReason matches an existing row whose routingReason is also null (undefined/null treated equivalently)", async () => {
@@ -586,10 +708,7 @@ test("createAccountDecision: an explicit null routingReason matches an existing 
     createdBy: "operator@example.test",
   });
   const { db } = makeFakeDb([
-    [evaluation],
-    [syntheticDecisionPolicyVersion()],
-    [],
-    [existing],
+    [{ decision: existing, accountId: evaluation.accountId }],
   ]);
 
   const result = await createAccountDecision({
@@ -602,6 +721,42 @@ test("createAccountDecision: an explicit null routingReason matches an existing 
   });
 
   assert.equal(result.created, false);
+});
+
+test("createAccountDecision: replaying an \"mql\" decision's idempotency key returns the existing decision even when the referenced evaluation would now fail the MQL-readiness gate — a decision recorded before the gate existed is never retroactively invalidated", async () => {
+  const evaluation = syntheticEvaluation(); // NOT_DECISION_READY_PROFILE_CONFIG_SNAPSHOT by default
+  const idempotencyKey = "88888888-8888-4888-8888-888888888812";
+  const existing = syntheticDecision({
+    id: idempotencyKey,
+    accountEvaluationId: evaluation.id,
+    routingOutput: "mql",
+    routingReason: null,
+    createdBy: "operator@example.test",
+  });
+  const { db, calls } = makeFakeDb([
+    [{ decision: existing, accountId: evaluation.accountId }],
+  ]);
+
+  const result = await createAccountDecision({
+    db,
+    idempotencyKey,
+    accountEvaluationId: evaluation.id,
+    routingOutput: "mql",
+    routingReason: undefined,
+    createdBy: "operator@example.test",
+  });
+
+  assert.equal(result.created, false);
+  assert.deepEqual(result.decision, existing);
+  // Exactly one ROOT query (the up-front existing-decision lookup, plus
+  // its from/innerJoin/where/limit chain calls) — the evaluation is never
+  // fetched, profileConfigSnapshot is never parsed, and no
+  // account_snapshots lookup, readiness computation, or insert ever runs.
+  const rootCalls = calls.filter(
+    (c) => c.method === "select" || c.method === "insert",
+  );
+  assert.equal(rootCalls.length, 1);
+  assert.equal(rootCalls[0]?.method, "select");
 });
 
 const idempotencyMismatchCases: Array<[string, Partial<AccountDecision>]> = [
@@ -627,10 +782,7 @@ for (const [field, override] of idempotencyMismatchCases) {
       ...override,
     });
     const { db } = makeFakeDb([
-      [evaluation],
-      [syntheticDecisionPolicyVersion()],
-      [],
-      [existing],
+      [{ decision: existing, accountId: evaluation.accountId }],
     ]);
 
     await assert.rejects(
@@ -650,8 +802,9 @@ for (const [field, override] of idempotencyMismatchCases) {
 test("createAccountDecision throws if the decision insert conflicted on id but no existing row is found", async () => {
   const evaluation = syntheticEvaluation();
   const { db } = makeFakeDb([
-    [evaluation],
-    [syntheticDecisionPolicyVersion()],
+    [], // no existing decision
+    [evaluation], // evaluation lookup
+    [syntheticDecisionPolicyVersion()], // policy version insert succeeds
     [], // decision insert conflicts
     [], // decision select fallback finds nothing
   ]);
@@ -661,7 +814,7 @@ test("createAccountDecision throws if the decision insert conflicted on id but n
       db,
       idempotencyKey: "88888888-8888-4888-8888-888888888808",
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql",
+      routingOutput: "sales_review",
       createdBy: "operator@example.test",
     }),
     /insert conflicted on id but no existing row was found/,

@@ -28,6 +28,7 @@ import {
   getAccountDecisionById,
   AccountEvaluationNotFoundError,
   AccountEvaluationNotEligibleError,
+  EvaluationNotDecisionReadyError,
   IdempotencyKeyConflictError,
   type CreateAccountDecisionResult,
   type AccountDecisionWithAccountId,
@@ -273,6 +274,14 @@ export function createAccountDecisionsRouter(
       }
       if (err instanceof AccountEvaluationNotEligibleError) {
         sendError(res, 409, "evaluation_not_eligible", err.message);
+        return;
+      }
+      if (err instanceof EvaluationNotDecisionReadyError) {
+        res.status(422).json({
+          error: "This evaluation is not decision-ready for MQL.",
+          code: "evaluation_not_decision_ready",
+          reasons: err.reasons,
+        });
         return;
       }
       if (err instanceof IdempotencyKeyConflictError) {

@@ -15,4 +15,5 @@ export * from "./configClassification.js";
 export * from "./legacyStarterDetection.js";
 export * from "./profileClassification.js";
 export * from "./businessRuleClassification.js";
+export * from "./mqlDecisionReadiness.js";
 export { evaluateCanonicalV1 } from "./evaluate.js";

@@ -18,6 +18,7 @@ import type { AccountDecision } from "@workspace/db/schema";
 import {
   AccountEvaluationNotFoundError,
   AccountEvaluationNotEligibleError,
+  EvaluationNotDecisionReadyError,
   IdempotencyKeyConflictError,
 } from "../services/accountDecisions.js";
 import type { Operator } from "../lib/operators.js";
@@ -597,6 +598,18 @@ const postServiceErrorCases: Array<{
     status: 409,
     code: "idempotency_conflict",
   },
+  {
+    label: "EvaluationNotDecisionReadyError",
+    makeError: () =>
+      new EvaluationNotDecisionReadyError(VALID_EVALUATION_ID, [
+        {
+          code: "intent_not_configured",
+          message: "This profile has no configured intent rule.",
+        },
+      ]),
+    status: 422,
+    code: "evaluation_not_decision_ready",
+  },
 ];
 
 for (const { label, makeError, status, code } of postServiceErrorCases) {
@@ -622,6 +635,39 @@ for (const { label, makeError, status, code } of postServiceErrorCases) {
     });
   });
 }
+
+test("POST 422 evaluation_not_decision_ready carries the structured reasons array from EvaluationNotDecisionReadyError verbatim", async () => {
+  const reasons = [
+    {
+      code: "intent_not_configured" as const,
+      message: "This profile has no configured intent rule.",
+    },
+    {
+      code: "required_condition_unresolved" as const,
+      dimension: "fit" as const,
+      ruleId: "fit_industry",
+      fields: ["company.industry"],
+      message: "The fit rule could not be resolved.",
+    },
+  ];
+  const createAccountDecisionFn = mock.fn<CreateAccountDecisionFn>(async () => {
+    throw new EvaluationNotDecisionReadyError(VALID_EVALUATION_ID, reasons);
+  });
+  const app = buildTestApp({ createAccountDecisionFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postDecision(
+      baseUrl,
+      validPostBody(),
+      VALID_IDEMPOTENCY_KEY,
+    );
+    const body = await readJson(res, "POST / 422 response body");
+
+    assert.equal(res.status, 422);
+    assert.equal(body.code, "evaluation_not_decision_ready");
+    assert.deepEqual(body.reasons, reasons);
+  });
+});
 
 test("POST maps an unexpected service error to a safe 500 response, without leaking internal details", async () => {
   const createAccountDecisionFn = mock.fn<CreateAccountDecisionFn>(async () => {

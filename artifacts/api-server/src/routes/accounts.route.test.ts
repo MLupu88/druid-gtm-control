@@ -13,8 +13,12 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { mock, test } from "node:test";
 import express, { type Express } from "express";
-import type { Account, AccountEvaluation } from "@workspace/db/schema";
-import type { AccountDetail, AccountListItem } from "../services/accounts.js";
+import type { Account } from "@workspace/db/schema";
+import type {
+  AccountDetail,
+  AccountEvaluationDetail,
+  AccountListItem,
+} from "../services/accounts.js";
 import {
   createAccountsRouter,
   type GetAccountByIdFn,
@@ -36,8 +40,8 @@ function syntheticAccount(overrides: Partial<Account> = {}): Account {
 }
 
 function syntheticEvaluation(
-  overrides: Partial<AccountEvaluation> = {},
-): AccountEvaluation {
+  overrides: Partial<AccountEvaluationDetail> = {},
+): AccountEvaluationDetail {
   return {
     id: "22222222-2222-4222-8222-222222222222",
     accountId: VALID_ACCOUNT_ID,
@@ -63,6 +67,10 @@ function syntheticEvaluation(
     missingInputs: [],
     createdAt: new Date("2026-01-02T00:00:00Z"),
     createdBy: null,
+    // This route test injects a fake getAccountByIdFn — it never runs the
+    // real derivation in ../services/accounts.ts/mqlDecisionReadiness.ts,
+    // so this is a plain fixture value, not a computed one.
+    mqlDecisionReadiness: { ready: true, reasons: [] },
     ...overrides,
   };
 }
