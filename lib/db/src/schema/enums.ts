@@ -126,3 +126,40 @@ export const clientRadarResearchStatusEnum = pgEnum(
   "client_radar_research_status",
   ["submitting", "queued", "running", "completed", "failed", "cancelled"],
 );
+
+// GTM V2 Unit 1 — Operational Identity and Signal Contracts.
+//
+// account_aliases.normalization_strategy
+// Domains and free-text labels (e.g. a company name) are case-
+// insensitive; source/provider identifiers (e.g. a HubSpot company ID)
+// may be case-sensitive, and lowercasing them could silently merge two
+// distinct identifiers. This is an explicit per-row choice rather than
+// something derived from alias_type (which stays an open, uncontrolled
+// vocabulary — see accountAliases.ts) precisely so that choice is always
+// visible and enforceable by a CHECK, not inferred.
+export const identityAliasNormalizationStrategy = pgEnum(
+  "identity_alias_normalization_strategy",
+  ["domain", "case_insensitive", "exact"],
+);
+
+// identity_resolution_events.outcome
+// Every row is a complete binding snapshot, not a partial delta — see
+// identityResolutionEvents.ts. "account_resolved" and "person_resolved"
+// both require account_id; only "person_resolved" additionally requires
+// person_id, so the latest row for a signal is always self-sufficient
+// (never "person matched but which account?").
+export const identityResolutionOutcome = pgEnum("identity_resolution_outcome", [
+  "unresolved",
+  "account_resolved",
+  "person_resolved",
+]);
+
+// identity_resolution_events.account_match_action /
+// identity_resolution_events.person_match_action
+// Records whether the account/person side of a binding was matched to
+// an existing row or newly created, without splitting that distinction
+// into separate partial event rows.
+export const identityMatchAction = pgEnum("identity_match_action", [
+  "matched",
+  "created",
+]);
