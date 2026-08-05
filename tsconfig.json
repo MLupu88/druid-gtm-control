@@ -10,6 +10,9 @@
       "path": "./lib/evaluator"
     },
     {
+      "path": "./lib/identity"
+    },
+    {
       "path": "./lib/evaluator-persistence"
     },
     {

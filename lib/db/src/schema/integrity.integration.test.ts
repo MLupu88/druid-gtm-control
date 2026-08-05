@@ -27,7 +27,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./index.js";
@@ -202,6 +202,39 @@ async function makeSnapshot(accountId: string) {
     })
     .returning();
   return snapshot;
+}
+
+async function makeSignal(
+  overrides: Partial<typeof schema.signals.$inferInsert> = {},
+) {
+  const [signal] = await db!
+    .insert(schema.signals)
+    .values({
+      source: "hubspot",
+      sourceEventId: `evt-${crypto.randomUUID()}`,
+      occurredAt: new Date(),
+      signalType: "page_view",
+      observedResolutionLevel: "anonymous",
+      schemaVersion: "v1",
+      rawPayload: { raw: true },
+      normalizedPayload: { normalized: true },
+      ...overrides,
+    })
+    .returning();
+  return signal;
+}
+
+async function makePerson(
+  overrides: Partial<typeof schema.people.$inferInsert> = {},
+) {
+  const [person] = await db!
+    .insert(schema.people)
+    .values({
+      workEmail: `person-${crypto.randomUUID()}@example.com`,
+      ...overrides,
+    })
+    .returning();
+  return person;
 }
 
 // profile_config_snapshot has no DB default (NOT NULL, required on every
@@ -1167,6 +1200,773 @@ test(
         code: "P0001",
         messageIncludes: "account_decisions",
       },
+    );
+  },
+);
+
+// =======================================================================
+// GTM V2 Unit 1 — Operational Identity and Signal Contracts
+// =======================================================================
+
+// -----------------------------------------------------------------------
+// signals
+// -----------------------------------------------------------------------
+
+test(
+  "signals rejects a second insert with the same (source, source_event_id)",
+  { skip },
+  async () => {
+    const sourceEventId = `evt-${crypto.randomUUID()}`;
+    await makeSignal({ source: "hubspot", sourceEventId });
+    await assertDbRejects(makeSignal({ source: "hubspot", sourceEventId }), {
+      constraint: "signals_source_source_event_id_uq",
+    });
+  },
+);
+
+test("signals rejects a blank source", { skip }, async () => {
+  await assertDbRejects(makeSignal({ source: "" }), {
+    constraint: "signals_source_not_blank",
+  });
+});
+
+test(
+  "signals rejects a non-canonical (uppercase/untrimmed) source",
+  { skip },
+  async () => {
+    await assertDbRejects(makeSignal({ source: " HubSpot " }), {
+      constraint: "signals_source_is_canonical_form",
+    });
+  },
+);
+
+test(
+  "signals.company_domain rejects a value still containing www. or a protocol",
+  { skip },
+  async () => {
+    await assertDbRejects(makeSignal({ companyDomain: "www.example.com" }), {
+      constraint: "signals_company_domain_is_normalized_domain_shape",
+    });
+    await assertDbRejects(
+      makeSignal({ companyDomain: "https://example.com" }),
+      { constraint: "signals_company_domain_is_normalized_domain_shape" },
+    );
+  },
+);
+
+test(
+  "signals accepts an already-normalized company_domain",
+  { skip },
+  async () => {
+    const signal = await makeSignal({ companyDomain: "example.com" });
+    assert.equal(signal.companyDomain, "example.com");
+  },
+);
+
+test(
+  "signals rejects non-object raw_payload/normalized_payload",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeSignal({ rawPayload: ["not", "an", "object"] as any }),
+      { constraint: "signals_raw_payload_is_object" },
+    );
+    await assertDbRejects(
+      makeSignal({ normalizedPayload: ["not", "an", "object"] as any }),
+      { constraint: "signals_normalized_payload_is_object" },
+    );
+  },
+);
+
+test("signals rejects UPDATE and DELETE", { skip }, async () => {
+  const signal = await makeSignal();
+  await assertDbRejects(
+    db!
+      .update(schema.signals)
+      .set({ signalType: "changed" })
+      .where(eq(schema.signals.id, signal.id)),
+    { code: "P0001", messageIncludes: "signals" },
+  );
+  await assertDbRejects(
+    db!.delete(schema.signals).where(eq(schema.signals.id, signal.id)),
+    { code: "P0001", messageIncludes: "signals" },
+  );
+});
+
+// -----------------------------------------------------------------------
+// people
+// -----------------------------------------------------------------------
+
+test("people rejects an all-null (identityless) row", { skip }, async () => {
+  await assertDbRejects(
+    db!.insert(schema.people).values({
+      fullName: null,
+      workEmail: null,
+      linkedinUrl: null,
+      externalId: null,
+      externalIdSource: null,
+    }),
+    { constraint: "people_has_identity_attribute" },
+  );
+});
+
+test("people rejects a duplicate work_email", { skip }, async () => {
+  const workEmail = `dup-${crypto.randomUUID()}@example.com`;
+  await makePerson({ workEmail });
+  await assertDbRejects(makePerson({ workEmail }), {
+    constraint: "people_work_email_uq",
+  });
+});
+
+test(
+  "people rejects a duplicate (external_id_source, external_id)",
+  { skip },
+  async () => {
+    const externalId = `hs-${crypto.randomUUID()}`;
+    await makePerson({
+      workEmail: null,
+      externalId,
+      externalIdSource: "hubspot",
+    });
+    await assertDbRejects(
+      makePerson({ workEmail: null, externalId, externalIdSource: "hubspot" }),
+      { constraint: "people_external_id_source_id_uq" },
+    );
+  },
+);
+
+test(
+  "people rejects a non-canonical (uppercase/untrimmed) work_email",
+  { skip },
+  async () => {
+    await assertDbRejects(makePerson({ workEmail: " Jordan@Example.com " }), {
+      constraint: "people_work_email_is_canonical_form",
+    });
+  },
+);
+
+// -----------------------------------------------------------------------
+// account_people
+// -----------------------------------------------------------------------
+
+test(
+  "account_people rejects a duplicate (account_id, person_id)",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const person = await makePerson();
+    await db!.insert(schema.accountPeople).values({
+      accountId: account.id,
+      personId: person.id,
+      source: "test",
+    });
+    await assertDbRejects(
+      db!.insert(schema.accountPeople).values({
+        accountId: account.id,
+        personId: person.id,
+        source: "test",
+      }),
+      { constraint: "account_people_account_id_person_id_uq" },
+    );
+  },
+);
+
+test(
+  "account_people rejects last_seen_at before first_seen_at",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const person = await makePerson();
+    await assertDbRejects(
+      db!.insert(schema.accountPeople).values({
+        accountId: account.id,
+        personId: person.id,
+        source: "test",
+        firstSeenAt: new Date("2026-01-10T00:00:00Z"),
+        lastSeenAt: new Date("2026-01-01T00:00:00Z"),
+      }),
+      { constraint: "account_people_last_seen_after_first_seen" },
+    );
+  },
+);
+
+// -----------------------------------------------------------------------
+// account_aliases
+// -----------------------------------------------------------------------
+
+test(
+  "account_aliases rejects a duplicate strong alias across two accounts",
+  { skip },
+  async () => {
+    const accountA = await makeAccount();
+    const accountB = await makeAccount();
+    const normalizedValue = `strong-${crypto.randomUUID()}.example.com`;
+    await db!.insert(schema.accountAliases).values({
+      accountId: accountA.id,
+      aliasType: "domain",
+      rawValue: normalizedValue,
+      normalizedValue,
+      normalizationStrategy: "domain",
+      isStrong: true,
+      source: "test",
+    });
+    await assertDbRejects(
+      db!.insert(schema.accountAliases).values({
+        accountId: accountB.id,
+        aliasType: "domain",
+        rawValue: normalizedValue,
+        normalizedValue,
+        normalizationStrategy: "domain",
+        isStrong: true,
+        source: "test",
+      }),
+      { constraint: "account_aliases_strong_type_normalized_value_uq" },
+    );
+  },
+);
+
+test(
+  "account_aliases allows a duplicate weak alias across two accounts",
+  { skip },
+  async () => {
+    const accountA = await makeAccount();
+    const accountB = await makeAccount();
+    const normalizedValue = `acme inc ${crypto.randomUUID()}`;
+    const [aliasA] = await db!
+      .insert(schema.accountAliases)
+      .values({
+        accountId: accountA.id,
+        aliasType: "company_name",
+        rawValue: normalizedValue,
+        normalizedValue,
+        normalizationStrategy: "case_insensitive",
+        isStrong: false,
+        source: "test",
+      })
+      .returning();
+    const [aliasB] = await db!
+      .insert(schema.accountAliases)
+      .values({
+        accountId: accountB.id,
+        aliasType: "company_name",
+        rawValue: normalizedValue,
+        normalizedValue,
+        normalizationStrategy: "case_insensitive",
+        isStrong: false,
+        source: "test",
+      })
+      .returning();
+    assert.notEqual(aliasA.accountId, aliasB.accountId);
+    assert.equal(aliasA.normalizedValue, aliasB.normalizedValue);
+  },
+);
+
+test(
+  "account_aliases 'domain' strategy collides once two raw values are correctly normalized to the same domain",
+  { skip },
+  async () => {
+    const accountA = await makeAccount();
+    const accountB = await makeAccount();
+    const normalizedValue = `collide-${crypto.randomUUID()}.example.com`;
+    await db!.insert(schema.accountAliases).values({
+      accountId: accountA.id,
+      aliasType: "domain",
+      rawValue: `HTTPS://WWW.${normalizedValue}`,
+      normalizedValue,
+      normalizationStrategy: "domain",
+      isStrong: true,
+      source: "test",
+    });
+    await assertDbRejects(
+      db!.insert(schema.accountAliases).values({
+        accountId: accountB.id,
+        aliasType: "domain",
+        rawValue: `  ${normalizedValue}  `,
+        normalizedValue,
+        normalizationStrategy: "domain",
+        isStrong: true,
+        source: "test",
+      }),
+      { constraint: "account_aliases_strong_type_normalized_value_uq" },
+    );
+  },
+);
+
+test(
+  "account_aliases 'exact' strategy preserves case — two distinct case-sensitive IDs do not collide",
+  { skip },
+  async () => {
+    const accountA = await makeAccount();
+    const accountB = await makeAccount();
+    const suffix = crypto.randomUUID();
+    const [aliasA] = await db!
+      .insert(schema.accountAliases)
+      .values({
+        accountId: accountA.id,
+        aliasType: "hubspot_company_id",
+        rawValue: `AbC-${suffix}`,
+        normalizedValue: `AbC-${suffix}`,
+        normalizationStrategy: "exact",
+        isStrong: true,
+        source: "test",
+      })
+      .returning();
+    const [aliasB] = await db!
+      .insert(schema.accountAliases)
+      .values({
+        accountId: accountB.id,
+        aliasType: "hubspot_company_id",
+        rawValue: `abc-${suffix}`,
+        normalizedValue: `abc-${suffix}`,
+        normalizationStrategy: "exact",
+        isStrong: true,
+        source: "test",
+      })
+      .returning();
+    assert.notEqual(aliasA.normalizedValue, aliasB.normalizedValue);
+  },
+);
+
+test(
+  "account_aliases 'domain' strategy CHECK rejects a value still containing a protocol/www./path",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.accountAliases).values({
+        accountId: account.id,
+        aliasType: "domain",
+        rawValue: "https://www.example.com/path",
+        normalizedValue: "https://www.example.com/path",
+        normalizationStrategy: "domain",
+        isStrong: true,
+        source: "test",
+      }),
+      { constraint: "account_aliases_normalized_value_matches_strategy" },
+    );
+  },
+);
+
+test(
+  "account_aliases 'case_insensitive' strategy CHECK rejects an uppercase or untrimmed value",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.accountAliases).values({
+        accountId: account.id,
+        aliasType: "company_name",
+        rawValue: "Acme Inc",
+        normalizedValue: "Acme Inc",
+        normalizationStrategy: "case_insensitive",
+        isStrong: false,
+        source: "test",
+      }),
+      { constraint: "account_aliases_normalized_value_matches_strategy" },
+    );
+  },
+);
+
+test(
+  "account_aliases 'exact' strategy CHECK allows a mixed-case value (not force-lowercased)",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const value = `MiXeD-${crypto.randomUUID()}`;
+    const [alias] = await db!
+      .insert(schema.accountAliases)
+      .values({
+        accountId: account.id,
+        aliasType: "hubspot_company_id",
+        rawValue: value,
+        normalizedValue: value,
+        normalizationStrategy: "exact",
+        isStrong: true,
+        source: "test",
+      })
+      .returning();
+    assert.match(alias.normalizedValue, /[A-Z]/);
+  },
+);
+
+// -----------------------------------------------------------------------
+// identity_resolution_events
+// -----------------------------------------------------------------------
+
+test(
+  "identity_resolution_events 'unresolved' requires both account_id and person_id null",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "unresolved",
+        resolutionLevel: "anonymous",
+        resolutionMethod: "no_match",
+        confidence: "low",
+        resolverVersion: "test-1",
+        accountId: account.id,
+      }),
+      { constraint: "identity_resolution_events_account_id_matches_outcome" },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events 'account_resolved' requires account_id",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "account_resolved",
+        resolutionLevel: "company",
+        resolutionMethod: "domain_alias_match",
+        confidence: "high",
+        resolverVersion: "test-1",
+        accountMatchAction: "matched",
+        // accountId intentionally omitted
+      }),
+      { constraint: "identity_resolution_events_account_id_matches_outcome" },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events 'person_resolved' requires both account_id and person_id",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "person_resolved",
+        resolutionLevel: "contact",
+        resolutionMethod: "email_match",
+        confidence: "high",
+        resolverVersion: "test-1",
+        accountId: account.id,
+        accountMatchAction: "matched",
+        personMatchAction: "created",
+        // personId intentionally omitted
+      }),
+      { constraint: "identity_resolution_events_person_id_matches_outcome" },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects personId set without contact-level resolution ('never manufacture a person')",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    const person = await makePerson();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "person_resolved",
+        resolutionLevel: "company",
+        resolutionMethod: "email_match",
+        confidence: "high",
+        resolverVersion: "test-1",
+        accountId: account.id,
+        accountMatchAction: "matched",
+        personId: person.id,
+        personMatchAction: "matched",
+      }),
+      {
+        constraint: "identity_resolution_events_person_requires_contact_level",
+      },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects outcome='unresolved' with a non-anonymous resolution_level",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "unresolved",
+        resolutionLevel: "company",
+        resolutionMethod: "no_match",
+        confidence: "low",
+        resolverVersion: "test-1",
+      }),
+      {
+        constraint:
+          "identity_resolution_events_resolution_level_matches_outcome",
+      },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects outcome='account_resolved' with a resolution_level other than 'company'",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "account_resolved",
+        resolutionLevel: "contact",
+        resolutionMethod: "domain_alias_match",
+        confidence: "high",
+        resolverVersion: "test-1",
+        accountId: account.id,
+        accountMatchAction: "matched",
+      }),
+      {
+        constraint:
+          "identity_resolution_events_resolution_level_matches_outcome",
+      },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects a non-null account_match_action when outcome='unresolved'",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "unresolved",
+        resolutionLevel: "anonymous",
+        resolutionMethod: "no_match",
+        confidence: "low",
+        resolverVersion: "test-1",
+        accountMatchAction: "matched",
+      }),
+      {
+        constraint:
+          "identity_resolution_events_account_match_action_matches_outcome",
+      },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events requires account_match_action when outcome='account_resolved'",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "account_resolved",
+        resolutionLevel: "company",
+        resolutionMethod: "domain_alias_match",
+        confidence: "high",
+        resolverVersion: "test-1",
+        accountId: account.id,
+        // accountMatchAction intentionally omitted
+      }),
+      {
+        constraint:
+          "identity_resolution_events_account_match_action_matches_outcome",
+      },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects a non-null person_match_action when outcome is not 'person_resolved'",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "account_resolved",
+        resolutionLevel: "company",
+        resolutionMethod: "domain_alias_match",
+        confidence: "high",
+        resolverVersion: "test-1",
+        accountId: account.id,
+        accountMatchAction: "matched",
+        personMatchAction: "matched",
+      }),
+      {
+        constraint:
+          "identity_resolution_events_person_match_action_matches_outcome",
+      },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events requires person_match_action when outcome='person_resolved'",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    const person = await makePerson();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "person_resolved",
+        resolutionLevel: "contact",
+        resolutionMethod: "email_match",
+        confidence: "high",
+        resolverVersion: "test-1",
+        accountId: account.id,
+        accountMatchAction: "matched",
+        personId: person.id,
+        // personMatchAction intentionally omitted
+      }),
+      {
+        constraint:
+          "identity_resolution_events_person_match_action_matches_outcome",
+      },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects a non-array candidate_matches",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    await assertDbRejects(
+      db!.insert(schema.identityResolutionEvents).values({
+        signalId: signal.id,
+        outcome: "unresolved",
+        resolutionLevel: "anonymous",
+        resolutionMethod: "no_match",
+        confidence: "low",
+        resolverVersion: "test-1",
+        candidateMatches: { not: "an array" } as any,
+      }),
+      { constraint: "identity_resolution_events_candidate_matches_is_array" },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects an invalid outcome/confidence at the enum level",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    await assertDbRejects(
+      db!.execute(
+        sql`INSERT INTO identity_resolution_events
+          (signal_id, outcome, resolution_level, resolution_method, confidence, resolver_version)
+          VALUES (${signal.id}, 'made_up_outcome', 'anonymous', 'no_match', 'low', 'test-1')`,
+      ),
+      { code: "22P02" },
+    );
+    await assertDbRejects(
+      db!.execute(
+        sql`INSERT INTO identity_resolution_events
+          (signal_id, outcome, resolution_level, resolution_method, confidence, resolver_version)
+          VALUES (${signal.id}, 'unresolved', 'anonymous', 'no_match', 'certain', 'test-1')`,
+      ),
+      { code: "22P02" },
+    );
+  },
+);
+
+test(
+  "identity_resolution_events rejects UPDATE and DELETE",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const [event] = await db!
+      .insert(schema.identityResolutionEvents)
+      .values({
+        signalId: signal.id,
+        outcome: "unresolved",
+        resolutionLevel: "anonymous",
+        resolutionMethod: "no_match",
+        confidence: "low",
+        resolverVersion: "test-1",
+      })
+      .returning();
+    await assertDbRejects(
+      db!
+        .update(schema.identityResolutionEvents)
+        .set({ reason: "edited" })
+        .where(eq(schema.identityResolutionEvents.id, event.id)),
+      { code: "P0001", messageIncludes: "identity_resolution_events" },
+    );
+    await assertDbRejects(
+      db!
+        .delete(schema.identityResolutionEvents)
+        .where(eq(schema.identityResolutionEvents.id, event.id)),
+      { code: "P0001", messageIncludes: "identity_resolution_events" },
+    );
+  },
+);
+
+test(
+  "unresolved-then-resolved: the latest identity_resolution_events row alone carries the complete current binding",
+  { skip },
+  async () => {
+    const signal = await makeSignal();
+    const account = await makeAccount();
+    const person = await makePerson();
+
+    await db!.insert(schema.identityResolutionEvents).values({
+      signalId: signal.id,
+      outcome: "unresolved",
+      resolutionLevel: "anonymous",
+      resolutionMethod: "no_match",
+      confidence: "low",
+      resolverVersion: "test-1",
+    });
+
+    await db!.insert(schema.identityResolutionEvents).values({
+      signalId: signal.id,
+      outcome: "person_resolved",
+      resolutionLevel: "contact",
+      resolutionMethod: "email_match",
+      confidence: "high",
+      resolverVersion: "test-1",
+      accountId: account.id,
+      accountMatchAction: "matched",
+      personId: person.id,
+      personMatchAction: "created",
+    });
+
+    const rows = await db!
+      .select()
+      .from(schema.identityResolutionEvents)
+      .where(eq(schema.identityResolutionEvents.signalId, signal.id))
+      .orderBy(
+        schema.identityResolutionEvents.createdAt,
+        schema.identityResolutionEvents.id,
+      );
+
+    assert.equal(rows.length, 2);
+    const latest = rows[rows.length - 1];
+    // The latest row alone is self-sufficient — it carries BOTH the
+    // account and person binding, unlike a granular person-only event
+    // would have.
+    assert.equal(latest.outcome, "person_resolved");
+    assert.equal(latest.accountId, account.id);
+    assert.equal(latest.personId, person.id);
+
+    // signals itself was never touched — no UPDATE occurred, and a
+    // direct attempt still fails via the immutability trigger.
+    await assertDbRejects(
+      db!
+        .update(schema.signals)
+        .set({ signalType: "changed" })
+        .where(eq(schema.signals.id, signal.id)),
+      { code: "P0001", messageIncludes: "signals" },
     );
   },
 );

@@ -15,3 +15,10 @@ export * from "./accountDecisions";
 export * from "./clientRadarResearchRuns";
 export * from "./accountFacts";
 export * from "./accountFactCurrent";
+
+// GTM V2 Unit 1 — Operational Identity and Signal Contracts.
+export * from "./accountAliases";
+export * from "./people";
+export * from "./accountPeople";
+export * from "./signals";
+export * from "./identityResolutionEvents";

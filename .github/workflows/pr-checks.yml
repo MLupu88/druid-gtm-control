@@ -54,6 +54,9 @@ jobs:
       - name: Run gtm-shared test suite
         run: node --test lib/gtm-shared/src/gtmContract.test.js lib/gtm-shared/src/messageComposer.test.js lib/gtm-shared/src/researchEligibility.test.js lib/gtm-shared/src/scenarios.test.js
 
+      - name: Run @workspace/identity test suite
+        run: pnpm --filter @workspace/identity run test
+
       - name: Apply @workspace/db migrations
         run: pnpm --filter @workspace/db run migrate
 
