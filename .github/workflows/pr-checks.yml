@@ -63,6 +63,9 @@ jobs:
       - name: Run @workspace/db test suite (structural + integration; DATABASE_URL is set above, so integration tests cannot silently skip here)
         run: pnpm --filter @workspace/db run test
 
+      - name: Run @workspace/api-server signal-ingestion suite (unit + route + integration; DATABASE_URL is set above, so the integration suite cannot silently skip here)
+        run: pnpm --filter @workspace/api-server run test:signals
+
       - name: Typecheck libs (includes @workspace/db)
         run: pnpm run typecheck:libs
 

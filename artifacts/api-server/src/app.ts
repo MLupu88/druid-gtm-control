@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import express, { type Express } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -60,5 +60,29 @@ app.use((req, res, next) => {
 
   res.sendFile(path.join(frontendDist, "index.html"));
 });
+
+// Maps body-parser's oversized-body rejection (thrown by express.json()
+// above, before any route handler runs) to the JSON error shape every API
+// consumer expects, rather than Express 5's default HTML error page. The
+// rejected body itself is never available here (body-parser aborts the
+// read before producing one) and is not logged. Scoped to exactly this
+// error type — any other error is passed through unchanged to Express's
+// default handler.
+app.use(
+  (err: unknown, _req: Request, res: Response, next: NextFunction): void => {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      (err as { type?: unknown }).type === "entity.too.large"
+    ) {
+      res.status(413).json({
+        error: "The request body is too large.",
+        code: "payload_too_large",
+      });
+      return;
+    }
+    next(err);
+  },
+);
 
 export default app;
