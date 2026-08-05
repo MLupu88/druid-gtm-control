@@ -22,8 +22,12 @@
 // @workspace/db's singleton" pattern already used throughout this
 // package's other *.integration.test.ts files. No truncation or row
 // deletion anywhere — isolation comes from crypto.randomUUID()-suffixed
-// sourceEventId values, and signals is immutable/insert-only by trigger
-// regardless.
+// sourceEventId/domain/email values, and signals is immutable/insert-only
+// by trigger regardless. Assertions on the shared accounts/people/
+// account_people/account_aliases tables (see the "no side-effects" test
+// below) are scoped to those unique per-test identifiers rather than
+// global row counts, since this file runs concurrently with
+// ./signalResolution.integration.test.ts against the same tables.
 //
 // Run with: DATABASE_URL=postgres://... tsx --test src/routes/signals.integration.test.ts
 
@@ -32,7 +36,7 @@ import crypto from "node:crypto";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
 import express, { type Express } from "express";
-import { and, count, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
@@ -110,6 +114,18 @@ async function withServer(fn: (baseUrl: string) => Promise<void>): Promise<void>
 
 function uniqueEventId(marker: string): string {
   return `${marker}-${crypto.randomUUID()}`;
+}
+
+// Mirrors ./signalResolution.integration.test.ts's own uniqueDomain/
+// uniqueEmail helpers — a randomUUID()-suffixed identifier per test run,
+// so scoped lookups below can never collide with fixture data left
+// behind by earlier runs or created concurrently by other test files.
+function uniqueDomain(marker: string): string {
+  return `${marker}-${crypto.randomUUID()}.example`;
+}
+
+function uniqueEmail(marker: string): string {
+  return `${marker}-${crypto.randomUUID()}@example.com`;
 }
 
 function normalizedSignalPayload(
@@ -397,20 +413,37 @@ test(
   { skip },
   async () => {
     const sourceEventId = uniqueEventId("no-side-effects");
-
-    const [beforeAccounts] = await db!.select({ n: count() }).from(schema.accounts);
-    const [beforePeople] = await db!.select({ n: count() }).from(schema.people);
-    const [beforeAccountPeople] = await db!.select({ n: count() }).from(schema.accountPeople);
-    const [beforeAliases] = await db!.select({ n: count() }).from(schema.accountAliases);
+    // This file's tests run concurrently with
+    // ./signalResolution.integration.test.ts in the same `test:signals`
+    // process (and against the same live Postgres instance in CI) —
+    // node:test schedules top-level test files in parallel by default,
+    // and that file legitimately creates accounts/people/account_people/
+    // account_aliases rows as part of its own (correctly-scoped)
+    // assertions. A global `count()` before/after comparison on these
+    // tables is therefore racy: it can observe rows created by that
+    // other file's concurrent tests and fail despite this ingestion
+    // having no side effects at all.
+    //
+    // Instead, scope every assertion to identifiers unique to this test
+    // (a randomUUID()-suffixed domain/email that no other test could
+    // ever produce) — mirroring the accountsByDomain/peopleByEmail
+    // pattern signalResolution.integration.test.ts already uses. Since
+    // ingestion (this route) never resolves identity, any row it might
+    // wrongly create would necessarily carry this signal's own domain/
+    // email — so proving none exists for these identifiers is a
+    // complete proof of "no side effects", without depending on global
+    // table state other tests are free to mutate.
+    const domain = uniqueDomain("no-side-effects");
+    const email = uniqueEmail("no-side-effects");
 
     await withServer(async (baseUrl) => {
       const res = await postSignal(baseUrl, {
         normalizedSignal: normalizedSignalPayload(sourceEventId, {
           observedResolutionLevel: "contact",
-          company: { domain: "example.com", name: "Acme Inc", externalIds: {} },
+          company: { domain, name: "Acme Inc", externalIds: {} },
           person: {
             fullName: "Jane Doe",
-            workEmail: "jane.doe@example.com",
+            workEmail: email,
             title: "VP Sales",
             linkedinUrl: null,
             externalIds: {},
@@ -421,15 +454,41 @@ test(
       assert.equal(res.status, 201);
     });
 
-    const [afterAccounts] = await db!.select({ n: count() }).from(schema.accounts);
-    const [afterPeople] = await db!.select({ n: count() }).from(schema.people);
-    const [afterAccountPeople] = await db!.select({ n: count() }).from(schema.accountPeople);
-    const [afterAliases] = await db!.select({ n: count() }).from(schema.accountAliases);
+    const accountRows = await db!
+      .select()
+      .from(schema.accounts)
+      .where(eq(schema.accounts.companyDomain, domain));
+    assert.equal(accountRows.length, 0, "no account row must be created for this signal's domain");
 
-    assert.equal(afterAccounts.n, beforeAccounts.n, "no account row must be created");
-    assert.equal(afterPeople.n, beforePeople.n, "no person row must be created");
-    assert.equal(afterAccountPeople.n, beforeAccountPeople.n, "no account_people row must be created");
-    assert.equal(afterAliases.n, beforeAliases.n, "no account_aliases row must be created");
+    const peopleRows = await db!
+      .select()
+      .from(schema.people)
+      .where(eq(schema.people.workEmail, email));
+    assert.equal(peopleRows.length, 0, "no person row must be created for this signal's email");
+
+    const aliasRows = await db!
+      .select()
+      .from(schema.accountAliases)
+      .where(eq(schema.accountAliases.normalizedValue, domain));
+    assert.equal(aliasRows.length, 0, "no account_aliases row must be created for this signal's domain");
+
+    // No account or person exists for this signal's identifiers (proven
+    // above), so no account_people row can reference either one — but
+    // query it directly rather than rely on that inference, joining
+    // through both possible identifiers.
+    const accountPeopleRows = await db!
+      .select({ id: schema.accountPeople.id })
+      .from(schema.accountPeople)
+      .innerJoin(schema.accounts, eq(schema.accountPeople.accountId, schema.accounts.id))
+      .innerJoin(schema.people, eq(schema.accountPeople.personId, schema.people.id))
+      .where(
+        or(eq(schema.accounts.companyDomain, domain), eq(schema.people.workEmail, email)),
+      );
+    assert.equal(
+      accountPeopleRows.length,
+      0,
+      "no account_people row must be created for this signal's domain or email",
+    );
   },
 );
 
