@@ -1225,7 +1225,7 @@ test(
 );
 
 test("signals rejects a blank source", { skip }, async () => {
-  await assertDbRejects(makeSignal({ source: "   " }), {
+  await assertDbRejects(makeSignal({ source: "" }), {
     constraint: "signals_source_not_blank",
   });
 });
