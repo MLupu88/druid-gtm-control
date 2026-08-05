@@ -101,6 +101,12 @@ async function postResolve(baseUrl: string, signalId: string): Promise<globalThi
   });
 }
 
+async function getIdentity(baseUrl: string, signalId: string): Promise<globalThis.Response> {
+  return fetch(`${baseUrl}/internal/signals/${signalId}/identity`, {
+    headers: AUTH_HEADERS,
+  });
+}
+
 // ---------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------
@@ -911,4 +917,271 @@ test("identity_resolution_events remain append-only for rows this service create
   await assert.rejects(() =>
     db!.delete(schema.identityResolutionEvents).where(eq(schema.identityResolutionEvents.id, eventId)),
   );
+});
+
+// ---------------------------------------------------------------------
+// GET /internal/signals/:signalId/identity — GTM V2 Stage 2 Unit 4
+// current-identity-binding read model.
+// ---------------------------------------------------------------------
+
+test("GET /identity: a signal that has never been resolved returns 200 hasBinding=false, distinct from a missing signal", { skip }, async () => {
+  const domain = uniqueDomain("never-resolved");
+  const signal = await insertSignal({ observedResolutionLevel: "company", company: { domain, name: "NeverResolvedCo", externalIds: {} } });
+
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    const body = await readJson(res, "response");
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, {
+      signalId: signal.id,
+      hasBinding: false,
+      eventId: null,
+      outcome: null,
+      resolutionLevel: null,
+      accountId: null,
+      personId: null,
+      accountMatchAction: null,
+      personMatchAction: null,
+      createdAt: null,
+    });
+  });
+});
+
+test("GET /identity: a signalId that does not exist at all returns 404 signal_not_found", { skip }, async () => {
+  const missingSignalId = crypto.randomUUID();
+
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, missingSignalId);
+    const body = await readJson(res, "response");
+    assert.equal(res.status, 404);
+    assert.deepEqual(body, { error: "The signal was not found.", code: "signal_not_found" });
+  });
+});
+
+test("GET /identity: after resolving, the current binding matches exactly what POST /resolve returned", { skip }, async () => {
+  const domain = uniqueDomain("get-after-resolve");
+  const signal = await insertSignal({ observedResolutionLevel: "company", company: { domain, name: "GetAfterResolveCo", externalIds: {} } });
+
+  let resolveBody!: Record<string, unknown>;
+  await withServer(async (baseUrl) => {
+    const res = await postResolve(baseUrl, signal.id);
+    resolveBody = await readJson(res, "resolve response");
+  });
+
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    const body = await readJson(res, "identity response");
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, {
+      signalId: signal.id,
+      hasBinding: true,
+      eventId: resolveBody.eventId,
+      outcome: resolveBody.outcome,
+      resolutionLevel: resolveBody.resolutionLevel,
+      accountId: resolveBody.accountId,
+      personId: resolveBody.personId,
+      accountMatchAction: resolveBody.accountMatchAction,
+      personMatchAction: resolveBody.personMatchAction,
+      createdAt: resolveBody.createdAt,
+    });
+  });
+});
+
+test("GET /identity: an exact replay does not change the current binding — same eventId/createdAt before and after", { skip }, async () => {
+  const domain = uniqueDomain("get-replay-stable");
+  const signal = await insertSignal({ observedResolutionLevel: "company", company: { domain, name: "GetReplayStableCo", externalIds: {} } });
+
+  await withServer(async (baseUrl) => {
+    await postResolve(baseUrl, signal.id);
+  });
+
+  let firstBinding!: Record<string, unknown>;
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    firstBinding = await readJson(res, "first identity response");
+  });
+
+  // Exact replay: same signal, same external state, no evidence changed.
+  await withServer(async (baseUrl) => {
+    const res = await postResolve(baseUrl, signal.id);
+    const body = await readJson(res, "replay resolve response");
+    assert.equal(body.status, "replayed");
+  });
+
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    const body = await readJson(res, "second identity response");
+    assert.deepEqual(body, firstBinding, "a pure replay must not change the current binding");
+  });
+
+  const events = await eventsForSignal(signal.id);
+  assert.equal(events.length, 1, "a pure replay must not append a new event");
+});
+
+test("GET /identity: when later evidence changes the resolver's outcome, the newly appended event becomes current — end to end via two real resolve calls", { skip }, async () => {
+  // Mirrors "unresolved rerun after evidence changes appends a resolved
+  // event" above: a genuine account_identifier_conflict, resolved once
+  // (unresolved), then the conflict is cleared by an external
+  // correction so the second resolve of the SAME signal now finds a
+  // single, unambiguous strong match — the exact evidence the resolver
+  // needs to move from unresolved to account_resolved. signals is
+  // immutable, so a signal can never be edited in place; the only way to
+  // observe a real outcome transition for one signal id is to change the
+  // matching state the resolver reads, not the signal itself.
+  const domain = uniqueDomain("get-transition");
+  const externalId = `ext-${crypto.randomUUID()}`;
+
+  const [accountA] = await db!.insert(schema.accounts).values({ accountKey: `dom:${domain}`, companyDomain: domain }).returning();
+  await db!.insert(schema.accountAliases).values({
+    accountId: accountA!.id,
+    aliasType: "domain",
+    rawValue: domain,
+    normalizedValue: domain,
+    normalizationStrategy: "domain",
+    isStrong: true,
+    source: "hubspot",
+  });
+  const [accountB] = await db!
+    .insert(schema.accounts)
+    .values({ accountKey: `ext:v1:seed-${crypto.randomUUID()}` })
+    .returning();
+  const [conflictingAlias] = await db!
+    .insert(schema.accountAliases)
+    .values({
+      accountId: accountB!.id,
+      aliasType: "external_id:hubspot",
+      rawValue: externalId,
+      normalizedValue: externalId,
+      normalizationStrategy: "exact",
+      isStrong: true,
+      source: "hubspot",
+    })
+    .returning();
+
+  const signal = await insertSignal({
+    observedResolutionLevel: "company",
+    company: { domain, name: null, externalIds: { hubspot: externalId } },
+  });
+
+  let firstEventId!: string;
+  await withServer(async (baseUrl) => {
+    await postResolve(baseUrl, signal.id);
+  });
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    const body = await readJson(res, "identity after first resolve");
+    assert.equal(body.hasBinding, true);
+    assert.equal(body.outcome, "unresolved");
+    assert.equal(body.accountId, null);
+    firstEventId = body.eventId as string;
+  });
+
+  // The needed strong identity evidence: exactly one unambiguous account
+  // per identifier, once the competing alias is cleared externally.
+  await db!.delete(schema.accountAliases).where(eq(schema.accountAliases.id, conflictingAlias!.id));
+
+  await withServer(async (baseUrl) => {
+    const res = await postResolve(baseUrl, signal.id);
+    const body = await readJson(res, "second resolve response");
+    assert.equal(body.outcome, "account_resolved");
+  });
+
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    const body = await readJson(res, "identity after second resolve");
+    assert.equal(body.hasBinding, true);
+    assert.equal(body.outcome, "account_resolved");
+    assert.equal(body.accountId, accountA!.id);
+    assert.notEqual(body.eventId, firstEventId, "the newly appended event must become current, not the original");
+  });
+
+  const events = await eventsForSignal(signal.id);
+  assert.equal(events.length, 2);
+});
+
+test("GET /identity: response never exposes raw payload, candidateMatches, reason, confidence, resolverVersion, or resolutionMethod", { skip }, async () => {
+  const domain = uniqueDomain("get-safe-fields");
+  const signal = await insertSignal({ observedResolutionLevel: "company", company: { domain, name: "GetSafeFieldsCo", externalIds: {} } });
+
+  await withServer(async (baseUrl) => {
+    await postResolve(baseUrl, signal.id);
+  });
+
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    const body = await readJson(res, "identity response");
+    assert.equal(res.status, 200);
+    assert.deepEqual(Object.keys(body).sort(), [
+      "accountId",
+      "accountMatchAction",
+      "createdAt",
+      "eventId",
+      "hasBinding",
+      "outcome",
+      "personId",
+      "personMatchAction",
+      "resolutionLevel",
+      "signalId",
+    ]);
+  });
+});
+
+test("GET /identity: deterministic tie-break — two events sharing the exact same created_at resolve to the greater id, regardless of insertion order", { skip }, async () => {
+  const signal = await insertSignal({ observedResolutionLevel: "anonymous", company: { domain: null, name: null, externalIds: {} } });
+
+  const sharedCreatedAt = new Date("2026-02-02T00:00:00Z");
+  // Freshly random per run (never a fixed literal id — a fixed id would
+  // collide on the events primary key if this test ever ran twice
+  // against the same database). Canonical crypto.randomUUID() strings
+  // compare, via plain JS string comparison, in exactly the same order
+  // Postgres's own uuid byte comparison would produce (dashes fall at
+  // identical positions in both strings; both are lowercase hex), so
+  // comparing them here reliably predicts which one the (created_at,
+  // id) DESC ordering must pick without hardcoding either value.
+  const idA = crypto.randomUUID();
+  const idB = crypto.randomUUID();
+  const [winnerId, loserId] = idA > idB ? [idA, idB] : [idB, idA];
+
+  // Insert the greater id FIRST and the lesser id SECOND — if the read
+  // model incorrectly picked "last inserted" instead of ordering by
+  // (created_at, id), this would return the loser and the test would
+  // fail, so the ordering assertion below is not an artifact of
+  // insertion order.
+  await db!.insert(schema.identityResolutionEvents).values({
+    id: winnerId,
+    signalId: signal.id,
+    outcome: "unresolved",
+    resolutionLevel: "anonymous",
+    resolutionMethod: "no_strong_company_identity",
+    confidence: "low",
+    resolverVersion: "identity-resolver-v1",
+    accountId: null,
+    accountMatchAction: null,
+    personId: null,
+    personMatchAction: null,
+    reason: "no_strong_company_identity",
+    createdAt: sharedCreatedAt,
+  });
+  await db!.insert(schema.identityResolutionEvents).values({
+    id: loserId,
+    signalId: signal.id,
+    outcome: "unresolved",
+    resolutionLevel: "anonymous",
+    resolutionMethod: "no_strong_company_identity",
+    confidence: "low",
+    resolverVersion: "identity-resolver-v1",
+    accountId: null,
+    accountMatchAction: null,
+    personId: null,
+    personMatchAction: null,
+    reason: "no_strong_company_identity",
+    createdAt: sharedCreatedAt,
+  });
+
+  await withServer(async (baseUrl) => {
+    const res = await getIdentity(baseUrl, signal.id);
+    const body = await readJson(res, "identity response");
+    assert.equal(res.status, 200);
+    assert.equal(body.eventId, winnerId, "the greater id must win a created_at tie, deterministically");
+  });
 });

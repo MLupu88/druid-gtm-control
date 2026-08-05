@@ -18,8 +18,16 @@ import { mock, test } from "node:test";
 import express, { type Express } from "express";
 import type { IdentityResolutionEvent } from "@workspace/db/schema";
 import { requireServiceAuth } from "../middlewares/requireServiceAuth.js";
-import { CorruptSignalPayloadError, type ResolveSignalResult } from "../services/identityResolution.js";
-import { createSignalResolutionRouter, type ResolveSignalFn } from "./signalResolution.js";
+import {
+  CorruptSignalPayloadError,
+  type ResolveSignalResult,
+  type CurrentIdentityBindingResult,
+} from "../services/identityResolution.js";
+import {
+  createSignalResolutionRouter,
+  type ResolveSignalFn,
+  type GetCurrentIdentityBindingFn,
+} from "./signalResolution.js";
 
 const VALID_SIGNAL_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const EVENT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -68,9 +76,14 @@ function createFakeLogger() {
   return { calls, info: record("info"), warn: record("warn"), error: record("error") };
 }
 
+const unusedGetCurrentIdentityBindingFn: GetCurrentIdentityBindingFn = async () => {
+  throw new Error("getCurrentIdentityBindingFn should not have been called");
+};
+
 function buildTestApp(
   resolveSignalFn: ResolveSignalFn,
   log: ReturnType<typeof createFakeLogger> = createFakeLogger(),
+  getCurrentIdentityBindingFn: GetCurrentIdentityBindingFn = unusedGetCurrentIdentityBindingFn,
 ): Express {
   const app = express();
   app.use(express.json());
@@ -78,8 +91,19 @@ function buildTestApp(
     req.log = log as never;
     next();
   });
-  app.use("/internal/signals", requireServiceAuth, createSignalResolutionRouter({ resolveSignalFn }));
+  app.use(
+    "/internal/signals",
+    requireServiceAuth,
+    createSignalResolutionRouter({ resolveSignalFn, getCurrentIdentityBindingFn }),
+  );
   return app;
+}
+
+function buildIdentityTestApp(
+  getCurrentIdentityBindingFn: GetCurrentIdentityBindingFn,
+  log: ReturnType<typeof createFakeLogger> = createFakeLogger(),
+): Express {
+  return buildTestApp(unusedResolveSignalFn, log, getCurrentIdentityBindingFn);
 }
 
 async function withServer(app: Express, fn: (baseUrl: string) => Promise<void>): Promise<void> {
@@ -129,6 +153,14 @@ function postResolve(
     init.body = JSON.stringify(body);
   }
   return fetch(`${baseUrl}/internal/signals/${signalId}/resolve`, init);
+}
+
+function getIdentity(
+  baseUrl: string,
+  signalId: string,
+  headers: Record<string, string> = {},
+): Promise<globalThis.Response> {
+  return fetch(`${baseUrl}/internal/signals/${signalId}/identity`, { headers });
 }
 
 // ---------------------------------------------------------------------
@@ -418,6 +450,196 @@ test("POST /internal/signals/:signalId/resolve: failure logging carries only saf
       assert.equal(message, "POST /internal/signals/:signalId/resolve failed");
       const loggedFields = errorCalls[0]?.arg0 as Record<string, unknown>;
       assert.deepEqual(Object.keys(loggedFields).sort(), ["pgConstraint", "pgErrorCode", "signalId"]);
+    }),
+  );
+});
+
+// =======================================================================
+// GET /internal/signals/:signalId/identity — GTM V2 Stage 2 Unit 4
+// =======================================================================
+
+test("GET /internal/signals/:signalId/identity: correct secret is accepted and reaches the service", async () => {
+  const getCurrentIdentityBindingFn = mock.fn<GetCurrentIdentityBindingFn>(async () => ({
+    kind: "bound",
+    event: syntheticEvent(),
+  }));
+  const app = buildIdentityTestApp(getCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": TEST_SECRET });
+      assert.equal(res.status, 200);
+      assert.equal(getCurrentIdentityBindingFn.mock.calls.length, 1);
+      assert.deepEqual(getCurrentIdentityBindingFn.mock.calls[0]?.arguments[0], { signalId: VALID_SIGNAL_ID });
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: missing secret header is rejected with 401 and the service is never called", async () => {
+  const app = buildIdentityTestApp(unusedGetCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID);
+      const body = await readJson(res);
+      assert.equal(res.status, 401);
+      assert.deepEqual(body, { error: "Unauthorized.", code: "unauthorized" });
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: incorrect secret is rejected with 401", async () => {
+  const app = buildIdentityTestApp(unusedGetCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": "wrong-secret" });
+      assert.equal(res.status, 401);
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: an unconfigured secret fails closed with 503", async () => {
+  const app = buildIdentityTestApp(unusedGetCurrentIdentityBindingFn);
+
+  await withEnvSecret(undefined, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": "anything" });
+      const body = await readJson(res);
+      assert.equal(res.status, 503);
+      assert.deepEqual(body, { error: "Signal ingestion is unavailable.", code: "signal_ingestion_unavailable" });
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: a malformed (non-UUID) signalId is rejected with 400 before the service is called", async () => {
+  const app = buildIdentityTestApp(unusedGetCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, "not-a-uuid", { "x-gtm-ingestion-secret": TEST_SECRET });
+      assert.equal(res.status, 400);
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: missing signal returns 404 signal_not_found", async () => {
+  const getCurrentIdentityBindingFn = mock.fn<GetCurrentIdentityBindingFn>(async () => ({
+    kind: "signal_not_found",
+  }));
+  const app = buildIdentityTestApp(getCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": TEST_SECRET });
+      const body = await readJson(res);
+      assert.equal(res.status, 404);
+      assert.deepEqual(body, { error: "The signal was not found.", code: "signal_not_found" });
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: signal with no resolution event returns 200 hasBinding=false, distinct from missing signal", async () => {
+  const getCurrentIdentityBindingFn = mock.fn<GetCurrentIdentityBindingFn>(async () => ({ kind: "no_binding" }));
+  const app = buildIdentityTestApp(getCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": TEST_SECRET });
+      const body = await readJson(res);
+      assert.equal(res.status, 200);
+      assert.deepEqual(body, {
+        signalId: VALID_SIGNAL_ID,
+        hasBinding: false,
+        eventId: null,
+        outcome: null,
+        resolutionLevel: null,
+        accountId: null,
+        personId: null,
+        accountMatchAction: null,
+        personMatchAction: null,
+        createdAt: null,
+      });
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: an unresolved event is still a binding (hasBinding=true, outcome=unresolved)", async () => {
+  const event = syntheticEvent({
+    outcome: "unresolved",
+    resolutionLevel: "anonymous",
+    accountId: null,
+    accountMatchAction: null,
+    personId: null,
+    personMatchAction: null,
+    resolutionMethod: "no_strong_company_identity",
+    reason: "no_strong_company_identity",
+    confidence: "low",
+  });
+  const getCurrentIdentityBindingFn = mock.fn<GetCurrentIdentityBindingFn>(async () => ({ kind: "bound", event }));
+  const app = buildIdentityTestApp(getCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": TEST_SECRET });
+      const body = await readJson(res);
+      assert.equal(res.status, 200);
+      assert.deepEqual(body, {
+        signalId: VALID_SIGNAL_ID,
+        hasBinding: true,
+        eventId: EVENT_ID,
+        outcome: "unresolved",
+        resolutionLevel: "anonymous",
+        accountId: null,
+        personId: null,
+        accountMatchAction: null,
+        personMatchAction: null,
+        createdAt: event.createdAt.toISOString(),
+      });
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: a resolved binding returns exactly the allow-listed fields, never raw payload/candidateMatches/reason/confidence/resolverVersion/resolutionMethod", async () => {
+  const event = syntheticEvent();
+  const getCurrentIdentityBindingFn = mock.fn<GetCurrentIdentityBindingFn>(async () => ({ kind: "bound", event }));
+  const app = buildIdentityTestApp(getCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": TEST_SECRET });
+      const body = await readJson(res);
+      assert.equal(res.status, 200);
+      assert.deepEqual(Object.keys(body).sort(), [
+        "accountId",
+        "accountMatchAction",
+        "createdAt",
+        "eventId",
+        "hasBinding",
+        "outcome",
+        "personId",
+        "personMatchAction",
+        "resolutionLevel",
+        "signalId",
+      ]);
+      assert.equal(body.accountId, ACCOUNT_ID);
+      assert.equal(body.accountMatchAction, "matched");
+    }),
+  );
+});
+
+test("GET /internal/signals/:signalId/identity: an unexpected service error maps to a generic 500", async () => {
+  const getCurrentIdentityBindingFn = mock.fn<GetCurrentIdentityBindingFn>(async () => {
+    throw new Error("some internal detail that must never leak");
+  });
+  const app = buildIdentityTestApp(getCurrentIdentityBindingFn);
+
+  await withEnvSecret(TEST_SECRET, () =>
+    withServer(app, async (baseUrl) => {
+      const res = await getIdentity(baseUrl, VALID_SIGNAL_ID, { "x-gtm-ingestion-secret": TEST_SECRET });
+      const body = await readJson(res);
+      assert.equal(res.status, 500);
+      assert.deepEqual(body, { error: "An unexpected error occurred.", code: "internal_error" });
     }),
   );
 });

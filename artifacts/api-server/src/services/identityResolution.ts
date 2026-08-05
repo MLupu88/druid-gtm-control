@@ -1051,3 +1051,89 @@ export async function resolveSignal(args: ResolveSignalArgs): Promise<ResolveSig
   // Unreachable — the loop above always returns or throws.
   throw new Error("identityResolution: resolution attempts exhausted unexpectedly.");
 }
+
+// ---------------------------------------------------------------------
+// Current-binding read model (read-only) — GTM V2 Stage 2 Unit 4.
+//
+// The "current identity binding" for a signal is never stored by
+// mutating anything (signals and identity_resolution_events are both
+// append-only by trigger regardless) — it is always derived, at read
+// time, as the latest identity_resolution_events row for that signal,
+// ordered by (created_at, id) exactly like attemptResolve's own latest-
+// event lookup above, backed by the same
+// identity_resolution_events_signal_id_created_at_id_idx index Unit 1
+// already created for this purpose. No new table, column, or migration.
+// ---------------------------------------------------------------------
+
+export type CurrentIdentityBindingResult =
+  | { kind: "signal_not_found" }
+  | { kind: "no_binding" }
+  | { kind: "bound"; event: IdentityResolutionEvent };
+
+/**
+ * Single-statement read: SELECT the signal LEFT JOIN LATERAL the latest
+ * identity_resolution_events row for it (ordered created_at DESC, id
+ * DESC, limit 1) — one round trip that distinguishes all three states a
+ * single plain query cannot tell apart on its own: no signal row at all,
+ * a signal row with zero events, and a signal row whose latest event is
+ * the current binding. No transaction/lock is taken — this is a read
+ * model, not a resolution attempt.
+ */
+export async function getCurrentIdentityBinding(
+  db: Db,
+  signalId: string,
+): Promise<CurrentIdentityBindingResult> {
+  const latestEventForSignal = db
+    .select()
+    .from(identityResolutionEvents)
+    .where(eq(identityResolutionEvents.signalId, signals.id))
+    .orderBy(desc(identityResolutionEvents.createdAt), desc(identityResolutionEvents.id))
+    .limit(1)
+    .as("latest_event");
+
+  // Selects only signals.id (never raw_payload/normalized_payload/
+  // company_domain/company_name/etc.) — an unqualified .select() here
+  // would otherwise pull the entire signals row, including raw/
+  // normalized payload content, out of Postgres on every read even
+  // though this endpoint never uses it. The lateral side still selects
+  // every identity_resolution_events column (mirrors resolveSignal's own
+  // ResolveSignalResult, which likewise returns the full event row from
+  // the service layer for the route layer to filter) — see
+  // ../routes/signalResolution.ts's serializeEventFields for the actual
+  // allow-listed HTTP response.
+  const [row] = await db
+    .select({
+      signalId: signals.id,
+      event: {
+        id: latestEventForSignal.id,
+        signalId: latestEventForSignal.signalId,
+        outcome: latestEventForSignal.outcome,
+        resolutionLevel: latestEventForSignal.resolutionLevel,
+        resolutionMethod: latestEventForSignal.resolutionMethod,
+        confidence: latestEventForSignal.confidence,
+        resolverVersion: latestEventForSignal.resolverVersion,
+        candidateMatches: latestEventForSignal.candidateMatches,
+        accountId: latestEventForSignal.accountId,
+        accountMatchAction: latestEventForSignal.accountMatchAction,
+        personId: latestEventForSignal.personId,
+        personMatchAction: latestEventForSignal.personMatchAction,
+        matchedAliasType: latestEventForSignal.matchedAliasType,
+        matchedAliasValue: latestEventForSignal.matchedAliasValue,
+        reason: latestEventForSignal.reason,
+        createdAt: latestEventForSignal.createdAt,
+      },
+    })
+    .from(signals)
+    .leftJoinLateral(latestEventForSignal, sql`true`)
+    .where(eq(signals.id, signalId));
+
+  if (!row) {
+    return { kind: "signal_not_found" };
+  }
+
+  if (!row.event) {
+    return { kind: "no_binding" };
+  }
+
+  return { kind: "bound", event: row.event };
+}
