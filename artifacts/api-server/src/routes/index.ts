@@ -12,6 +12,7 @@ import { createClientRadarResearchRunsRouter } from "./clientRadarResearchRuns";
 import { createAccountIcpEvaluationsRouter } from "./accountIcpEvaluations";
 import { createAccountFactsRouter } from "./accountFacts";
 import { createSignalsRouter } from "./signals";
+import { createSignalResolutionRouter } from "./signalResolution";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireServiceAuth } from "../middlewares/requireServiceAuth";
 
@@ -35,6 +36,15 @@ router.use(
   "/internal/signals",
   requireServiceAuth,
   createSignalsRouter({ db }),
+);
+// GTM V2 Unit 3 — POST /internal/signals/:signalId/resolve. Mounted at
+// the same "/internal/signals" prefix and behind the same
+// requireServiceAuth boundary as signal ingestion above (not a separate
+// mount point, since both are the same service-to-service signal API).
+router.use(
+  "/internal/signals",
+  requireServiceAuth,
+  createSignalResolutionRouter({ db }),
 );
 
 // Everything below this line requires a valid session.
