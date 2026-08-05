@@ -22,3 +22,6 @@ export * from "./people";
 export * from "./accountPeople";
 export * from "./signals";
 export * from "./identityResolutionEvents";
+
+// GTM V2 Stage 3, Unit 1 — Attention Model foundation.
+export * from "./attentionItems";

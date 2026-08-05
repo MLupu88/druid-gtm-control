@@ -71,6 +71,20 @@
       "when": 1785926198528,
       "tag": "0009_signals_identity_resolution_immutability",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785949972480,
+      "tag": "0010_perpetual_wrecker",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785950032480,
+      "tag": "0011_attention_items_lifecycle",
+      "breakpoints": true
     }
   ]
 }

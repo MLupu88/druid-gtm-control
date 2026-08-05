@@ -18,6 +18,7 @@ import {
   accountPeople,
   accounts,
   accountSnapshots,
+  attentionItems,
   decisionPolicyVersions,
   evaluatorVersions,
   icpProfileActivationEvents,
@@ -30,6 +31,7 @@ import {
   insertAccountPersonSchema,
   insertAccountSchema,
   insertAccountSnapshotSchema,
+  insertAttentionItemSchema,
   insertDecisionPolicyVersionSchema,
   insertEvaluatorVersionSchema,
   insertIcpProfileActivationEventSchema,
@@ -527,4 +529,129 @@ test("identityResolutionEvents insert schema restricts outcome/confidence/match-
       accountMatchAction: "guessed",
     }),
   );
+});
+
+// ---------------------------------------------------------------------
+// GTM V2 Stage 3, Unit 1 — Attention Model foundation.
+// ---------------------------------------------------------------------
+
+test("attentionItems exports the expected columns", () => {
+  assert.deepEqual(columnNames(attentionItems), [
+    "accountId",
+    "context",
+    "createdAt",
+    "createdBy",
+    "id",
+    "reasonCode",
+    "reasonDetail",
+    "resolutionReason",
+    "resolvedAt",
+    "resolvedBy",
+    "source",
+    "sourceRef",
+    "status",
+  ]);
+});
+
+test("attentionItems insert schema omits status/resolvedAt/resolvedBy/resolutionReason (server/DB controlled)", () => {
+  const parsed = insertAttentionItemSchema.parse({
+    accountId: ZERO_UUID,
+    reasonCode: "unresolved_signal",
+    source: "manual",
+    createdBy: "operator@example.com",
+  });
+  for (const forbidden of [
+    "status",
+    "resolvedAt",
+    "resolvedBy",
+    "resolutionReason",
+  ]) {
+    assert.equal(
+      forbidden in parsed,
+      false,
+      `insertAttentionItemSchema must not accept ${forbidden} — creation always starts open`,
+    );
+  }
+});
+
+test("attentionItems insert schema requires createdBy — never silently defaulted", () => {
+  assert.throws(() =>
+    insertAttentionItemSchema.parse({
+      accountId: ZERO_UUID,
+      reasonCode: "unresolved_signal",
+      source: "manual",
+    }),
+  );
+  assert.throws(() =>
+    insertAttentionItemSchema.parse({
+      accountId: ZERO_UUID,
+      reasonCode: "unresolved_signal",
+      source: "manual",
+      createdBy: "   ",
+    }),
+  );
+  const parsed = insertAttentionItemSchema.parse({
+    accountId: ZERO_UUID,
+    reasonCode: "unresolved_signal",
+    source: "identity_resolution",
+    createdBy: "system:identity_resolution",
+  });
+  assert.equal(parsed.createdBy, "system:identity_resolution");
+});
+
+test("attentionItems insert schema rejects a blank reasonCode", () => {
+  assert.throws(() =>
+    insertAttentionItemSchema.parse({
+      accountId: ZERO_UUID,
+      reasonCode: "   ",
+      source: "manual",
+      createdBy: "operator@example.com",
+    }),
+  );
+});
+
+test("attentionItems insert schema restricts source to the closed enum", () => {
+  assert.throws(() =>
+    insertAttentionItemSchema.parse({
+      accountId: ZERO_UUID,
+      reasonCode: "unresolved_signal",
+      source: "made_up_source",
+      createdBy: "operator@example.com",
+    }),
+  );
+  for (const source of [
+    "manual",
+    "identity_resolution",
+    "evaluation",
+    "enrichment",
+    "client_radar",
+    "action",
+  ] as const) {
+    const parsed = insertAttentionItemSchema.parse({
+      accountId: ZERO_UUID,
+      reasonCode: "unresolved_signal",
+      source,
+      createdBy: `system:${source}`,
+    });
+    assert.equal(parsed.source, source);
+  }
+});
+
+test("attentionItems insert schema rejects a non-object context, defaults to {} when omitted", () => {
+  assert.throws(() =>
+    insertAttentionItemSchema.parse({
+      accountId: ZERO_UUID,
+      reasonCode: "unresolved_signal",
+      source: "manual",
+      createdBy: "operator@example.com",
+      context: ["not", "an", "object"],
+    }),
+  );
+  const parsed = insertAttentionItemSchema.parse({
+    accountId: ZERO_UUID,
+    reasonCode: "unresolved_signal",
+    source: "manual",
+    createdBy: "operator@example.com",
+  });
+  assert.deepEqual(parsed.context, {});
 });

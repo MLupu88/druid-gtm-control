@@ -27,7 +27,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./index.js";
@@ -1968,6 +1968,511 @@ test(
         .where(eq(schema.signals.id, signal.id)),
       { code: "P0001", messageIncludes: "signals" },
     );
+  },
+);
+
+// =======================================================================
+// GTM V2 Stage 3, Unit 1 — attention_items
+// =======================================================================
+
+async function makeAttentionItem(
+  accountId: string,
+  overrides: Partial<typeof schema.attentionItems.$inferInsert> = {},
+) {
+  const [item] = await db!
+    .insert(schema.attentionItems)
+    .values({
+      accountId,
+      reasonCode: "unresolved_signal",
+      source: "manual",
+      createdBy: `test-actor-${crypto.randomUUID()}`,
+      ...overrides,
+    })
+    .returning();
+  return item;
+}
+
+test("attention_items accepts a valid insertion, defaulting to open with no resolution fields", { skip }, async () => {
+  const account = await makeAccount();
+  const item = await makeAttentionItem(account.id, {
+    reasonCode: "unresolved_signal",
+    reasonDetail: "3 signals from an unrecognized domain",
+    source: "identity_resolution",
+    sourceRef: `signal-${crypto.randomUUID()}`,
+    createdBy: "system:identity_resolution",
+    context: { signalCount: 3 },
+  });
+  assert.equal(item.status, "open");
+  assert.equal(item.resolvedAt, null);
+  assert.equal(item.resolvedBy, null);
+  assert.equal(item.resolutionReason, null);
+  assert.deepEqual(item.context, { signalCount: 3 });
+});
+
+test(
+  "attention_items rejects a blank reason_code",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      makeAttentionItem(account.id, { reasonCode: "   " }),
+      { constraint: "attention_items_reason_code_not_blank" },
+    );
+  },
+);
+
+test(
+  "attention_items rejects a non-canonical (uppercase/untrimmed) reason_code",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      makeAttentionItem(account.id, { reasonCode: " Unresolved_Signal " }),
+      { constraint: "attention_items_reason_code_is_canonical_form" },
+    );
+  },
+);
+
+test(
+  "attention_items rejects a non-object context",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      makeAttentionItem(account.id, {
+        context: ["not", "an", "object"] as any,
+      }),
+      { constraint: "attention_items_context_is_object" },
+    );
+  },
+);
+
+test(
+  "attention_items rejects a blank created_by",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      makeAttentionItem(account.id, { createdBy: "  " }),
+      { constraint: "attention_items_created_by_not_blank" },
+    );
+  },
+);
+
+test(
+  "attention_items rejects a blank (whitespace-only) reason_detail when present",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      makeAttentionItem(account.id, { reasonDetail: "   " }),
+      { constraint: "attention_items_reason_detail_not_blank_if_present" },
+    );
+  },
+);
+
+test(
+  "attention_items rejects a blank (whitespace-only) source_ref when present",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      makeAttentionItem(account.id, { sourceRef: "   " }),
+      { constraint: "attention_items_source_ref_not_blank_if_present" },
+    );
+  },
+);
+
+test(
+  "attention_items dedup: rejects a second open item with the same (account, reason, source, source_ref)",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const sourceRef = `signal-${crypto.randomUUID()}`;
+    await makeAttentionItem(account.id, {
+      reasonCode: "unresolved_signal",
+      source: "identity_resolution",
+      sourceRef,
+      createdBy: "system:identity_resolution",
+    });
+    await assertDbRejects(
+      makeAttentionItem(account.id, {
+        reasonCode: "unresolved_signal",
+        source: "identity_resolution",
+        sourceRef,
+        createdBy: "system:identity_resolution",
+      }),
+      { constraint: "attention_items_open_dedup_with_ref_uq" },
+    );
+  },
+);
+
+test(
+  "attention_items dedup: rejects a second open item with the same (account, reason, source) when source_ref is null",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await makeAttentionItem(account.id, {
+      reasonCode: "manual_review_requested",
+      source: "manual",
+    });
+    await assertDbRejects(
+      makeAttentionItem(account.id, {
+        reasonCode: "manual_review_requested",
+        source: "manual",
+      }),
+      { constraint: "attention_items_open_dedup_without_ref_uq" },
+    );
+  },
+);
+
+test(
+  "attention_items dedup: different reasons, sources, and accounts freely coexist",
+  { skip },
+  async () => {
+    const accountA = await makeAccount();
+    const accountB = await makeAccount();
+    const sharedRef = `signal-${crypto.randomUUID()}`;
+
+    const byReason = await makeAttentionItem(accountA.id, {
+      reasonCode: "unresolved_signal",
+      source: "identity_resolution",
+      sourceRef: sharedRef,
+      createdBy: "system:identity_resolution",
+    });
+    const byDifferentReason = await makeAttentionItem(accountA.id, {
+      reasonCode: "low_confidence_identity",
+      source: "identity_resolution",
+      sourceRef: sharedRef,
+      createdBy: "system:identity_resolution",
+    });
+    const byDifferentSource = await makeAttentionItem(accountA.id, {
+      reasonCode: "unresolved_signal",
+      source: "evaluation",
+      sourceRef: sharedRef,
+      createdBy: "system:evaluation",
+    });
+    const byDifferentAccount = await makeAttentionItem(accountB.id, {
+      reasonCode: "unresolved_signal",
+      source: "identity_resolution",
+      sourceRef: sharedRef,
+      createdBy: "system:identity_resolution",
+    });
+
+    assert.equal(
+      new Set([
+        byReason.id,
+        byDifferentReason.id,
+        byDifferentSource.id,
+        byDifferentAccount.id,
+      ]).size,
+      4,
+    );
+  },
+);
+
+test(
+  "attention_items rejects status='resolved' at insert time without resolution fields",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.attentionItems).values({
+        accountId: account.id,
+        reasonCode: "unresolved_signal",
+        source: "manual",
+        createdBy: "operator-1",
+        status: "resolved",
+      } as any),
+      { constraint: "attention_items_resolution_fields_iff_resolved" },
+    );
+  },
+);
+
+test(
+  "attention_items rejects status='open' carrying a resolved_at",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    await assertDbRejects(
+      db!.insert(schema.attentionItems).values({
+        accountId: account.id,
+        reasonCode: "unresolved_signal",
+        source: "manual",
+        createdBy: "operator-1",
+        status: "open",
+        resolvedAt: new Date(),
+      } as any),
+      { constraint: "attention_items_resolution_fields_iff_resolved" },
+    );
+  },
+);
+
+test(
+  "attention_items rejects resolved_at before created_at",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const item = await makeAttentionItem(account.id);
+    await assertDbRejects(
+      db!
+        .update(schema.attentionItems)
+        .set({
+          status: "resolved",
+          resolvedAt: new Date("2000-01-01T00:00:00Z"),
+          resolvedBy: "operator-1",
+          resolutionReason: "matched to canonical account",
+        })
+        .where(eq(schema.attentionItems.id, item.id)),
+      { constraint: "attention_items_resolved_at_after_created_at" },
+    );
+  },
+);
+
+test(
+  "attention_items accepts a valid open -> resolved transition",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const item = await makeAttentionItem(account.id);
+    const resolvedAt = new Date();
+    const [resolved] = await db!
+      .update(schema.attentionItems)
+      .set({
+        status: "resolved",
+        resolvedAt,
+        resolvedBy: "operator-1",
+        resolutionReason: "matched to canonical account",
+      })
+      .where(eq(schema.attentionItems.id, item.id))
+      .returning();
+    assert.equal(resolved.status, "resolved");
+    assert.equal(resolved.resolvedBy, "operator-1");
+    assert.equal(resolved.resolutionReason, "matched to canonical account");
+  },
+);
+
+test(
+  "attention_items rejects changing an immutable field while still open",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const item = await makeAttentionItem(account.id, {
+      reasonDetail: "original detail",
+    });
+    // No status transition — just trying to edit reason_detail in place.
+    await assertDbRejects(
+      db!
+        .update(schema.attentionItems)
+        .set({ reasonDetail: "edited detail" })
+        .where(eq(schema.attentionItems.id, item.id)),
+      {
+        code: "P0001",
+        messageIncludes: "the only permitted update is open -> resolved",
+      },
+    );
+  },
+);
+
+test(
+  "attention_items rejects an open -> resolved transition that also sets a null immutable field to a value (NULL-safe immutability)",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const item = await makeAttentionItem(account.id, {
+      reasonDetail: null,
+      sourceRef: null,
+    });
+    assert.equal(item.reasonDetail, null);
+    assert.equal(item.sourceRef, null);
+
+    await assertDbRejects(
+      db!
+        .update(schema.attentionItems)
+        .set({
+          status: "resolved",
+          resolvedAt: new Date(),
+          resolvedBy: "operator-1",
+          resolutionReason: "matched to canonical account",
+          // Was NULL at creation — a plain `<>` comparison in the trigger
+          // would not have caught this (NULL <> 'x' is NULL, not TRUE).
+          reasonDetail: "sneaked in during resolution",
+        })
+        .where(eq(schema.attentionItems.id, item.id)),
+      {
+        code: "P0001",
+        messageIncludes: "the only permitted update is open -> resolved",
+      },
+    );
+  },
+);
+
+test(
+  "attention_items rejects an open -> resolved transition that also changes an immutable field",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const item = await makeAttentionItem(account.id, {
+      reasonCode: "unresolved_signal",
+    });
+    await assertDbRejects(
+      db!
+        .update(schema.attentionItems)
+        .set({
+          status: "resolved",
+          resolvedAt: new Date(),
+          resolvedBy: "operator-1",
+          resolutionReason: "matched to canonical account",
+          reasonCode: "low_confidence_identity",
+        })
+        .where(eq(schema.attentionItems.id, item.id)),
+      {
+        code: "P0001",
+        messageIncludes: "the only permitted update is open -> resolved",
+      },
+    );
+  },
+);
+
+test("attention_items rejects DELETE while still open", { skip }, async () => {
+  const account = await makeAccount();
+  const item = await makeAttentionItem(account.id);
+  await assertDbRejects(
+    db!.delete(schema.attentionItems).where(eq(schema.attentionItems.id, item.id)),
+    { code: "P0001", messageIncludes: "can never be deleted" },
+  );
+});
+
+test(
+  "attention_items rejects UPDATE and DELETE once resolved",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const item = await makeAttentionItem(account.id);
+    await db!
+      .update(schema.attentionItems)
+      .set({
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedBy: "operator-1",
+        resolutionReason: "matched to canonical account",
+      })
+      .where(eq(schema.attentionItems.id, item.id));
+
+    await assertDbRejects(
+      db!
+        .update(schema.attentionItems)
+        .set({ resolutionReason: "changed my mind" })
+        .where(eq(schema.attentionItems.id, item.id)),
+      { code: "P0001", messageIncludes: "is immutable" },
+    );
+    await assertDbRejects(
+      db!
+        .delete(schema.attentionItems)
+        .where(eq(schema.attentionItems.id, item.id)),
+      { code: "P0001", messageIncludes: "can never be deleted" },
+    );
+  },
+);
+
+test(
+  "attention_items: a new open item is allowed once the prior matching item resolves",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const sourceRef = `signal-${crypto.randomUUID()}`;
+    const first = await makeAttentionItem(account.id, {
+      reasonCode: "unresolved_signal",
+      source: "identity_resolution",
+      sourceRef,
+      createdBy: "system:identity_resolution",
+    });
+    await db!
+      .update(schema.attentionItems)
+      .set({
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedBy: "operator-1",
+        resolutionReason: "matched to canonical account",
+      })
+      .where(eq(schema.attentionItems.id, first.id));
+
+    const second = await makeAttentionItem(account.id, {
+      reasonCode: "unresolved_signal",
+      source: "identity_resolution",
+      sourceRef,
+      createdBy: "system:identity_resolution",
+    });
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.status, "open");
+  },
+);
+
+test(
+  "attention_items: resolving the final open item drops the account from a Needs-Attention-shaped query, without deleting the account or any attention_items history",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const itemA = await makeAttentionItem(account.id, {
+      reasonCode: "unresolved_signal",
+    });
+    const itemB = await makeAttentionItem(account.id, {
+      reasonCode: "low_confidence_identity",
+    });
+
+    const needsAttention = () =>
+      db!
+        .selectDistinct({ accountId: schema.attentionItems.accountId })
+        .from(schema.attentionItems)
+        .where(
+          and(
+            eq(schema.attentionItems.accountId, account.id),
+            eq(schema.attentionItems.status, "open"),
+          ),
+        );
+
+    assert.equal((await needsAttention()).length, 1);
+
+    await db!
+      .update(schema.attentionItems)
+      .set({
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedBy: "operator-1",
+        resolutionReason: "reason A resolved",
+      })
+      .where(eq(schema.attentionItems.id, itemA.id));
+
+    // Still one open item (itemB) — account must still appear.
+    assert.equal((await needsAttention()).length, 1);
+
+    await db!
+      .update(schema.attentionItems)
+      .set({
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedBy: "operator-1",
+        resolutionReason: "reason B resolved",
+      })
+      .where(eq(schema.attentionItems.id, itemB.id));
+
+    // No open items left — account drops out of the Needs-Attention query.
+    assert.equal((await needsAttention()).length, 0);
+
+    // All Accounts is untouched: the account row itself is never removed.
+    const [stillThere] = await db!
+      .select()
+      .from(schema.accounts)
+      .where(eq(schema.accounts.id, account.id));
+    assert.ok(stillThere);
+
+    // Attention history is preserved — both resolved rows still exist.
+    const history = await db!
+      .select()
+      .from(schema.attentionItems)
+      .where(eq(schema.attentionItems.accountId, account.id));
+    assert.equal(history.length, 2);
+    assert.ok(history.every((row) => row.status === "resolved"));
   },
 );
 

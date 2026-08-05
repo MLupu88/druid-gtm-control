@@ -163,3 +163,34 @@ export const identityMatchAction = pgEnum("identity_match_action", [
   "matched",
   "created",
 ]);
+
+// GTM V2 Stage 3, Unit 1 — Attention Model foundation.
+//
+// attention_items.source
+// A closed, already-known set of producers — unlike signals.source (an
+// open, uncontrolled integration vocabulary), the workflows that can ever
+// raise an attention item are enumerated by this unit's own requirements:
+// a human operator (manual) or one of five future automated integrations,
+// none of which this unit implements. Extending this list later (should a
+// genuinely new producer appear) is the same one-value ALTER TYPE this
+// schema already did once for routing_output (see
+// 0005_add_dismissed_routing_output.sql).
+export const attentionSource = pgEnum("attention_source", [
+  "manual",
+  "identity_resolution",
+  "evaluation",
+  "enrichment",
+  "client_radar",
+  "action",
+]);
+
+// attention_items.status
+// Exactly two states, one-way: an item is opened once and resolved once.
+// There is no "dismissed" vs "resolved" distinction — how/why a resolution
+// happened belongs in resolution_reason, not in a wider status vocabulary.
+// Reopening is never modeled as a status transition; it means creating a
+// new attention_items row (see attentionItems.ts).
+export const attentionItemStatus = pgEnum("attention_item_status", [
+  "open",
+  "resolved",
+]);
