@@ -13,6 +13,8 @@ import { createAccountIcpEvaluationsRouter } from "./accountIcpEvaluations";
 import { createAccountFactsRouter } from "./accountFacts";
 import { createSignalsRouter } from "./signals";
 import { createSignalResolutionRouter } from "./signalResolution";
+import { createAttentionItemsRouter } from "./attentionItems";
+import { createAttentionItemResolutionRouter } from "./attentionItemResolution";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireServiceAuth } from "../middlewares/requireServiceAuth";
 
@@ -45,6 +47,28 @@ router.use(
   "/internal/signals",
   requireServiceAuth,
   createSignalResolutionRouter({ db }),
+);
+// GTM V2 Stage 3, Unit 2 — POST /internal/accounts/:accountId/attention-items.
+// Mounted at the full, specific prefix INCLUDING :accountId (not the
+// shared "/internal/accounts" prefix the requireAuth-gated accounts
+// router below uses) and registered before that mount — same rationale
+// as signal ingestion above: requireServiceAuth must never run in front
+// of the browser-session-gated /internal/accounts routes, and this
+// mount's pattern only ever matches a request carrying an
+// ".../attention-items" path segment, so it never intercepts a plain
+// GET /internal/accounts or GET /internal/accounts/:accountId request.
+router.use(
+  "/internal/accounts/:accountId/attention-items",
+  requireServiceAuth,
+  createAttentionItemsRouter({ db }),
+);
+// POST /internal/attention-items/:attentionItemId/resolve. Same
+// requireServiceAuth boundary, a prefix no other router in this package
+// uses, so no ordering hazard with any other mount.
+router.use(
+  "/internal/attention-items",
+  requireServiceAuth,
+  createAttentionItemResolutionRouter({ db }),
 );
 
 // Everything below this line requires a valid session.
