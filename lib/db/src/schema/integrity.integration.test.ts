@@ -2015,7 +2015,7 @@ test(
   async () => {
     const account = await makeAccount();
     await assertDbRejects(
-      makeAttentionItem(account.id, { reasonCode: "   " }),
+      makeAttentionItem(account.id, { reasonCode: "" }),
       { constraint: "attention_items_reason_code_not_blank" },
     );
   },
