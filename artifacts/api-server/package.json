@@ -10,12 +10,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bootstrap:production-data": "tsx src/scripts/bootstrapProductionData.ts",
     "test": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/accountDecisions.test.ts src/routes/accountDecisions.route.test.ts src/services/mqlDecisionReadiness.test.ts src/services/accountFactsSnapshotEvidence.test.ts src/services/accountFacts.test.ts src/routes/accountFacts.route.test.ts src/lib/clientRadarClient.test.ts src/routes/clientRadarResearchRuns.route.test.ts src/routes/accountEvaluations.integration.test.ts src/routes/icpProfiles.integration.test.ts src/routes/accounts.integration.test.ts src/routes/accountDecisions.integration.test.ts src/services/accountFacts.integration.test.ts",
-    "test:unit": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/accountDecisions.test.ts src/routes/accountDecisions.route.test.ts src/services/mqlDecisionReadiness.test.ts src/services/accountFactsSnapshotEvidence.test.ts src/services/accountFacts.test.ts src/routes/accountFacts.route.test.ts src/lib/clientRadarClient.test.ts src/routes/clientRadarResearchRuns.route.test.ts"
+    "test:unit": "tsx --test src/services/accountEvaluations.test.ts src/routes/accountEvaluations.route.test.ts src/services/icpProfiles.test.ts src/routes/icpProfiles.route.test.ts src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/accountDecisions.test.ts src/routes/accountDecisions.route.test.ts src/services/mqlDecisionReadiness.test.ts src/services/accountFactsSnapshotEvidence.test.ts src/services/accountFacts.test.ts src/routes/accountFacts.route.test.ts src/lib/clientRadarClient.test.ts src/routes/clientRadarResearchRuns.route.test.ts",
+    "test:signals": "tsx --test src/services/signals.test.ts src/routes/signals.route.test.ts src/routes/signals.integration.test.ts",
+    "test:signals:unit": "tsx --test src/services/signals.test.ts src/routes/signals.route.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/evaluator": "workspace:*",
+    "@workspace/identity": "workspace:*",
     "@workspace/evaluator-persistence": "workspace:*",
     "@workspace/gtm-shared": "workspace:*",
     "cookie-parser": "^1.4.7",

@@ -11,13 +11,31 @@ import { createAccountDecisionsRouter } from "./accountDecisions";
 import { createClientRadarResearchRunsRouter } from "./clientRadarResearchRuns";
 import { createAccountIcpEvaluationsRouter } from "./accountIcpEvaluations";
 import { createAccountFactsRouter } from "./accountFacts";
+import { createSignalsRouter } from "./signals";
 import { requireAuth } from "../middlewares/requireAuth";
+import { requireServiceAuth } from "../middlewares/requireServiceAuth";
 
 const router: IRouter = Router();
 
 // Public routes. Must stay mounted above the requireAuth guard below.
 router.use(healthRouter);
 router.use("/auth", authRouter);
+
+// Service-to-service, not browser-session: guarded by requireServiceAuth
+// (a shared-secret header), never requireAuth. Mounted at the full,
+// specific "/internal/signals" prefix and registered before the bare
+// "/internal" + requireAuth mounts below — Express matches router.use
+// prefixes in registration order, and "/internal/signals" would also
+// match those routers' shared "/internal" prefix, so registering this
+// first is what keeps signal-ingestion requests from ever reaching the
+// browser-session auth boundary (and, just as importantly, keeps
+// requireServiceAuth from ever running in front of the unrelated
+// requireAuth-gated /internal routes mounted below).
+router.use(
+  "/internal/signals",
+  requireServiceAuth,
+  createSignalsRouter({ db }),
+);
 
 // Everything below this line requires a valid session.
 router.use("/n8n", requireAuth, n8nRouter);
