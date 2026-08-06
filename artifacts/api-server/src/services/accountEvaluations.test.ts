@@ -15,6 +15,7 @@ import {
 import {
   createAccountEvaluation,
   getAccountEvaluationById,
+  findLatestCompletedProductionEvaluation,
   type EvaluateAndPersistFn,
 } from "./accountEvaluations.js";
 
@@ -161,4 +162,59 @@ test("getAccountEvaluationById returns undefined when no row exists", async () =
   const result = await getAccountEvaluationById(db, "does-not-exist");
 
   assert.equal(result, undefined);
+});
+
+// ---------------------------------------------------------------------
+// findLatestCompletedProductionEvaluation — GTM V2 Stage 4, Unit 1.
+//
+// A fake db can only prove query SHAPE (which table, that a filter and a
+// two-key deterministic ORDER BY were applied, that exactly one row is
+// requested) and straightforward passthrough of whatever row is queued —
+// not real SQL filtering semantics. Whether preview/failed rows are
+// actually excluded, and whether the newest completed/production row
+// really does win among several, is proven against a real Postgres
+// instance in ../services/accountFacts.integration.test.ts (the
+// preview-only and failed-production-only fixtures) — this file has no
+// database to exercise that against.
+// ---------------------------------------------------------------------
+
+function makeFakeOrderedSelectDb(rows: AccountEvaluation[]) {
+  const limitMock = mock.fn(async (..._args: unknown[]) => rows);
+  const orderByMock = mock.fn((..._args: unknown[]) => ({ limit: limitMock }));
+  const whereMock = mock.fn((_condition: unknown) => ({ orderBy: orderByMock }));
+  const fromMock = mock.fn((_table: unknown) => ({ where: whereMock }));
+  const selectMock = mock.fn(() => ({ from: fromMock }));
+  const db = { select: selectMock } as never;
+  return { db, selectMock, fromMock, whereMock, orderByMock, limitMock };
+}
+
+test("findLatestCompletedProductionEvaluation returns undefined when no row is found", async () => {
+  const { db } = makeFakeOrderedSelectDb([]);
+
+  const result = await findLatestCompletedProductionEvaluation(db, "acc-1");
+
+  assert.equal(result, undefined);
+});
+
+test("findLatestCompletedProductionEvaluation returns the single queued row", async () => {
+  const row = syntheticEvaluation({
+    id: "eval-latest",
+    status: "completed",
+    evaluationMode: "production",
+  });
+  const { db, fromMock, whereMock, orderByMock, limitMock } =
+    makeFakeOrderedSelectDb([row]);
+
+  const result = await findLatestCompletedProductionEvaluation(db, "acc-1");
+
+  assert.equal(result, row);
+  // Targets the exact canonical table, applies a real (non-undefined)
+  // filter, a deterministic two-key ORDER BY (createdAt desc, id desc —
+  // the same tie-break already used throughout ../services/accounts.ts),
+  // and requests exactly one row.
+  assert.equal(fromMock.mock.calls[0]?.arguments[0], accountEvaluations);
+  assert.notEqual(whereMock.mock.calls[0]?.arguments[0], undefined);
+  assert.equal(orderByMock.mock.calls[0]?.arguments.length, 2);
+  assert.equal(limitMock.mock.calls.length, 1);
+  assert.equal(limitMock.mock.calls[0]?.arguments[0], 1);
 });

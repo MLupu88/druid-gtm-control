@@ -94,6 +94,11 @@ function syntheticDetail(
   return {
     account: syntheticAccount(),
     evaluations: [syntheticEvaluation()],
+    // GTM V2 Stage 4, Unit 1 — this route test injects a fake
+    // getAccountByIdFn (never runs the real derivation in
+    // ../services/accounts.ts), so this is a plain fixture default, not a
+    // computed one, mirroring mqlDecisionReadiness above.
+    latestProductionEvaluationStaleness: null,
     ...overrides,
   };
 }

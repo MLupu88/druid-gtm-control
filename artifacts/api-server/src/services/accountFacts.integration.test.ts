@@ -24,13 +24,20 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
 import { recordAccountFact, StaleFactCorrectionError } from "./accountFacts.js";
 import { activateVersion } from "./icpProfiles.js";
-import { runOfficialIcpEvaluationForAccount } from "./accountEvaluations.js";
+import {
+  runOfficialIcpEvaluationForAccount,
+  runPreviewIcpEvaluationForAccount,
+} from "./accountEvaluations.js";
+import {
+  createCurrentAccountSnapshot,
+  resolveCanonicalEvaluatorVersion,
+} from "./icpEvaluationResolvers.js";
 import { deriveMqlDecisionReadiness } from "./mqlDecisionReadiness.js";
 import {
   createAccountDecision,
@@ -189,6 +196,287 @@ async function makeActiveProfileVersion(config: unknown) {
   });
   return { profile: profile!, version: published! };
 }
+
+// A fit config referencing both company.industry AND company.region, used
+// only by the concurrent-dedup test below (GTM V2 Stage 4, Unit 1), which
+// needs two distinct account-fact fields both provably relevant to the
+// SAME evaluation.
+function syntheticProfileConfigWithIndustryAndRegionFit() {
+  return {
+    configSchemaVersion: "v1",
+    fit: {
+      rules: [
+        {
+          id: "fit_industry_banking",
+          description: "Industry is Banking",
+          points: 10,
+          condition: { op: "eq", field: "company.industry", value: "Banking" },
+        },
+        {
+          id: "fit_region_us",
+          description: "Region is US",
+          points: 5,
+          condition: { op: "eq", field: "company.region", value: "us" },
+        },
+      ],
+      tiers: [{ code: "base", minScore: 0 }],
+    },
+    intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+    actionability: { rules: [] },
+    eligibility: { hardDisqualifiers: [], restrictions: [] },
+  };
+}
+
+// ---------------------------------------------------------------------
+// GTM V2 Stage 4, Unit 1 — evaluation staleness signal, exercised through
+// the real production call path (recordAccountFact) against a real,
+// migrated Postgres instance.
+// ---------------------------------------------------------------------
+
+test(
+  "recordAccountFact raises an open evaluation_stale attention item for a fit-referenced field, and a second, different triggering field against the same evaluation dedupes to the same open item",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const { profile } = await makeActiveProfileVersion(
+      syntheticProfileConfigWithIndustryFitAndIntent(),
+    );
+
+    const evaluation = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+    assert.equal(evaluation.status, "completed");
+    assert.equal(evaluation.evaluationMode, "production");
+
+    const firstFact = await recordAccountFact({
+      db: db!,
+      accountId: account.id,
+      field: "company.industry",
+      value: "Banking",
+      recordedBy: "operator@example.test",
+      expectedCurrentFactId: null,
+      correctionReason: null,
+    });
+
+    const openAfterFirst = await db!
+      .select()
+      .from(schema.attentionItems)
+      .where(
+        and(
+          eq(schema.attentionItems.accountId, account.id),
+          eq(schema.attentionItems.status, "open"),
+        ),
+      );
+    assert.equal(openAfterFirst.length, 1);
+    assert.equal(openAfterFirst[0]?.reasonCode, "evaluation_stale");
+    assert.equal(openAfterFirst[0]?.source, "evaluation");
+    assert.equal(openAfterFirst[0]?.sourceRef, evaluation.id);
+    assert.equal(openAfterFirst[0]?.createdBy, "system:evaluation");
+
+    // A correction to a DIFFERENT value on the same referenced field,
+    // still targeting the same still-current evaluation — must dedupe to
+    // the same open item, never create a second one.
+    await recordAccountFact({
+      db: db!,
+      accountId: account.id,
+      field: "company.industry",
+      value: "Insurance",
+      recordedBy: "operator@example.test",
+      expectedCurrentFactId: firstFact.id,
+      correctionReason: "corrected",
+    });
+
+    const openAfterSecond = await db!
+      .select()
+      .from(schema.attentionItems)
+      .where(
+        and(
+          eq(schema.attentionItems.accountId, account.id),
+          eq(schema.attentionItems.status, "open"),
+        ),
+      );
+    assert.equal(
+      openAfterSecond.length,
+      1,
+      "a repeated trigger against the same evaluation must dedupe to one open item",
+    );
+    assert.equal(openAfterSecond[0]?.id, openAfterFirst[0]?.id);
+  },
+);
+
+test(
+  "recordAccountFact does not raise an attention item for a field the evaluation's fit config never referenced",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const { profile } = await makeActiveProfileVersion(
+      syntheticProfileConfigWithIndustryFitAndIntent(), // fit only references company.industry
+    );
+    const evaluation = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+    assert.equal(evaluation.status, "completed");
+
+    await recordAccountFact({
+      db: db!,
+      accountId: account.id,
+      field: "company.country",
+      value: "Germany",
+      recordedBy: "operator@example.test",
+      expectedCurrentFactId: null,
+      correctionReason: null,
+    });
+
+    const openItems = await db!
+      .select()
+      .from(schema.attentionItems)
+      .where(eq(schema.attentionItems.accountId, account.id));
+    assert.equal(openItems.length, 0);
+  },
+);
+
+test(
+  "recordAccountFact does not raise an attention item when the account has only a preview evaluation, never a completed production one",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const { profile } = await makeActiveProfileVersion(
+      syntheticProfileConfigWithIndustryFitAndIntent(),
+    );
+
+    const preview = await runPreviewIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+    assert.equal(preview.evaluationMode, "preview");
+
+    await recordAccountFact({
+      db: db!,
+      accountId: account.id,
+      field: "company.industry",
+      value: "Banking",
+      recordedBy: "operator@example.test",
+      expectedCurrentFactId: null,
+      correctionReason: null,
+    });
+
+    const openItems = await db!
+      .select()
+      .from(schema.attentionItems)
+      .where(eq(schema.attentionItems.accountId, account.id));
+    assert.equal(openItems.length, 0);
+  },
+);
+
+test(
+  "recordAccountFact does not raise an attention item when the account's only production evaluation failed",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const { version } = await makeActiveProfileVersion(
+      syntheticProfileConfigWithIndustryFitAndIntent(),
+    );
+    const snapshot = await createCurrentAccountSnapshot(db!, account.id);
+    const evaluatorVersion = await resolveCanonicalEvaluatorVersion(db!);
+
+    await db!.insert(schema.accountEvaluations).values({
+      accountId: account.id,
+      snapshotId: snapshot.id,
+      profileVersionId: version.id,
+      profileConfigSnapshot: version.config,
+      evaluatorVersionId: evaluatorVersion.id,
+      evaluationMode: "production",
+      status: "failed",
+      errorDetail: "synthetic failure for test fixture purposes",
+    });
+
+    await recordAccountFact({
+      db: db!,
+      accountId: account.id,
+      field: "company.industry",
+      value: "Banking",
+      recordedBy: "operator@example.test",
+      expectedCurrentFactId: null,
+      correctionReason: null,
+    });
+
+    const openItems = await db!
+      .select()
+      .from(schema.attentionItems)
+      .where(eq(schema.attentionItems.accountId, account.id));
+    assert.equal(openItems.length, 0);
+  },
+);
+
+test(
+  "concurrent recordAccountFact calls for two different referenced fields racing against the same evaluation: exactly one open item exists afterward, and BOTH fact writes commit (the dedup race never poisons either caller's transaction)",
+  { skip },
+  async () => {
+    const account = await makeAccount();
+    const { profile } = await makeActiveProfileVersion(
+      syntheticProfileConfigWithIndustryAndRegionFit(),
+    );
+    const evaluation = await runOfficialIcpEvaluationForAccount({
+      db: db!,
+      accountId: account.id,
+      profileId: profile.id,
+    });
+    assert.equal(evaluation.status, "completed");
+
+    const [industryResult, regionResult] = await Promise.all([
+      recordAccountFact({
+        db: db!,
+        accountId: account.id,
+        field: "company.industry",
+        value: "Banking",
+        recordedBy: "operator@example.test",
+        expectedCurrentFactId: null,
+        correctionReason: null,
+      }),
+      recordAccountFact({
+        db: db!,
+        accountId: account.id,
+        field: "company.region",
+        value: "us",
+        recordedBy: "operator@example.test",
+        expectedCurrentFactId: null,
+        correctionReason: null,
+      }),
+    ]);
+
+    // Both fact writes must have succeeded — the attention-item dedup race
+    // must never roll back the fact write itself, in either direction.
+    assert.equal(industryResult.field, "company.industry");
+    assert.equal(regionResult.field, "company.region");
+
+    const facts = await db!
+      .select()
+      .from(schema.accountFacts)
+      .where(eq(schema.accountFacts.accountId, account.id));
+    assert.equal(facts.length, 2, "both concurrent fact writes must have committed");
+
+    const openItems = await db!
+      .select()
+      .from(schema.attentionItems)
+      .where(
+        and(
+          eq(schema.attentionItems.accountId, account.id),
+          eq(schema.attentionItems.status, "open"),
+        ),
+      );
+    assert.equal(
+      openItems.length,
+      1,
+      "the concurrent dedup race must converge to exactly one open item, not two",
+    );
+    assert.equal(openItems[0]?.sourceRef, evaluation.id);
+  },
+);
 
 // ---------------------------------------------------------------------
 // account_facts immutability

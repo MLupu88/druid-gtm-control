@@ -14,6 +14,7 @@ import type * as schema from "@workspace/db/schema";
 import {
   recordAccountFact,
   listAccountFacts,
+  isAccountFactFieldReferencedInProfileConfig,
   CorrectionReasonRequiredError,
   CorrectionReasonNotAllowedError,
   InvalidAccountFactValueError,
@@ -268,6 +269,7 @@ test("first-time confirmation: inserts the fact and claims the pointer via onCon
     [{ id: ACCOUNT_ID }], // account lookup
     [fact], // account_facts insert .returning()
     [{ accountId: ACCOUNT_ID, field: "company.industry", factId: FACT_ID }], // pointer insert .returning()
+    [], // GTM V2 Stage 4, Unit 1: findLatestCompletedProductionEvaluation -> none found, staleness check short-circuits
   ]);
 
   const result = await recordAccountFact({
@@ -292,6 +294,7 @@ test("correction: inserts the fact and moves the pointer via onConflictDoUpdate"
     [{ id: ACCOUNT_ID }],
     [fact],
     [{ accountId: ACCOUNT_ID, field: "company.industry", factId: FACT_ID }],
+    [], // GTM V2 Stage 4, Unit 1: findLatestCompletedProductionEvaluation -> none found, staleness check short-circuits
   ]);
 
   const result = await recordAccountFact({
@@ -579,6 +582,352 @@ test("a deeply nested cause chain with no constraint-violation shape anywhere do
       return true;
     },
   );
+});
+
+// ---------------------------------------------------------------------
+// GTM V2 Stage 4, Unit 1 — evaluation staleness signal.
+//
+// Real-database race/dedup behavior (two concurrent triggers colliding on
+// the attention_items partial unique index) is exercised only in
+// accountFacts.integration.test.ts — a fake queue-based db has no real
+// unique index to race against. This section covers the WIRING (which
+// queries run, in what order, and under what conditions) plus the pure
+// relevance rule directly.
+// ---------------------------------------------------------------------
+
+const EVALUATION_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+function syntheticProductionEvaluation(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: EVALUATION_ID,
+    accountId: ACCOUNT_ID,
+    snapshotId: "33333333-3333-4333-8333-333333333333",
+    profileVersionId: "44444444-4444-4444-8444-444444444444",
+    evaluatorVersionId: "55555555-5555-4555-8555-555555555555",
+    evaluationMode: "production",
+    status: "completed",
+    profileConfigSnapshot: {
+      configSchemaVersion: "v1",
+      fit: {
+        rules: [
+          {
+            id: "fit_industry",
+            description: "Industry match",
+            points: 10,
+            condition: { op: "eq", field: "company.industry", value: "Banking" },
+          },
+        ],
+        tiers: [{ code: "base", minScore: 0 }],
+      },
+      intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+      actionability: { rules: [] },
+      eligibility: { hardDisqualifiers: [], restrictions: [] },
+    },
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    createdBy: null,
+    ...overrides,
+  };
+}
+
+function syntheticAttentionItem(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: "attn-1",
+    accountId: ACCOUNT_ID,
+    reasonCode: "evaluation_stale",
+    reasonDetail: "detail",
+    source: "evaluation",
+    sourceRef: EVALUATION_ID,
+    context: { trigger: "account_fact_changed", evaluationId: EVALUATION_ID },
+    status: "open",
+    createdAt: new Date("2026-01-02T00:00:00Z"),
+    createdBy: "system:evaluation",
+    resolvedAt: null,
+    resolvedBy: null,
+    resolutionReason: null,
+    ...overrides,
+  };
+}
+
+test("recordAccountFact: no completed production evaluation -> no attention item is raised", async () => {
+  const fact = syntheticFact();
+  const { db, calls } = makeFakeDb([
+    [{ id: ACCOUNT_ID }],
+    [fact],
+    [{ accountId: ACCOUNT_ID, field: "company.industry", factId: FACT_ID }],
+    [], // findLatestCompletedProductionEvaluation -> none (covers preview-only and failed-only accounts too, which that helper's own unit tests in accountEvaluations.test.ts exercise directly)
+  ]);
+
+  await recordAccountFact({
+    db,
+    accountId: ACCOUNT_ID,
+    field: "company.industry",
+    value: "Banking",
+    recordedBy: "operator@example.com",
+    expectedCurrentFactId: null,
+    correctionReason: null,
+  });
+
+  // Only the fact insert + pointer insert ran — no attention_items insert.
+  assert.equal(calls.filter((c) => c.method === "insert").length, 2);
+});
+
+test("recordAccountFact: a referenced fit field raises an evaluation_stale attention item, committed via the same transaction", async () => {
+  const fact = syntheticFact();
+  const evaluation = syntheticProductionEvaluation();
+  const { db, calls } = makeFakeDb([
+    [{ id: ACCOUNT_ID }], // recordAccountFact's own account lookup
+    [fact], // account_facts insert
+    [{ accountId: ACCOUNT_ID, field: "company.industry", factId: FACT_ID }], // pointer insert
+    [evaluation], // findLatestCompletedProductionEvaluation
+    [{ id: ACCOUNT_ID }], // createAttentionItem's own account-existence check
+    [syntheticAttentionItem()], // attention_items insert .returning()
+  ]);
+
+  const result = await recordAccountFact({
+    db,
+    accountId: ACCOUNT_ID,
+    field: "company.industry",
+    value: "Banking",
+    recordedBy: "operator@example.com",
+    expectedCurrentFactId: null,
+    correctionReason: null,
+  });
+
+  assert.equal(result.id, FACT_ID);
+  // account_facts insert + accountFactCurrent insert + attention_items insert.
+  assert.equal(calls.filter((c) => c.method === "insert").length, 3);
+  assert.equal(calls.filter((c) => c.method === "select").length, 3);
+});
+
+test("recordAccountFact: an unreferenced field never raises an attention item, even with a completed production evaluation present", async () => {
+  const fact = syntheticFact({ field: "company.country", value: "Germany" });
+  // This evaluation's fit config only references company.industry.
+  const evaluation = syntheticProductionEvaluation();
+  const { db, calls } = makeFakeDb([
+    [{ id: ACCOUNT_ID }],
+    [fact],
+    [{ accountId: ACCOUNT_ID, field: "company.country", factId: FACT_ID }],
+    [evaluation], // findLatestCompletedProductionEvaluation
+    // no further slots consumed — company.country is not referenced, so
+    // createAttentionItem must never be called.
+  ]);
+
+  await recordAccountFact({
+    db,
+    accountId: ACCOUNT_ID,
+    field: "company.country",
+    value: "Germany",
+    recordedBy: "operator@example.com",
+    expectedCurrentFactId: null,
+    correctionReason: null,
+  });
+
+  assert.equal(calls.filter((c) => c.method === "insert").length, 2);
+});
+
+test("recordAccountFact: a correction to the SAME value as the fact it supersedes still raises an attention item — no same-value suppression exists", async () => {
+  // GTM V2 Stage 4, Unit 1 deliberately does not compare the new value
+  // against the value being superseded: fact identity/provenance is
+  // meaningful elsewhere in this codebase (see
+  // ../services/accountFactsSnapshotEvidence.ts's accountFactId-keyed
+  // evidence), so a same-value correction is not provably a no-op for
+  // evaluation purposes. Every accepted write to a referenced field is a
+  // trigger, full stop — this test locks that in.
+  const priorFactId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const fact = syntheticFact({ supersedesFactId: priorFactId, correctionReason: "reaffirm" });
+  const evaluation = syntheticProductionEvaluation();
+  const { db, calls } = makeFakeDb([
+    [{ id: ACCOUNT_ID }],
+    [fact],
+    [{ accountId: ACCOUNT_ID, field: "company.industry", factId: FACT_ID }],
+    [evaluation], // findLatestCompletedProductionEvaluation
+    [{ id: ACCOUNT_ID }], // createAttentionItem's own account-existence check
+    [syntheticAttentionItem()], // attention_items insert .returning()
+  ]);
+
+  await recordAccountFact({
+    db,
+    accountId: ACCOUNT_ID,
+    field: "company.industry",
+    value: "Banking", // same value the superseded fact already held
+    recordedBy: "operator@example.com",
+    expectedCurrentFactId: priorFactId,
+    correctionReason: "reaffirm",
+  });
+
+  assert.equal(calls.filter((c) => c.method === "insert").length, 3);
+});
+
+test("recordAccountFact: a correction to a different value on a referenced field raises an attention item", async () => {
+  const priorFactId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const fact = syntheticFact({ supersedesFactId: priorFactId, correctionReason: "corrected" });
+  const evaluation = syntheticProductionEvaluation();
+  const { db, calls } = makeFakeDb([
+    [{ id: ACCOUNT_ID }],
+    [fact],
+    [{ accountId: ACCOUNT_ID, field: "company.industry", factId: FACT_ID }],
+    [evaluation],
+    [{ id: ACCOUNT_ID }],
+    [syntheticAttentionItem()],
+  ]);
+
+  await recordAccountFact({
+    db,
+    accountId: ACCOUNT_ID,
+    field: "company.industry",
+    value: "Banking",
+    recordedBy: "operator@example.com",
+    expectedCurrentFactId: priorFactId,
+    correctionReason: "corrected",
+  });
+
+  assert.equal(calls.filter((c) => c.method === "insert").length, 3);
+});
+
+test("recordAccountFact: conservatively raises an attention item when the latest evaluation's frozen profileConfigSnapshot fails schema validation", async () => {
+  const fact = syntheticFact({ field: "company.employeeRange", value: "51-200" });
+  const evaluation = syntheticProductionEvaluation({
+    profileConfigSnapshot: { configSchemaVersion: "v1" }, // missing fit/intent/actionability/eligibility
+  });
+  const { db, calls } = makeFakeDb([
+    [{ id: ACCOUNT_ID }],
+    [fact],
+    [{ accountId: ACCOUNT_ID, field: "company.employeeRange", factId: FACT_ID }],
+    [evaluation],
+    [{ id: ACCOUNT_ID }],
+    [syntheticAttentionItem({ context: { trigger: "account_fact_changed", evaluationId: EVALUATION_ID } })],
+  ]);
+
+  await recordAccountFact({
+    db,
+    accountId: ACCOUNT_ID,
+    field: "company.employeeRange",
+    value: "51-200",
+    recordedBy: "operator@example.com",
+    expectedCurrentFactId: null,
+    correctionReason: null,
+  });
+
+  assert.equal(calls.filter((c) => c.method === "insert").length, 3);
+});
+
+test(
+  "recordAccountFact: a genuine (non-dedup) failure while raising the staleness signal propagates unswallowed, never converted to StaleFactCorrectionError",
+  async () => {
+    const fact = syntheticFact();
+    const evaluation = syntheticProductionEvaluation();
+    const boom = new Error("simulated infra failure");
+    const { db } = makeFakeDb([
+      [{ id: ACCOUNT_ID }],
+      [fact],
+      [{ accountId: ACCOUNT_ID, field: "company.industry", factId: FACT_ID }],
+      [evaluation],
+      [{ id: ACCOUNT_ID }],
+      () => {
+        throw boom;
+      },
+    ]);
+
+    // A real db.transaction() callback that throws an uncaught error rolls
+    // back the ENTIRE transaction (the same mechanism recordAccountFact
+    // already relies on for StaleFactCorrectionError below) — this proves
+    // the application-layer half of that guarantee: the error must reach
+    // the caller completely unswallowed and unconverted, so it is never
+    // mistaken for a benign, already-handled outcome. What db.transaction()
+    // does with an unswallowed throw (ROLLBACK) is standard drizzle-orm/
+    // Postgres behavior, proven separately by real-Postgres coverage
+    // elsewhere (see ./attentionItems.integration.test.ts and
+    // ./accountFacts.integration.test.ts's atomic-commit tests), not
+    // something a fake db can demonstrate.
+    await assert.rejects(
+      () =>
+        recordAccountFact({
+          db,
+          accountId: ACCOUNT_ID,
+          field: "company.industry",
+          value: "Banking",
+          recordedBy: "operator@example.com",
+          expectedCurrentFactId: null,
+          correctionReason: null,
+        }),
+      (err: unknown) => {
+        assert.equal(err, boom);
+        assert.ok(!(err instanceof StaleFactCorrectionError));
+        return true;
+      },
+    );
+  },
+);
+
+// ---------------------------------------------------------------------
+// isAccountFactFieldReferencedInProfileConfig — the pure relevance rule,
+// tested directly against the full range of RuleCondition shapes.
+// ---------------------------------------------------------------------
+
+function configWithFitCondition(condition: unknown): unknown {
+  return {
+    configSchemaVersion: "v1",
+    fit: {
+      rules: [{ id: "r1", description: "d", points: 1, condition }],
+      tiers: [{ code: "base", minScore: 0 }],
+    },
+    intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+    actionability: { rules: [] },
+    eligibility: { hardDisqualifiers: [], restrictions: [] },
+  };
+}
+
+test("isAccountFactFieldReferencedInProfileConfig: true for a direct eq condition on the field", () => {
+  const config = configWithFitCondition({ op: "eq", field: "company.industry", value: "Banking" });
+  assert.equal(isAccountFactFieldReferencedInProfileConfig(config, "company.industry"), true);
+});
+
+test("isAccountFactFieldReferencedInProfileConfig: false for a field never referenced anywhere in fit", () => {
+  const config = configWithFitCondition({ op: "eq", field: "company.industry", value: "Banking" });
+  assert.equal(isAccountFactFieldReferencedInProfileConfig(config, "company.employeeRange"), false);
+});
+
+test("isAccountFactFieldReferencedInProfileConfig: false when fit has no rules at all", () => {
+  const config = {
+    configSchemaVersion: "v1",
+    fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+    intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+    actionability: { rules: [] },
+    eligibility: { hardDisqualifiers: [], restrictions: [] },
+  };
+  assert.equal(isAccountFactFieldReferencedInProfileConfig(config, "company.industry"), false);
+});
+
+test("isAccountFactFieldReferencedInProfileConfig: nested and/or/not references are found at any depth", () => {
+  const config = configWithFitCondition({
+    op: "and",
+    conditions: [
+      {
+        op: "or",
+        conditions: [
+          { op: "not", condition: { op: "eq", field: "company.region", value: "us" } },
+          { op: "eq", field: "company.domain", value: "example.com" },
+        ],
+      },
+      { op: "exists", field: "company.employeeRange" },
+    ],
+  });
+  assert.equal(isAccountFactFieldReferencedInProfileConfig(config, "company.region"), true);
+  assert.equal(isAccountFactFieldReferencedInProfileConfig(config, "company.employeeRange"), true);
+  assert.equal(isAccountFactFieldReferencedInProfileConfig(config, "company.revenueRange"), false);
+});
+
+test("isAccountFactFieldReferencedInProfileConfig: conservatively true when profileConfigSnapshot fails schema validation", () => {
+  assert.equal(
+    isAccountFactFieldReferencedInProfileConfig({ configSchemaVersion: "v1" }, "company.industry"),
+    true,
+  );
+  assert.equal(isAccountFactFieldReferencedInProfileConfig(null, "company.industry"), true);
+  assert.equal(isAccountFactFieldReferencedInProfileConfig("not an object", "company.industry"), true);
 });
 
 // ---------------------------------------------------------------------

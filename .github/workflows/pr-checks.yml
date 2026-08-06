@@ -72,6 +72,9 @@ jobs:
       - name: Run @workspace/api-server accounts suite (unit + route + integration; DATABASE_URL is set above, so the integration suite cannot silently skip here)
         run: pnpm --filter @workspace/api-server run test:accounts
 
+      - name: Run @workspace/api-server evaluation/decision lifecycle suite (GTM V2 Stage 4 — account evaluations, account decisions, MQL decision readiness, account facts; unit + route + integration; DATABASE_URL is set above, so the integration suites cannot silently skip here)
+        run: pnpm --filter @workspace/api-server run test:evaluation-decision-lifecycle
+
       - name: Typecheck libs (includes @workspace/db)
         run: pnpm run typecheck:libs
 

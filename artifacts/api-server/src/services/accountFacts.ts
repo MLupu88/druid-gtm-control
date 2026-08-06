@@ -11,6 +11,22 @@
 // imports from @workspace/db/schema, never @workspace/db itself — the
 // database instance is always received via explicit injection, mirroring
 // every other service in this package.
+//
+// GTM V2 Stage 4, Unit 1 — evaluation staleness signal. recordAccountFact
+// also raises an `evaluation_stale` attention item (source: "evaluation",
+// see ../services/attentionItems.ts) whenever an accepted fact write
+// touches a field the account's latest completed, production
+// evaluation's frozen fit config actually references — every such write
+// is a trigger, with no same-value or identity-based suppression (see
+// raiseEvaluationStalenessSignalIfNeeded's own comment below for why).
+// This never rewrites or invalidates that evaluation row itself
+// (account_evaluations stays exactly as immutable as before) — it only
+// records, via the existing Stage 3 attention-item mechanism, that the
+// evaluation may no longer reflect current facts. See
+// isAccountFactFieldReferencedInProfileConfig below for the exact
+// relevance rule, and the module comment on
+// ../services/attentionItems.ts's createAttentionItem for why that call is
+// safe to make from inside this function's own open transaction.
 
 import { desc, eq, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -23,10 +39,20 @@ import {
   type AccountFactField,
 } from "@workspace/db/schema";
 import type * as schema from "@workspace/db/schema";
+import { IcpProfileConfigV1Schema, type RuleCondition } from "@workspace/evaluator";
 import { AccountNotFoundError } from "./icpEvaluationResolvers.js";
 import { parseAccountFactValue } from "./accountFactValueValidation.js";
+import { findLatestCompletedProductionEvaluation } from "./accountEvaluations.js";
+import { createAttentionItem } from "./attentionItems.js";
 
 type Db = NodePgDatabase<typeof schema>;
+// Extracts the exact transaction-handle type db.transaction()'s callback
+// receives — see ../services/identityResolution.ts's own Tx type alias,
+// which this mirrors exactly. Needed here because
+// raiseEvaluationStalenessSignalIfNeeded below is called with the open
+// transaction recordAccountFact's own db.transaction() callback receives,
+// not with Db itself.
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 // ---------------------------------------------------------------------
 // Errors
@@ -174,6 +200,137 @@ function isKnownConcurrencyViolation(err: unknown): boolean {
   );
 }
 
+// ---------------------------------------------------------------------
+// GTM V2 Stage 4, Unit 1 — evaluation staleness relevance rule. Kept
+// local to this service (not exported from @workspace/evaluator): this is
+// a one-off relevance check for the staleness signal, not a
+// general-purpose evaluator capability.
+// ---------------------------------------------------------------------
+
+/**
+ * Recursively walks a fit-dimension RuleCondition tree (and/or/not
+ * composition) for a reference to `field` — mirrors
+ * lib/evaluator/src/conditions.ts's own `walk`/`conditionDepth` switch
+ * shape exactly, just answering a different question (field membership,
+ * not depth or type validity).
+ */
+function conditionReferencesField(condition: RuleCondition, field: string): boolean {
+  switch (condition.op) {
+    case "exists":
+    case "eq":
+    case "in":
+    case "gte":
+    case "includesAny":
+      return condition.field === field;
+    case "not":
+      return conditionReferencesField(condition.condition, field);
+    case "and":
+    case "or":
+      return condition.conditions.some((c) => conditionReferencesField(c, field));
+  }
+}
+
+/**
+ * Whether an accepted change to `field` could truthfully change a
+ * production evaluation's output — i.e. whether `field` is referenced
+ * anywhere inside the frozen profileConfigSnapshot's fit.rules conditions.
+ *
+ * Proven, not assumed: every one of the five ACCOUNT_FACT_FIELDS values
+ * (@workspace/db/schema's accountFacts.ts) is only ever allowlisted for
+ * the "fit" dimension (lib/evaluator/src/profileConfig.ts's
+ * FIT_FIELD_ALLOWLIST) — intent/actionability/eligibility's own
+ * allowlists contain none of them — and every persisted profile config
+ * was validated against its dimension's allowlist at authoring time
+ * (profileConfig.ts's superRefine blocks). So checking fit.rules alone is
+ * exhaustive for these fields; no other dimension needs inspecting.
+ *
+ * Returns true (conservatively relevant) when profileConfigSnapshot fails
+ * IcpProfileConfigV1Schema validation — the DB's own CHECK on that column
+ * only requires a JSON object, not conformance to this stricter,
+ * possibly-since-tightened schema (mirrors ../services/accounts.ts's
+ * toEvaluationSummary, which parses the same column just as defensively).
+ * Relevance cannot be disproven in that case, and silently suppressing a
+ * possibly-real staleness signal would be worse than an occasional false
+ * positive.
+ */
+export function isAccountFactFieldReferencedInProfileConfig(
+  profileConfigSnapshot: unknown,
+  field: AccountFactField,
+): boolean {
+  const parsed = IcpProfileConfigV1Schema.safeParse(profileConfigSnapshot);
+  if (!parsed.success) {
+    return true;
+  }
+  return parsed.data.fit.rules.some((rule) =>
+    conditionReferencesField(rule.condition, field),
+  );
+}
+
+// Evaluation-scoped, deliberately never field-specific — so any number of
+// distinct triggering fields against the SAME still-open item replay as a
+// clean duplicate via createAttentionItem's own dedup (see
+// ../services/attentionItems.ts's isDuplicateOfExisting, which compares
+// reasonDetail/context/createdBy verbatim against the existing open row).
+// A field-specific payload would make a second, different triggering
+// field misclassify as a conflict purely because its context differs,
+// even though both describe the exact same "this evaluation is stale"
+// condition.
+function evaluationStaleReasonDetail(evaluationId: string): string {
+  return `A confirmed account fact changed after production evaluation ${evaluationId} was completed; its fit inputs may no longer reflect current facts.`;
+}
+
+function evaluationStaleContext(evaluationId: string): Record<string, unknown> {
+  return { trigger: "account_fact_changed", evaluationId };
+}
+
+/**
+ * Raises (or replays into) an open `evaluation_stale` attention item for
+ * the account's latest completed, production evaluation, when that
+ * evaluation's frozen fit config actually references `field`. A no-op
+ * when no such evaluation exists (preview-only or failed-only accounts —
+ * see findLatestCompletedProductionEvaluation) or when the field isn't
+ * referenced — those are the ONLY two conditions gating this call.
+ * Deliberately does NOT compare the new value against the value being
+ * superseded: a same-value correction is not provably a no-op for
+ * evaluation purposes (fact identity/provenance is meaningful elsewhere in
+ * this codebase — see recordAccountFact's own call site comment), so Unit
+ * 1 treats every accepted write to a referenced field as a trigger, full
+ * stop. Always called with the SAME open transaction recordAccountFact's
+ * own fact write ran in, relying on createAttentionItem's
+ * nested-transaction/savepoint support (see ../services/attentionItems.ts)
+ * — a genuine (non-dedup) failure here propagates out and rolls back the
+ * fact write too; a benign dedup race/replay never does.
+ */
+async function raiseEvaluationStalenessSignalIfNeeded(
+  tx: Tx,
+  accountId: string,
+  field: AccountFactField,
+): Promise<void> {
+  const evaluation = await findLatestCompletedProductionEvaluation(tx, accountId);
+  if (!evaluation) {
+    return;
+  }
+  if (
+    !isAccountFactFieldReferencedInProfileConfig(
+      evaluation.profileConfigSnapshot,
+      field,
+    )
+  ) {
+    return;
+  }
+
+  await createAttentionItem({
+    db: tx,
+    accountId,
+    reasonCode: "evaluation_stale",
+    source: "evaluation",
+    sourceRef: evaluation.id,
+    reasonDetail: evaluationStaleReasonDetail(evaluation.id),
+    context: evaluationStaleContext(evaluation.id),
+    createdBy: "system:evaluation",
+  });
+}
+
 /**
  * Records one manual account-fact assertion. Application-layer mirror of
  * account_facts' correction-reason-iff-supersedes CHECK (defense in
@@ -270,6 +427,17 @@ export async function recordAccountFact(
       if (pointerResult.length === 0) {
         throw new StaleFactCorrectionError(accountId, field);
       }
+
+      // GTM V2 Stage 4, Unit 1: every successfully accepted fact row for a
+      // referenced field is a staleness trigger — root assertion or
+      // correction alike, with no same-value suppression. A same-value
+      // correction is NOT provably a no-op here: fact IDENTITY (not just
+      // its string value) is meaningful elsewhere in this codebase — see
+      // ../services/accountFactsSnapshotEvidence.ts, whose frozen evidence
+      // envelope keys each entry by accountFactId specifically, not by
+      // value alone. Unit 1 does not attempt the judgment call of deciding
+      // when identity/provenance differences are safe to ignore.
+      await raiseEvaluationStalenessSignalIfNeeded(tx, accountId, field);
 
       return inserted;
     });
