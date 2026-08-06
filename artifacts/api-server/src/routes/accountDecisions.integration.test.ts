@@ -359,7 +359,7 @@ async function makeDecisionRow(
 // ---------------------------------------------------------------------
 
 test(
-  "createAccountDecision creates an mql decision for a completed production evaluation, with every field persisted exactly",
+  "createAccountDecision creates a sales_review decision for a completed production evaluation, with every field persisted exactly",
   { skip },
   async () => {
     const { account, snapshot } = await makeAccountWithSnapshot();
@@ -375,7 +375,7 @@ test(
       db: db!,
       idempotencyKey,
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql",
+      routingOutput: "sales_review",
       routingReason: "Strong signal, promote to sales",
       createdBy: "operator@example.test",
     });
@@ -388,7 +388,7 @@ test(
       result.decision.decisionPolicyVersionId,
       manualPolicyVersionId,
     );
-    assert.equal(result.decision.routingOutput, "mql");
+    assert.equal(result.decision.routingOutput, "sales_review");
     assert.equal(
       result.decision.routingReason,
       "Strong signal, promote to sales",
@@ -453,7 +453,7 @@ test(
       db: db!,
       idempotencyKey: crypto.randomUUID(),
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql",
+      routingOutput: "sales_review",
       routingReason: null,
       createdBy: "operator@example.test",
     });
@@ -488,7 +488,7 @@ test(
       db: db!,
       idempotencyKey: crypto.randomUUID(),
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql",
+      routingOutput: "sales_review",
       createdBy: "operator@example.test",
     });
 
@@ -548,7 +548,7 @@ test(
       db: db!,
       idempotencyKey: crypto.randomUUID(),
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql",
+      routingOutput: "sales_review",
       createdBy: "operator@example.test",
     });
 
@@ -575,7 +575,7 @@ test(
       db: db!,
       idempotencyKey,
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql" as const,
+      routingOutput: "sales_review" as const,
       routingReason: "First pass",
       createdBy: "operator@example.test",
     };
@@ -612,7 +612,7 @@ test(
       db: db!,
       idempotencyKey,
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql",
+      routingOutput: "dismissed",
       createdBy: "operator@example.test",
     });
     assert.equal(first.created, true);
@@ -885,7 +885,7 @@ test(
       db: db!,
       idempotencyKey: crypto.randomUUID(),
       accountEvaluationId: evaluation.id,
-      routingOutput: "mql",
+      routingOutput: "sales_review",
       routingReason: "detail test",
       createdBy: "operator@example.test",
     });
@@ -946,7 +946,7 @@ test(
       db: db!,
       idempotencyKey: crypto.randomUUID(),
       accountEvaluationId: evaluationA.id,
-      routingOutput: "mql",
+      routingOutput: "sales_review",
       createdBy: "operator@example.test",
     });
     const resultB = await createAccountDecision({
