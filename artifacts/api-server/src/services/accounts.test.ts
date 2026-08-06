@@ -510,7 +510,7 @@ test("listAccounts derives intentConfigured=false when the evaluation's profileC
   assert.equal(result.items[0]?.latestEvaluation?.intentConfigured, false);
 });
 
-test("listAccounts throws rather than defaulting when a persisted evaluation's profileConfigSnapshot fails schema validation", async () => {
+test("listAccounts returns latestEvaluation/latestProductionEvaluation: null (never throws, never fails the list) for a persisted evaluation whose profileConfigSnapshot fails schema validation", async () => {
   const account = syntheticAccount();
   const evaluation = syntheticEvaluationSummary({
     profileConfigSnapshot: { configSchemaVersion: "v1" }, // missing fit/intent/actionability/eligibility
@@ -525,9 +525,56 @@ test("listAccounts throws rather than defaulting when a persisted evaluation's p
     [syntheticSnapshotRow()],
   ]);
 
-  await assert.rejects(
-    listAccounts({ db, limit: 50, offset: 0, needsAttention: false }),
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.latestEvaluation, null);
+  assert.equal(result.items[0]?.latestProductionEvaluation, null);
+});
+
+test("listAccounts: an invalid profileConfigSnapshot on one account's evaluation does not affect another account's valid evaluation summary", async () => {
+  const validAccount = syntheticAccount({ id: "acc-valid" });
+  const invalidAccount = syntheticAccount({ id: "acc-invalid" });
+  const validEvaluation = syntheticEvaluationSummary({
+    id: "eval-valid",
+    accountId: "acc-valid",
+  });
+  const invalidEvaluation = syntheticEvaluationSummary({
+    id: "eval-invalid",
+    accountId: "acc-invalid",
+    profileConfigSnapshot: { configSchemaVersion: "v1" }, // missing fit/intent/actionability/eligibility
+  });
+  const snapshot = syntheticSnapshotRow();
+  const { db } = makeFakeDb([
+    [{ value: 2 }],
+    [validAccount, invalidAccount],
+    [validEvaluation, invalidEvaluation],
+    [validEvaluation, invalidEvaluation],
+    [],
+    [],
+    [snapshot],
+  ]);
+
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  const validItem = result.items.find((i) => i.account.id === "acc-valid");
+  const invalidItem = result.items.find((i) => i.account.id === "acc-invalid");
+  assert.deepEqual(
+    validItem?.latestEvaluation,
+    expectedSummary(validEvaluation, snapshot),
   );
+  assert.equal(invalidItem?.latestEvaluation, null);
+  assert.equal(invalidItem?.latestProductionEvaluation, null);
 });
 
 test("listAccounts maps latestDecision per account, independently of latestEvaluation/latestProductionEvaluation", async () => {

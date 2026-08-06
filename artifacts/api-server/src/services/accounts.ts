@@ -151,6 +151,15 @@ const EVALUATION_SUMMARY_QUERY_COLUMNS = {
 // the type, since a false/silent default here would risk showing "Intent
 // not configured" for corrupted or otherwise-unexpected stored data
 // instead of surfacing the problem.
+//
+// Returns null (never throws) when validation fails — the DB's own CHECK
+// on this column only requires a JSON object (jsonb_typeof = 'object'),
+// not conformance to this stricter, possibly-since-tightened application
+// schema, so a row that was legally written can still fail here. One
+// account's evaluation summary being unavailable must not fail the whole
+// account list (see AccountListItem.latestEvaluation /
+// latestProductionEvaluation, both already nullable for exactly this
+// case). Never invents or coerces a replacement config.
 function toEvaluationSummary<
   T extends {
     profileConfigSnapshot: unknown;
@@ -160,16 +169,14 @@ function toEvaluationSummary<
 >(
   row: T,
   snapshot: SnapshotForReadiness | undefined,
-): Omit<T, "profileConfigSnapshot"> & {
+): (Omit<T, "profileConfigSnapshot"> & {
   intentConfigured: boolean;
   mqlDecisionReadiness: MqlDecisionReadiness;
-} {
+}) | null {
   const { profileConfigSnapshot, ...rest } = row;
   const parsed = IcpProfileConfigV1Schema.safeParse(profileConfigSnapshot);
   if (!parsed.success) {
-    throw new Error(
-      "Persisted account evaluation contains an invalid profileConfigSnapshot",
-    );
+    return null;
   }
   const mqlDecisionReadiness = deriveMqlDecisionReadiness(
     {

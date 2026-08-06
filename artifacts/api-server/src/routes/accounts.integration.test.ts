@@ -42,6 +42,7 @@ import pg from "pg";
 import * as schema from "@workspace/db/schema";
 import { createAccountsRouter } from "./accounts.js";
 import { resolveAttentionItem } from "../services/attentionItems.js";
+import { deriveMqlDecisionReadiness } from "../services/mqlDecisionReadiness.js";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const skip = !DATABASE_URL;
@@ -139,6 +140,19 @@ const RUN_EPOCH_MS = Date.now();
 const FAR_FUTURE_BASE_MS = Date.UTC(2100, 0, 1);
 function runTimestamp(offsetMs = 0): Date {
   return new Date(FAR_FUTURE_BASE_MS + RUN_EPOCH_MS + offsetMs);
+}
+
+// attention_items.createdAt needs the opposite anchor from runTimestamp
+// above: resolveOpenAttentionItem resolves through the real service, which
+// sets resolved_at to Postgres's real now() — and
+// attention_items_resolved_at_after_created_at requires resolved_at >=
+// created_at. A createdAt anchored to runTimestamp's year-2100 future would
+// always sort ahead of that real now(), tripping the constraint on every
+// resolution. Anchored safely in the past instead, with the same
+// offsetMs-orders-fixtures-relative-to-each-other contract as runTimestamp.
+const PAST_ATTENTION_ITEM_BASE_MS = Date.UTC(2020, 0, 1);
+function attentionItemCreatedAt(offsetMs = 0): Date {
+  return new Date(PAST_ATTENTION_ITEM_BASE_MS + offsetMs);
 }
 
 // Derives two distinct, format-valid UUIDs from one fresh random UUID by
@@ -366,7 +380,7 @@ async function makeEvaluation(
       scoreComponents: [],
       matchedRules: [],
       missingInputs: [],
-      profileConfigSnapshot: { configSchemaVersion: "v1" },
+      profileConfigSnapshot: syntheticProfileConfig(),
       ...overrides,
     })
     .returning();
@@ -390,7 +404,7 @@ async function makeOpenAttentionItem(
       reasonCode: `accounts-route-test-reason-${crypto.randomUUID()}`,
       source: "manual",
       createdBy: `accounts-route-test-${RUN_ID}`,
-      createdAt: runTimestamp(),
+      createdAt: attentionItemCreatedAt(),
       ...overrides,
     })
     .returning();
@@ -846,15 +860,15 @@ test(
     // createdAt order.
     const oldest = await makeOpenAttentionItem(account.id, {
       reasonCode: `zzz-late-alpha-${crypto.randomUUID()}`,
-      createdAt: runTimestamp(1_000),
+      createdAt: attentionItemCreatedAt(1_000),
     });
     const second = await makeOpenAttentionItem(account.id, {
       reasonCode: `aaa-early-alpha-${crypto.randomUUID()}`,
-      createdAt: runTimestamp(2_000),
+      createdAt: attentionItemCreatedAt(2_000),
     });
     const third = await makeOpenAttentionItem(account.id, {
       reasonCode: `mmm-mid-alpha-${crypto.randomUUID()}`,
-      createdAt: runTimestamp(3_000),
+      createdAt: attentionItemCreatedAt(3_000),
     });
     const expectedReasonCodes = [
       second.reasonCode,
@@ -917,12 +931,12 @@ test(
     const oldest = await makeOpenAttentionItem(account.id, {
       reasonCode: sharedReasonCode,
       source: "manual",
-      createdAt: runTimestamp(1_000),
+      createdAt: attentionItemCreatedAt(1_000),
     });
     await makeOpenAttentionItem(account.id, {
       reasonCode: sharedReasonCode,
       source: "identity_resolution",
-      createdAt: runTimestamp(2_000),
+      createdAt: attentionItemCreatedAt(2_000),
     });
 
     await withServer(async (baseUrl) => {
@@ -970,11 +984,11 @@ test(
     const { account } = await makeAccountWithSnapshot();
     const toResolve = await makeOpenAttentionItem(account.id, {
       reasonCode: `resolve-me-${crypto.randomUUID()}`,
-      createdAt: runTimestamp(1_000),
+      createdAt: attentionItemCreatedAt(1_000),
     });
     const remaining = await makeOpenAttentionItem(account.id, {
       reasonCode: `stay-open-${crypto.randomUUID()}`,
-      createdAt: runTimestamp(2_000),
+      createdAt: attentionItemCreatedAt(2_000),
     });
     await resolveOpenAttentionItem(toResolve.id);
 
@@ -1224,9 +1238,18 @@ test(
       const body = await readRecord(res, "GET /:accountId response body");
 
       assert.equal(res.status, 200);
+      // mqlDecisionReadiness is getAccountById's one derived addition on
+      // top of the exact persisted row (see services/accounts.ts's
+      // AccountEvaluationDetail) — computed here via the real
+      // deriveMqlDecisionReadiness, the same function and inputs
+      // getAccountById itself uses, rather than a hand-guessed literal.
+      const expectedEvaluations = [tieHigh, tieLow, older].map((row) => ({
+        ...row,
+        mqlDecisionReadiness: deriveMqlDecisionReadiness(row, snapshot),
+      }));
       assert.deepEqual(
         body.evaluations,
-        JSON.parse(JSON.stringify([tieHigh, tieLow, older])),
+        JSON.parse(JSON.stringify(expectedEvaluations)),
       );
     });
   },
