@@ -239,10 +239,24 @@ async function makePerson(
 
 // profile_config_snapshot has no DB default (NOT NULL, required on every
 // row regardless of status/mode) — a fixed fixture value for tests that
-// aren't specifically exercising that column.
+// aren't specifically exercising that column. The DB's own CHECK only
+// requires a JSON object (jsonb_typeof = 'object'), but this package has no
+// dependency on @workspace/evaluator's IcpProfileConfigV1Schema (and
+// shouldn't gain one just to share this fixture — lib/db stays a leaf
+// package), so the full required shape (fit/intent/actionability/
+// eligibility, each with a floor tier where tiers are required) is
+// duplicated here literally rather than imported, mirroring
+// artifacts/api-server/src/routes/accounts.integration.test.ts's
+// syntheticProfileConfig(). Kept schema-valid so rows this suite leaves
+// behind in the shared CI database never trip application-level validation
+// in a later suite that also reads account_evaluations (e.g.
+// ../../../artifacts/api-server/src/services/accounts.ts's list endpoint).
 const PROFILE_CONFIG_SNAPSHOT_FIXTURE = {
   configSchemaVersion: "v1",
-  fit: { rules: [] },
+  fit: { rules: [], tiers: [{ code: "base", minScore: 0 }] },
+  intent: { rules: [], tiers: [{ code: "floor", minScore: 0 }] },
+  actionability: { rules: [] },
+  eligibility: { hardDisqualifiers: [], restrictions: [] },
 };
 
 async function makeCompletedProductionEvaluation(overrides: {

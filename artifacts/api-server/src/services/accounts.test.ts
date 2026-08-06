@@ -213,7 +213,7 @@ function makeFakeDb(queue: unknown[]) {
 
   function chain(): any {
     const obj: any = {};
-    for (const method of ["from", "innerJoin", "where", "orderBy", "limit", "offset"]) {
+    for (const method of ["from", "innerJoin", "where", "orderBy", "groupBy", "limit", "offset"]) {
       obj[method] = (...args: unknown[]) => {
         calls.push({ method, args });
         return obj;
@@ -249,18 +249,35 @@ function makeFakeDb(queue: unknown[]) {
 test("listAccounts shapes total and returns [] items without querying evaluations when the page is empty", async () => {
   const { db, calls } = makeFakeDb([[{ value: 5 }], []]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   assert.equal(result.total, 5);
   assert.deepEqual(result.items, []);
   assert.equal(calls.filter((c) => c.method === "selectDistinctOn").length, 0);
 });
 
+test("listAccounts does not run the attention aggregate query when the account page is empty", async () => {
+  const { db, calls } = makeFakeDb([[{ value: 0 }], []]);
+
+  await listAccounts({ db, limit: 50, offset: 0, needsAttention: true });
+
+  // Only the count and the (empty) page query ran — no further select()
+  // calls at all, so the attention GROUP BY query (and the evaluation/
+  // decision DISTINCT ON queries) never fired.
+  assert.equal(calls.filter((c) => c.method === "select").length, 2);
+  assert.equal(calls.filter((c) => c.method === "groupBy").length, 0);
+});
+
 test("listAccounts orders accounts deterministically (updatedAt desc, id desc)", async () => {
   const a1 = syntheticAccount({ id: "a1" });
-  const { db, calls } = makeFakeDb([[{ value: 1 }], [a1], [], [], []]);
+  const { db, calls } = makeFakeDb([[{ value: 1 }], [a1], [], [], [], []]);
 
-  await listAccounts({ db, limit: 50, offset: 0 });
+  await listAccounts({ db, limit: 50, offset: 0, needsAttention: false });
 
   const accountsOrderByCall = calls.find(
     (c, idx) =>
@@ -272,16 +289,54 @@ test("listAccounts orders accounts deterministically (updatedAt desc, id desc)",
   assert.equal(accountsOrderByCall!.args.length, 2);
 });
 
+test("listAccounts does not filter the base account query or its count when needsAttention is false", async () => {
+  const account = syntheticAccount();
+  const { db, calls } = makeFakeDb([[{ value: 1 }], [account], [], [], [], []]);
+
+  await listAccounts({ db, limit: 50, offset: 0, needsAttention: false });
+
+  // Every where() call recorded across both the count and page queries on
+  // `accounts` must have been invoked with `undefined` (drizzle's "no
+  // filter" value) — the EXISTS filter must never be applied when
+  // needsAttention is false.
+  const whereCalls = calls.filter((c) => c.method === "where");
+  assert.ok(whereCalls.length >= 2);
+  for (const call of whereCalls.slice(0, 2)) {
+    assert.equal(call.args[0], undefined);
+  }
+});
+
+test("listAccounts applies the same EXISTS filter to both the count query and the page query when needsAttention is true", async () => {
+  const account = syntheticAccount();
+  const { db, calls } = makeFakeDb([[{ value: 1 }], [account], [], [], [], []]);
+
+  await listAccounts({ db, limit: 50, offset: 0, needsAttention: true });
+
+  const whereCalls = calls.filter((c) => c.method === "where");
+  // The count query's where() and the page query's where() must both have
+  // received a real (non-undefined) filter expression, and the same one —
+  // never a post-fetch filter applied only to one of the two.
+  assert.ok(whereCalls.length >= 2);
+  assert.notEqual(whereCalls[0]?.args[0], undefined);
+  assert.deepEqual(whereCalls[0]?.args[0], whereCalls[1]?.args[0]);
+});
+
 test("listAccounts returns null latestEvaluation/latestProductionEvaluation/latestDecision for an account with no evaluations or decisions", async () => {
   const account = syntheticAccount();
-  const { db } = makeFakeDb([[{ value: 1 }], [account], [], [], []]);
+  const { db } = makeFakeDb([[{ value: 1 }], [account], [], [], [], []]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]?.latestEvaluation, null);
   assert.equal(result.items[0]?.latestProductionEvaluation, null);
   assert.equal(result.items[0]?.latestDecision, null);
+  assert.equal(result.items[0]?.attention, null);
 });
 
 test("listAccounts maps latestEvaluation and latestProductionEvaluation independently per account", async () => {
@@ -302,10 +357,16 @@ test("listAccounts maps latestEvaluation and latestProductionEvaluation independ
     [latestA], // latestEvaluation query: only account A has a row
     [latestProductionB], // latestProductionEvaluation query: only account B has a row
     [], // latestDecision query: neither account has a decision
+    [], // attention aggregate query: neither account has an open item
     [snapshot], // batched account_snapshots lookup for the readiness derivation
   ]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   const itemA = result.items.find((i) => i.account.id === "acc-a");
   const itemB = result.items.find((i) => i.account.id === "acc-b");
@@ -337,10 +398,16 @@ test("listAccounts: a preview evaluation newer than the latest production evalua
     [previewLatest], // unfiltered DISTINCT ON picks the newest overall: the preview row
     [productionOlder], // production-filtered DISTINCT ON picks the newest production row
     [], // latestDecision query: no decision yet
+    [], // attention aggregate query: no open items
     [snapshot], // batched account_snapshots lookup for the readiness derivation
   ]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   assert.deepEqual(
     result.items[0]?.latestEvaluation,
@@ -365,10 +432,16 @@ test("listAccounts: when the latest evaluation is itself the latest production e
     [evaluation],
     [evaluation],
     [],
+    [],
     [snapshot],
   ]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   assert.deepEqual(
     result.items[0]?.latestEvaluation,
@@ -391,10 +464,16 @@ test("listAccounts derives intentConfigured=true when the evaluation's profileCo
     [evaluation],
     [evaluation],
     [],
+    [],
     [syntheticSnapshotRow()],
   ]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   assert.equal(result.items[0]?.latestEvaluation?.intentConfigured, true);
   assert.equal("profileConfigSnapshot" in (result.items[0]?.latestEvaluation ?? {}), false);
@@ -417,15 +496,21 @@ test("listAccounts derives intentConfigured=false when the evaluation's profileC
     [evaluation],
     [evaluation],
     [],
+    [],
     [syntheticSnapshotRow()],
   ]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   assert.equal(result.items[0]?.latestEvaluation?.intentConfigured, false);
 });
 
-test("listAccounts throws rather than defaulting when a persisted evaluation's profileConfigSnapshot fails schema validation", async () => {
+test("listAccounts returns latestEvaluation/latestProductionEvaluation: null (never throws, never fails the list) for a persisted evaluation whose profileConfigSnapshot fails schema validation", async () => {
   const account = syntheticAccount();
   const evaluation = syntheticEvaluationSummary({
     profileConfigSnapshot: { configSchemaVersion: "v1" }, // missing fit/intent/actionability/eligibility
@@ -436,10 +521,60 @@ test("listAccounts throws rather than defaulting when a persisted evaluation's p
     [evaluation],
     [evaluation],
     [],
+    [],
     [syntheticSnapshotRow()],
   ]);
 
-  await assert.rejects(listAccounts({ db, limit: 50, offset: 0 }));
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]?.latestEvaluation, null);
+  assert.equal(result.items[0]?.latestProductionEvaluation, null);
+});
+
+test("listAccounts: an invalid profileConfigSnapshot on one account's evaluation does not affect another account's valid evaluation summary", async () => {
+  const validAccount = syntheticAccount({ id: "acc-valid" });
+  const invalidAccount = syntheticAccount({ id: "acc-invalid" });
+  const validEvaluation = syntheticEvaluationSummary({
+    id: "eval-valid",
+    accountId: "acc-valid",
+  });
+  const invalidEvaluation = syntheticEvaluationSummary({
+    id: "eval-invalid",
+    accountId: "acc-invalid",
+    profileConfigSnapshot: { configSchemaVersion: "v1" }, // missing fit/intent/actionability/eligibility
+  });
+  const snapshot = syntheticSnapshotRow();
+  const { db } = makeFakeDb([
+    [{ value: 2 }],
+    [validAccount, invalidAccount],
+    [validEvaluation, invalidEvaluation],
+    [validEvaluation, invalidEvaluation],
+    [],
+    [],
+    [snapshot],
+  ]);
+
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  const validItem = result.items.find((i) => i.account.id === "acc-valid");
+  const invalidItem = result.items.find((i) => i.account.id === "acc-invalid");
+  assert.deepEqual(
+    validItem?.latestEvaluation,
+    expectedSummary(validEvaluation, snapshot),
+  );
+  assert.equal(invalidItem?.latestEvaluation, null);
+  assert.equal(invalidItem?.latestProductionEvaluation, null);
 });
 
 test("listAccounts maps latestDecision per account, independently of latestEvaluation/latestProductionEvaluation", async () => {
@@ -456,9 +591,15 @@ test("listAccounts maps latestDecision per account, independently of latestEvalu
     [],
     [],
     [{ accountId: "acc-a", ...decisionA }], // only account A has a decision
+    [],
   ]);
 
-  const result = await listAccounts({ db, limit: 50, offset: 0 });
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
 
   const itemA = result.items.find((i) => i.account.id === "acc-a");
   const itemB = result.items.find((i) => i.account.id === "acc-b");
@@ -466,7 +607,7 @@ test("listAccounts maps latestDecision per account, independently of latestEvalu
   assert.equal(itemB?.latestDecision, null);
 });
 
-test("listAccounts issues exactly five queries total regardless of how many accounts are on the page (no N+1)", async () => {
+test("listAccounts issues exactly six queries total regardless of how many accounts are on the page (no N+1)", async () => {
   const manyAccounts = Array.from({ length: 25 }, (_, i) =>
     syntheticAccount({ id: `acc-${i}` }),
   );
@@ -476,14 +617,97 @@ test("listAccounts issues exactly five queries total regardless of how many acco
     [],
     [],
     [],
+    [],
   ]);
 
-  await listAccounts({ db, limit: 100, offset: 0 });
+  await listAccounts({ db, limit: 100, offset: 0, needsAttention: false });
 
   const rootCalls = calls.filter(
     (c) => c.method === "select" || c.method === "selectDistinctOn",
   );
-  assert.equal(rootCalls.length, 5);
+  assert.equal(rootCalls.length, 6);
+});
+
+// ---------------------------------------------------------------------
+// attention summary
+// ---------------------------------------------------------------------
+
+test("listAccounts maps multiple attention aggregate rows to their correct accounts, one row per account regardless of open item count", async () => {
+  const accountA = syntheticAccount({ id: "acc-a" });
+  const accountB = syntheticAccount({ id: "acc-b" });
+  const { db } = makeFakeDb([
+    [{ value: 2 }],
+    [accountA, accountB],
+    [],
+    [],
+    [],
+    [
+      {
+        accountId: "acc-a",
+        openCount: "3", // count() arrives as a string from the pg driver
+        oldestOpenAttentionAt: new Date("2026-01-01T00:00:00Z"),
+        reasonCodes: ["stale_evaluation", "manual_review"],
+      },
+      {
+        accountId: "acc-b",
+        openCount: "1",
+        oldestOpenAttentionAt: new Date("2026-02-01T00:00:00Z"),
+        reasonCodes: ["enrichment_failed"],
+      },
+    ],
+  ]);
+
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  const itemA = result.items.find((i) => i.account.id === "acc-a");
+  const itemB = result.items.find((i) => i.account.id === "acc-b");
+
+  assert.equal(itemA?.attention?.openCount, 3);
+  assert.equal(typeof itemA?.attention?.openCount, "number");
+  assert.deepEqual(itemA?.attention?.oldestOpenAttentionAt, new Date("2026-01-01T00:00:00Z"));
+  // Distinct + deterministically ascending, regardless of the order the
+  // (already-distinct) driver array arrived in.
+  assert.deepEqual(itemA?.attention?.reasonCodes, ["manual_review", "stale_evaluation"]);
+
+  assert.equal(itemB?.attention?.openCount, 1);
+  assert.deepEqual(itemB?.attention?.reasonCodes, ["enrichment_failed"]);
+});
+
+test("listAccounts returns attention: null for an account absent from the aggregate results", async () => {
+  const accountA = syntheticAccount({ id: "acc-a" });
+  const accountB = syntheticAccount({ id: "acc-b" });
+  const { db } = makeFakeDb([
+    [{ value: 2 }],
+    [accountA, accountB],
+    [],
+    [],
+    [],
+    [
+      {
+        accountId: "acc-a",
+        openCount: "1",
+        oldestOpenAttentionAt: new Date("2026-01-01T00:00:00Z"),
+        reasonCodes: ["manual_review"],
+      },
+      // acc-b has no open attention_items row at all — it must be null,
+      // never { openCount: 0, ... }.
+    ],
+  ]);
+
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  const itemB = result.items.find((i) => i.account.id === "acc-b");
+  assert.equal(itemB?.attention, null);
 });
 
 // ---------------------------------------------------------------------

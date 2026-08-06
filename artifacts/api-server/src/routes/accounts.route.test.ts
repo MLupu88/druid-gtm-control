@@ -83,6 +83,7 @@ function syntheticListItem(
     latestEvaluation: null,
     latestProductionEvaluation: null,
     latestDecision: null,
+    attention: null,
     ...overrides,
   };
 }
@@ -165,7 +166,7 @@ async function withServer(
 // GET / — pagination
 // ---------------------------------------------------------------------
 
-test("GET / with no query parameters uses the default pagination (limit 50, offset 0) and calls the service exactly once", async () => {
+test("GET / with no query parameters uses the default pagination (limit 50, offset 0) and needsAttention defaults to false, calling the service exactly once", async () => {
   const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
     items: [],
     total: 0,
@@ -182,6 +183,7 @@ test("GET / with no query parameters uses the default pagination (limit 50, offs
     assert.deepEqual(listAccountsFn.mock.calls[0]?.arguments[0], {
       limit: 50,
       offset: 0,
+      needsAttention: false,
     });
   });
 });
@@ -205,7 +207,141 @@ test("GET / with an explicit valid limit and offset calls the service exactly on
     assert.deepEqual(listAccountsFn.mock.calls[0]?.arguments[0], {
       limit: 10,
       offset: 20,
+      needsAttention: false,
     });
+  });
+});
+
+// ---------------------------------------------------------------------
+// GET / — needsAttention
+// ---------------------------------------------------------------------
+
+test("GET / with no needsAttention query parameter parses it as false", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?limit=10&offset=0`);
+    assert.equal(res.status, 200);
+    assert.equal(
+      listAccountsFn.mock.calls[0]?.arguments[0].needsAttention,
+      false,
+    );
+  });
+});
+
+test("GET / with needsAttention=false parses it as false", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?needsAttention=false`);
+    assert.equal(res.status, 200);
+    assert.equal(
+      listAccountsFn.mock.calls[0]?.arguments[0].needsAttention,
+      false,
+    );
+  });
+});
+
+test("GET / with needsAttention=true parses it as true and calls the service with it", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?needsAttention=true`);
+    assert.equal(res.status, 200);
+    assert.equal(listAccountsFn.mock.calls.length, 1);
+    assert.deepEqual(listAccountsFn.mock.calls[0]?.arguments[0], {
+      limit: 50,
+      offset: 0,
+      needsAttention: true,
+    });
+  });
+});
+
+const invalidNeedsAttentionCases: Array<[string, string]> = [
+  ["numeric 1", "needsAttention=1"],
+  ["yes", "needsAttention=yes"],
+  ["uppercase TRUE", "needsAttention=TRUE"],
+  ["empty string", "needsAttention="],
+];
+
+for (const [label, query] of invalidNeedsAttentionCases) {
+  test(`GET / rejects needsAttention=${label} with 400 and does not call the service`, async () => {
+    const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+      items: [],
+      total: 0,
+    }));
+    const app = buildTestApp({ listAccountsFn });
+
+    await withServer(app, async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/?${query}`);
+      const body = await readJson(res, `GET /?${query} response body`);
+
+      assert.equal(res.status, 400);
+      assert.equal(body.code, "invalid_request");
+      assert.equal(listAccountsFn.mock.calls.length, 0);
+    });
+  });
+}
+
+test("GET / serializes a populated attention summary verbatim", async () => {
+  const oldestOpenAttentionAt = new Date("2026-01-01T00:00:00Z");
+  const items = [
+    syntheticListItem({
+      attention: {
+        openCount: 2,
+        oldestOpenAttentionAt,
+        reasonCodes: ["manual_review", "stale_evaluation"],
+      },
+    }),
+  ];
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items,
+    total: 1,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?needsAttention=true`);
+    const body = await readJson(res, "GET /?needsAttention=true response body");
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body.items, JSON.parse(JSON.stringify(items)));
+    const [item] = body.items as Array<Record<string, unknown>>;
+    assert.deepEqual(item?.attention, {
+      openCount: 2,
+      oldestOpenAttentionAt: oldestOpenAttentionAt.toISOString(),
+      reasonCodes: ["manual_review", "stale_evaluation"],
+    });
+  });
+});
+
+test("GET / serializes attention: null verbatim", async () => {
+  const items = [syntheticListItem({ attention: null })];
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items,
+    total: 1,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/`);
+    const body = await readJson(res, "GET / response body");
+
+    assert.equal(res.status, 200);
+    const [item] = body.items as Array<Record<string, unknown>>;
+    assert.equal(item?.attention, null);
   });
 });
 

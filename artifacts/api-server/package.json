@@ -14,7 +14,9 @@
     "test:signals": "tsx --test src/services/signals.test.ts src/routes/signals.route.test.ts src/routes/signals.integration.test.ts src/services/identityResolution.test.ts src/routes/signalResolution.route.test.ts src/routes/signalResolution.integration.test.ts",
     "test:signals:unit": "tsx --test src/services/signals.test.ts src/routes/signals.route.test.ts src/services/identityResolution.test.ts src/routes/signalResolution.route.test.ts",
     "test:attention-items": "tsx --test src/services/attentionItems.test.ts src/routes/attentionItems.route.test.ts src/routes/attentionItemResolution.route.test.ts src/routes/attentionItems.integration.test.ts",
-    "test:attention-items:unit": "tsx --test src/services/attentionItems.test.ts src/routes/attentionItems.route.test.ts src/routes/attentionItemResolution.route.test.ts"
+    "test:attention-items:unit": "tsx --test src/services/attentionItems.test.ts src/routes/attentionItems.route.test.ts src/routes/attentionItemResolution.route.test.ts",
+    "test:accounts": "tsx --test src/services/accounts.test.ts src/routes/accounts.route.test.ts src/routes/accounts.integration.test.ts",
+    "test:accounts:unit": "tsx --test src/services/accounts.test.ts src/routes/accounts.route.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

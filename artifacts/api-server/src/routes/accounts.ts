@@ -36,6 +36,12 @@ const MIN_OFFSET = 0;
 // converts, then the usual int/min/max checks apply. Absent fields fall
 // back to their defaults; anything else invalid (non-numeric, out of
 // range, wrong type) is a 400, not a silently-clamped value.
+//
+// needsAttention deliberately uses z.enum(["true", "false"]), never
+// z.coerce.boolean() — coerce.boolean() runs JS's Boolean(string), which
+// is true for ANY non-empty string, including the literal text "false".
+// The enum form makes exactly two spellings legal and rejects everything
+// else (1, yes, TRUE, "") with the same 400 the numeric params get.
 const ListAccountsQuerySchema = z
   .object({
     limit: z.coerce
@@ -45,6 +51,10 @@ const ListAccountsQuerySchema = z
       .max(MAX_LIMIT)
       .default(DEFAULT_LIMIT),
     offset: z.coerce.number().int().min(MIN_OFFSET).default(DEFAULT_OFFSET),
+    needsAttention: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
   })
   .strict();
 
@@ -69,6 +79,7 @@ function sendError(
 export type ListAccountsFn = (args: {
   limit: number;
   offset: number;
+  needsAttention: boolean;
 }) => Promise<AccountListResult>;
 
 export type GetAccountByIdFn = (
@@ -141,10 +152,10 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
       return;
     }
 
-    const { limit, offset } = parsed.data;
+    const { limit, offset, needsAttention } = parsed.data;
 
     try {
-      const result = await listAccountsFn({ limit, offset });
+      const result = await listAccountsFn({ limit, offset, needsAttention });
       res.status(200).json({
         items: result.items,
         pagination: { limit, offset, total: result.total },

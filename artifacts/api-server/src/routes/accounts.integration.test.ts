@@ -41,6 +41,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
 import { createAccountsRouter } from "./accounts.js";
+import { resolveAttentionItem } from "../services/attentionItems.js";
+import { deriveMqlDecisionReadiness } from "../services/mqlDecisionReadiness.js";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const skip = !DATABASE_URL;
@@ -107,6 +109,23 @@ function extractListItemAccountId(item: unknown, context: string): string {
   return item.account.id;
 }
 
+// Scans `items` (an already-narrowed `body.items` array) for the single
+// entry whose account.id matches, re-asserting the record shape along the
+// way rather than trusting extractListItemAccountId's return value alone —
+// callers need the full item (to inspect .attention), not just its id.
+function findListItemByAccountId(
+  items: unknown[],
+  accountId: string,
+  context: string,
+): Record<string, unknown> | undefined {
+  for (const item of items) {
+    assertIsRecord(item, context);
+    assertIsRecord(item.account, `${context}.account`);
+    if (item.account.id === accountId) return item;
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------
 // Ordering helpers
 // ---------------------------------------------------------------------
@@ -121,6 +140,19 @@ const RUN_EPOCH_MS = Date.now();
 const FAR_FUTURE_BASE_MS = Date.UTC(2100, 0, 1);
 function runTimestamp(offsetMs = 0): Date {
   return new Date(FAR_FUTURE_BASE_MS + RUN_EPOCH_MS + offsetMs);
+}
+
+// attention_items.createdAt needs the opposite anchor from runTimestamp
+// above: resolveOpenAttentionItem resolves through the real service, which
+// sets resolved_at to Postgres's real now() — and
+// attention_items_resolved_at_after_created_at requires resolved_at >=
+// created_at. A createdAt anchored to runTimestamp's year-2100 future would
+// always sort ahead of that real now(), tripping the constraint on every
+// resolution. Anchored safely in the past instead, with the same
+// offsetMs-orders-fixtures-relative-to-each-other contract as runTimestamp.
+const PAST_ATTENTION_ITEM_BASE_MS = Date.UTC(2020, 0, 1);
+function attentionItemCreatedAt(offsetMs = 0): Date {
+  return new Date(PAST_ATTENTION_ITEM_BASE_MS + offsetMs);
 }
 
 // Derives two distinct, format-valid UUIDs from one fresh random UUID by
@@ -348,11 +380,54 @@ async function makeEvaluation(
       scoreComponents: [],
       matchedRules: [],
       missingInputs: [],
-      profileConfigSnapshot: { configSchemaVersion: "v1" },
+      profileConfigSnapshot: syntheticProfileConfig(),
       ...overrides,
     })
     .returning();
   return evaluation!;
+}
+
+// Inserted directly (not via ../services/attentionItems.ts's
+// createAttentionItem) so createdAt is controllable per fixture — the same
+// reasoning makeEvaluation above already applies to its own createdAt
+// overrides. reasonCode defaults to a fresh, already-canonical-form
+// (lowercase, no whitespace) value per call so unrelated fixtures never
+// collide against attention_items_open_dedup_without_ref_uq.
+async function makeOpenAttentionItem(
+  accountId: string,
+  overrides: Partial<typeof schema.attentionItems.$inferInsert> = {},
+) {
+  const [item] = await db!
+    .insert(schema.attentionItems)
+    .values({
+      accountId,
+      reasonCode: `accounts-route-test-reason-${crypto.randomUUID()}`,
+      source: "manual",
+      createdBy: `accounts-route-test-${RUN_ID}`,
+      createdAt: attentionItemCreatedAt(),
+      ...overrides,
+    })
+    .returning();
+  return item!;
+}
+
+// Resolution DOES go through the real service (unlike creation above) —
+// the lifecycle trigger only permits one exact UPDATE shape, and
+// resolveAttentionItem already performs it correctly; there's no fixture
+// value worth hand-controlling here the way createdAt is above.
+async function resolveOpenAttentionItem(attentionItemId: string) {
+  const result = await resolveAttentionItem({
+    db: db!,
+    attentionItemId,
+    resolvedBy: `accounts-route-test-${RUN_ID}`,
+    resolutionReason: "resolved by accounts-route integration test",
+  });
+  if (result.kind !== "resolved") {
+    throw new Error(
+      `resolveOpenAttentionItem: expected kind "resolved", got "${result.kind}"`,
+    );
+  }
+  return result.item;
 }
 
 // ---------------------------------------------------------------------
@@ -396,6 +471,16 @@ async function countAccountDecisionsByEvaluationId(
     .select({ value: count() })
     .from(schema.accountDecisions)
     .where(eq(schema.accountDecisions.accountEvaluationId, evaluationId));
+  return Number(row?.value ?? 0);
+}
+
+async function countAttentionItemsByAccountId(
+  accountId: string,
+): Promise<number> {
+  const [row] = await db!
+    .select({ value: count() })
+    .from(schema.attentionItems)
+    .where(eq(schema.attentionItems.accountId, accountId));
   return Number(row?.value ?? 0);
 }
 
@@ -670,6 +755,405 @@ test(
 );
 
 // ---------------------------------------------------------------------
+// GET / — needsAttention
+// ---------------------------------------------------------------------
+
+test(
+  "GET / with no open attention items: the account appears in the default list with attention: null, and is excluded from needsAttention=true",
+  { skip },
+  async () => {
+    const { account } = await makeAccountWithSnapshot();
+
+    await withServer(async (baseUrl) => {
+      const defaultRes = await fetch(`${baseUrl}/?limit=100&offset=0`);
+      assert.equal(defaultRes.status, 200);
+      const defaultBody = await readRecord(
+        defaultRes,
+        "GET /?limit=100&offset=0 response body",
+      );
+      assertIsArray(defaultBody.items, "response body.items");
+      const defaultMatch = findListItemByAccountId(
+        defaultBody.items,
+        account.id,
+        "response body.items[]",
+      );
+      assert.ok(defaultMatch, "the account must appear in the default list");
+      assert.equal(defaultMatch.attention, null);
+
+      const attentionRes = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=100&offset=0`,
+      );
+      assert.equal(attentionRes.status, 200);
+      const attentionBody = await readRecord(
+        attentionRes,
+        "GET /?needsAttention=true&limit=100&offset=0 response body",
+      );
+      assertIsArray(attentionBody.items, "response body.items");
+      const attentionMatch = findListItemByAccountId(
+        attentionBody.items,
+        account.id,
+        "response body.items[]",
+      );
+      assert.equal(
+        attentionMatch,
+        undefined,
+        "an account with no open attention items must not appear in needsAttention=true",
+      );
+    });
+  },
+);
+
+test(
+  "GET / with only a resolved attention item: the account still appears in the default list with attention: null, and is excluded from needsAttention=true",
+  { skip },
+  async () => {
+    const { account } = await makeAccountWithSnapshot();
+    const item = await makeOpenAttentionItem(account.id);
+    await resolveOpenAttentionItem(item.id);
+
+    await withServer(async (baseUrl) => {
+      const defaultRes = await fetch(`${baseUrl}/?limit=100&offset=0`);
+      const defaultBody = await readRecord(
+        defaultRes,
+        "GET /?limit=100&offset=0 response body",
+      );
+      assertIsArray(defaultBody.items, "response body.items");
+      const defaultMatch = findListItemByAccountId(
+        defaultBody.items,
+        account.id,
+        "response body.items[]",
+      );
+      assert.ok(defaultMatch, "the account must appear in the default list");
+      assert.equal(defaultMatch.attention, null);
+
+      const attentionRes = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=100&offset=0`,
+      );
+      const attentionBody = await readRecord(
+        attentionRes,
+        "GET /?needsAttention=true&limit=100&offset=0 response body",
+      );
+      assertIsArray(attentionBody.items, "response body.items");
+      const attentionMatch = findListItemByAccountId(
+        attentionBody.items,
+        account.id,
+        "response body.items[]",
+      );
+      assert.equal(
+        attentionMatch,
+        undefined,
+        "an account whose only attention item is resolved must not appear in needsAttention=true",
+      );
+    });
+  },
+);
+
+test(
+  "GET / needsAttention=true returns exactly one row for an account with multiple open attention items, with a correct openCount/oldestOpenAttentionAt/reasonCodes summary",
+  { skip },
+  async () => {
+    const { account } = await makeAccountWithSnapshot();
+    // Inserted deliberately out of alphabetical order — the oldest
+    // (lowest createdAt) item sorts last alphabetically, so a correct
+    // response can only match if reasonCodes is genuinely sorted
+    // ascending rather than incidentally returned in insertion or
+    // createdAt order.
+    const oldest = await makeOpenAttentionItem(account.id, {
+      reasonCode: `zzz-late-alpha-${crypto.randomUUID()}`,
+      createdAt: attentionItemCreatedAt(1_000),
+    });
+    const second = await makeOpenAttentionItem(account.id, {
+      reasonCode: `aaa-early-alpha-${crypto.randomUUID()}`,
+      createdAt: attentionItemCreatedAt(2_000),
+    });
+    const third = await makeOpenAttentionItem(account.id, {
+      reasonCode: `mmm-mid-alpha-${crypto.randomUUID()}`,
+      createdAt: attentionItemCreatedAt(3_000),
+    });
+    const expectedReasonCodes = [
+      second.reasonCode,
+      third.reasonCode,
+      oldest.reasonCode,
+    ].sort();
+
+    await withServer(async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=100&offset=0`,
+      );
+      const body = await readRecord(
+        res,
+        "GET /?needsAttention=true&limit=100&offset=0 response body",
+      );
+      assertIsArray(body.items, "response body.items");
+
+      const matches = body.items.filter(
+        (item) =>
+          extractListItemAccountId(item, "response body.items[]") ===
+          account.id,
+      );
+      assert.equal(
+        matches.length,
+        1,
+        "an account with multiple open items must appear exactly once",
+      );
+
+      const match = matches[0];
+      assertIsRecord(match, "matching list item");
+      assertIsRecord(match.attention, "matching list item.attention");
+      assert.equal(match.attention.openCount, 3);
+      assertIsString(
+        match.attention.oldestOpenAttentionAt,
+        "matching list item.attention.oldestOpenAttentionAt",
+      );
+      assert.equal(
+        match.attention.oldestOpenAttentionAt,
+        oldest.createdAt.toISOString(),
+      );
+      assert.deepEqual(match.attention.reasonCodes, expectedReasonCodes);
+    });
+  },
+);
+
+test(
+  "GET / needsAttention=true collapses two open items that share the same reasonCode (but differ in source) into one distinct entry",
+  { skip },
+  async () => {
+    const { account } = await makeAccountWithSnapshot();
+    // Same reasonCode on purpose — this is what array_agg(DISTINCT ...)
+    // in ./accounts.ts's listAccounts must collapse. Different `source`
+    // values keep both rows legal under both partial dedup unique
+    // indexes (attention_items_open_dedup_with_ref_uq /
+    // _without_ref_uq are scoped to (account, reasonCode, source[,
+    // sourceRef]) — differing source means neither index's key
+    // collides), so both open items coexist for real, rather than one
+    // insert failing.
+    const sharedReasonCode = `shared-reason-${crypto.randomUUID()}`;
+    const oldest = await makeOpenAttentionItem(account.id, {
+      reasonCode: sharedReasonCode,
+      source: "manual",
+      createdAt: attentionItemCreatedAt(1_000),
+    });
+    await makeOpenAttentionItem(account.id, {
+      reasonCode: sharedReasonCode,
+      source: "identity_resolution",
+      createdAt: attentionItemCreatedAt(2_000),
+    });
+
+    await withServer(async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=100&offset=0`,
+      );
+      const body = await readRecord(
+        res,
+        "GET /?needsAttention=true&limit=100&offset=0 response body",
+      );
+      assertIsArray(body.items, "response body.items");
+
+      const matches = body.items.filter(
+        (item) =>
+          extractListItemAccountId(item, "response body.items[]") ===
+          account.id,
+      );
+      assert.equal(
+        matches.length,
+        1,
+        "an account with two same-reasonCode open items must still appear exactly once",
+      );
+
+      const match = matches[0];
+      assertIsRecord(match, "matching list item");
+      assertIsRecord(match.attention, "matching list item.attention");
+      assert.equal(match.attention.openCount, 2);
+      assertIsString(
+        match.attention.oldestOpenAttentionAt,
+        "matching list item.attention.oldestOpenAttentionAt",
+      );
+      assert.equal(
+        match.attention.oldestOpenAttentionAt,
+        oldest.createdAt.toISOString(),
+      );
+      assert.deepEqual(match.attention.reasonCodes, [sharedReasonCode]);
+    });
+  },
+);
+
+test(
+  "GET / resolving one of multiple open attention items updates the summary but keeps the account in needsAttention=true",
+  { skip },
+  async () => {
+    const { account } = await makeAccountWithSnapshot();
+    const toResolve = await makeOpenAttentionItem(account.id, {
+      reasonCode: `resolve-me-${crypto.randomUUID()}`,
+      createdAt: attentionItemCreatedAt(1_000),
+    });
+    const remaining = await makeOpenAttentionItem(account.id, {
+      reasonCode: `stay-open-${crypto.randomUUID()}`,
+      createdAt: attentionItemCreatedAt(2_000),
+    });
+    await resolveOpenAttentionItem(toResolve.id);
+
+    await withServer(async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=100&offset=0`,
+      );
+      const body = await readRecord(
+        res,
+        "GET /?needsAttention=true&limit=100&offset=0 response body",
+      );
+      assertIsArray(body.items, "response body.items");
+      const match = findListItemByAccountId(
+        body.items,
+        account.id,
+        "response body.items[]",
+      );
+      assert.ok(
+        match,
+        "the account must still appear in needsAttention=true — one item remains open",
+      );
+      assertIsRecord(match.attention, "matching list item.attention");
+      assert.equal(match.attention.openCount, 1);
+      assert.deepEqual(match.attention.reasonCodes, [remaining.reasonCode]);
+      assert.equal(
+        match.attention.oldestOpenAttentionAt,
+        remaining.createdAt.toISOString(),
+      );
+    });
+
+    // Both rows — one resolved, one still open — remain: resolving never
+    // deletes attention_items history.
+    assert.equal(await countAttentionItemsByAccountId(account.id), 2);
+  },
+);
+
+test(
+  "GET / resolving the final open attention item removes the account from needsAttention=true only, and preserves the canonical account and every historical attention row",
+  { skip },
+  async () => {
+    const { account } = await makeAccountWithSnapshot();
+    const item = await makeOpenAttentionItem(account.id);
+    await resolveOpenAttentionItem(item.id);
+
+    await withServer(async (baseUrl) => {
+      const attentionRes = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=100&offset=0`,
+      );
+      const attentionBody = await readRecord(
+        attentionRes,
+        "GET /?needsAttention=true&limit=100&offset=0 response body",
+      );
+      assertIsArray(attentionBody.items, "response body.items");
+      assert.equal(
+        findListItemByAccountId(
+          attentionBody.items,
+          account.id,
+          "response body.items[]",
+        ),
+        undefined,
+        "resolving the only open item must remove the account from needsAttention=true",
+      );
+
+      const defaultRes = await fetch(`${baseUrl}/?limit=100&offset=0`);
+      const defaultBody = await readRecord(
+        defaultRes,
+        "GET /?limit=100&offset=0 response body",
+      );
+      assertIsArray(defaultBody.items, "response body.items");
+      const defaultMatch = findListItemByAccountId(
+        defaultBody.items,
+        account.id,
+        "response body.items[]",
+      );
+      assert.ok(
+        defaultMatch,
+        "the account must still appear in the default (All Accounts) list",
+      );
+      assert.equal(defaultMatch.attention, null);
+    });
+
+    assert.equal(await countAccountsById(account.id), 1);
+    assert.equal(await countAttentionItemsByAccountId(account.id), 1);
+  },
+);
+
+test(
+  "GET / needsAttention=true pagination.total reflects only accounts with at least one open attention item",
+  { skip },
+  async () => {
+    async function fetchNeedsAttentionTotal(baseUrl: string): Promise<number> {
+      const res = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=1&offset=0`,
+      );
+      assert.equal(res.status, 200);
+      const body = await readRecord(
+        res,
+        "GET /?needsAttention=true&limit=1&offset=0 response body",
+      );
+      assertIsRecord(body.pagination, "response body.pagination");
+      assertIsNumber(body.pagination.total, "response body.pagination.total");
+      return body.pagination.total;
+    }
+
+    await withServer(async (baseUrl) => {
+      const totalBefore = await fetchNeedsAttentionTotal(baseUrl);
+
+      // An account with no open attention item must not move the total.
+      await makeAccountWithSnapshot();
+      const totalAfterNonMatching = await fetchNeedsAttentionTotal(baseUrl);
+      assert.equal(totalAfterNonMatching, totalBefore);
+
+      // An account with one open attention item must move the total by
+      // exactly one — proving the count query applies the same EXISTS
+      // filter the page query does, not an unfiltered accounts count.
+      const { account: matchingAccount } = await makeAccountWithSnapshot();
+      await makeOpenAttentionItem(matchingAccount.id);
+      const totalAfterMatching = await fetchNeedsAttentionTotal(baseUrl);
+      assert.equal(totalAfterMatching, totalBefore + 1);
+    });
+  },
+);
+
+test(
+  "GET / needsAttention=true preserves updatedAt desc, id desc ordering",
+  { skip },
+  async () => {
+    const older = await makeAccount({ updatedAt: runTimestamp(0) });
+    await makeOpenAttentionItem(older.id);
+    const { lowerId, higherId } = makeOrderedIdPair();
+    const tieLow = await makeAccount({
+      id: lowerId,
+      updatedAt: runTimestamp(60_000),
+    });
+    await makeOpenAttentionItem(tieLow.id);
+    const tieHigh = await makeAccount({
+      id: higherId,
+      updatedAt: runTimestamp(60_000),
+    });
+    await makeOpenAttentionItem(tieHigh.id);
+    const fixtureIds = new Set([older.id, tieLow.id, tieHigh.id]);
+
+    await withServer(async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/?needsAttention=true&limit=100&offset=0`,
+      );
+      assert.equal(res.status, 200);
+      const body = await readRecord(
+        res,
+        "GET /?needsAttention=true&limit=100&offset=0 response body",
+      );
+      assertIsArray(body.items, "response body.items");
+
+      const relevantIds = body.items
+        .map((item, idx) =>
+          extractListItemAccountId(item, `response body.items[${idx}]`),
+        )
+        .filter((id) => fixtureIds.has(id));
+
+      assert.deepEqual(relevantIds, [tieHigh.id, tieLow.id, older.id]);
+    });
+  },
+);
+
+// ---------------------------------------------------------------------
 // GET /:accountId — detail
 // ---------------------------------------------------------------------
 
@@ -754,9 +1238,18 @@ test(
       const body = await readRecord(res, "GET /:accountId response body");
 
       assert.equal(res.status, 200);
+      // mqlDecisionReadiness is getAccountById's one derived addition on
+      // top of the exact persisted row (see services/accounts.ts's
+      // AccountEvaluationDetail) — computed here via the real
+      // deriveMqlDecisionReadiness, the same function and inputs
+      // getAccountById itself uses, rather than a hand-guessed literal.
+      const expectedEvaluations = [tieHigh, tieLow, older].map((row) => ({
+        ...row,
+        mqlDecisionReadiness: deriveMqlDecisionReadiness(row, snapshot),
+      }));
       assert.deepEqual(
         body.evaluations,
-        JSON.parse(JSON.stringify([tieHigh, tieLow, older])),
+        JSON.parse(JSON.stringify(expectedEvaluations)),
       );
     });
   },
