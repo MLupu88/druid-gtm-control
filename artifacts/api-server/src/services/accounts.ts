@@ -16,13 +16,14 @@
 // mqlDecisionReadiness — its referenced account_snapshots row), never
 // re-running the evaluator itself.
 
-import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, min, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   accounts,
   accountEvaluations,
   accountDecisions,
   accountSnapshots,
+  attentionItems,
   type Account,
   type AccountEvaluation,
   type AccountDecision,
@@ -196,18 +197,35 @@ export type AccountDecisionSummary = Pick<
   "id" | "routingOutput" | "createdAt"
 >;
 
+// GTM V2 Stage 3, Unit 3 — attention_items is the sole source of truth for
+// this; there is no stored attention flag on accounts anywhere. null means
+// zero open attention_items rows for the account (never
+// { openCount: 0, ... } — there is nothing to report an oldest-open
+// timestamp or reason codes for in that case). reasonCodes is the distinct
+// set of open items' reasonCode values, sorted ascending — deterministic
+// regardless of insertion order or how Postgres happened to return them.
+export interface AccountAttentionSummary {
+  openCount: number;
+  oldestOpenAttentionAt: Date;
+  reasonCodes: string[];
+}
+
 export interface AccountListItem {
   account: Account;
   latestEvaluation: AccountEvaluationSummary | null;
   latestProductionEvaluation: AccountEvaluationSummary | null;
   /** The account's most recent decision across all of its evaluations, or null if none exists yet. */
   latestDecision: AccountDecisionSummary | null;
+  /** Derived at read time from attention_items — never a stored column. See AccountAttentionSummary. */
+  attention: AccountAttentionSummary | null;
 }
 
 export interface ListAccountsArgs {
   db: Db;
   limit: number;
   offset: number;
+  /** When true, restricts the base account query (and its count) to accounts with at least one open attention_items row. Applied via EXISTS, before pagination — never a post-fetch filter, so pagination.total and limit/offset stay correct against the filtered set. */
+  needsAttention: boolean;
 }
 
 export interface AccountListResult {
@@ -218,24 +236,53 @@ export interface AccountListResult {
 /**
  * Lists canonical accounts, deterministically ordered (updatedAt desc,
  * id desc), each paired with its newest evaluation (any mode), its newest
- * production evaluation (if any), and its newest decision (if any). Runs
- * exactly five queries total regardless of how many accounts are on the
- * page — one count, one page of accounts, one DISTINCT ON query each for
- * "latest" and "latest production" evaluations, and one DISTINCT ON query
- * for the latest decision — all scoped to just this page's account ids.
- * No per-account querying (no N+1).
+ * production evaluation (if any), its newest decision (if any), and its
+ * open-attention-items summary (if any). Runs exactly six queries total
+ * regardless of how many accounts are on the page — one count, one page of
+ * accounts, one DISTINCT ON query each for "latest" and "latest
+ * production" evaluations, one DISTINCT ON query for the latest decision,
+ * and one GROUP BY aggregate query for open attention items — all scoped
+ * to just this page's account ids. No per-account querying (no N+1); the
+ * attention aggregate is skipped entirely when the page is empty (see the
+ * early return below).
  */
 export async function listAccounts(
   args: ListAccountsArgs,
 ): Promise<AccountListResult> {
-  const { db, limit, offset } = args;
+  const { db, limit, offset, needsAttention } = args;
 
-  const [totalRow] = await db.select({ value: count() }).from(accounts);
+  // EXISTS against attention_items_open_account_idx (account_id) WHERE
+  // status = 'open' — the same partial index the write-path service
+  // (../services/attentionItems.ts) relies on for its own open-item
+  // lookups. Applied identically to the count and page queries below so
+  // pagination.total always matches the actual filtered set; undefined
+  // (the needsAttention=false case) is drizzle's normal "no filter" value
+  // for .where(), matching this file's existing optional-filter pattern.
+  //
+  // Built as a raw sql fragment rather than drizzle's exists(db.select()...)
+  // helper — that helper needs a full query-builder object (one
+  // implementing getSQL()), which a correlated subquery referencing the
+  // outer accounts.id doesn't cleanly express through drizzle's typed
+  // query builder anyway. Table/column objects interpolated into a sql
+  // template render as identifiers, not bound values (same convention
+  // schema/attentionItems.ts's own CHECK constraints use).
+  const openAttentionExistsFilter = needsAttention
+    ? sql`EXISTS (SELECT 1 FROM ${attentionItems} WHERE ${and(
+        eq(attentionItems.accountId, accounts.id),
+        eq(attentionItems.status, "open"),
+      )})`
+    : undefined;
+
+  const [totalRow] = await db
+    .select({ value: count() })
+    .from(accounts)
+    .where(openAttentionExistsFilter);
   const total = Number(totalRow?.value ?? 0);
 
   const accountRows = await db
     .select()
     .from(accounts)
+    .where(openAttentionExistsFilter)
     .orderBy(desc(accounts.updatedAt), desc(accounts.id))
     .limit(limit)
     .offset(offset);
@@ -249,7 +296,7 @@ export async function listAccounts(
   // DISTINCT ON (account_id) — combined with the matching ORDER BY, this
   // is Postgres's native "one row per account_id, the newest by
   // createdAt/id" — no application-side grouping needed.
-  const [latestRows, latestProductionRows, latestDecisionRows] =
+  const [latestRows, latestProductionRows, latestDecisionRows, attentionAggRows] =
     await Promise.all([
       db
         .selectDistinctOn(
@@ -302,6 +349,29 @@ export async function listAccounts(
           desc(accountDecisions.createdAt),
           desc(accountDecisions.id),
         ),
+      // One GROUP BY per account_id — count()/min() aggregate every open
+      // item regardless of how many exist, so an account can never appear
+      // more than once here (satisfies "one row per account" even when
+      // multiple open items exist). array_agg(DISTINCT ...) dedupes
+      // reasonCode server-side; the ascending .sort() below (not an
+      // in-aggregate ORDER BY) is what makes the array's order
+      // deterministic, since array_agg with no ORDER BY has no
+      // guaranteed row order.
+      db
+        .select({
+          accountId: attentionItems.accountId,
+          openCount: count(),
+          oldestOpenAttentionAt: min(attentionItems.createdAt),
+          reasonCodes: sql<string[]>`array_agg(distinct ${attentionItems.reasonCode})`,
+        })
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.accountId, accountIds),
+            eq(attentionItems.status, "open"),
+          ),
+        )
+        .groupBy(attentionItems.accountId),
     ]);
 
   const snapshotById = await loadSnapshotsForReadiness(db, [
@@ -330,6 +400,24 @@ export async function listAccounts(
     ]),
   );
 
+  // count() is a Postgres bigint, which node-postgres returns as a string
+  // (not a JS number) to avoid precision loss — normalize it explicitly
+  // here rather than trust drizzle's SQL<number> compile-time type, same
+  // gotcha as the `total` count above.
+  const attentionByAccountId = new Map(
+    attentionAggRows.map((row) => [
+      row.accountId,
+      {
+        openCount: Number(row.openCount),
+        // Non-null by construction: a GROUP BY row only exists here when
+        // openCount >= 1, and created_at is NOT NULL, so MIN() over a
+        // non-empty group can never itself be null.
+        oldestOpenAttentionAt: row.oldestOpenAttentionAt!,
+        reasonCodes: [...row.reasonCodes].sort(),
+      } satisfies AccountAttentionSummary,
+    ]),
+  );
+
   const items: AccountListItem[] = accountRows.map((account) => ({
     account,
     latestEvaluation: latestByAccountId.get(account.id) ?? null,
@@ -338,6 +426,7 @@ export async function listAccounts(
     latestProductionEvaluation:
       latestProductionByAccountId.get(account.id) ?? null,
     latestDecision: latestDecisionByAccountId.get(account.id) ?? null,
+    attention: attentionByAccountId.get(account.id) ?? null,
   }));
 
   return { items, total };
