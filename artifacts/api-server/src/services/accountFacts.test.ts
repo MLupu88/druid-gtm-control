@@ -65,6 +65,9 @@ interface FakeQueryChain {
   where(...args: unknown[]): FakeQueryChain;
   orderBy(...args: unknown[]): FakeQueryChain;
   limit(...args: unknown[]): FakeQueryChain;
+  // GTM V2 Stage 4, Unit 2: recordAccountFact's account-existence check is
+  // now SELECT ... FOR UPDATE, run inside the transaction.
+  for(...args: unknown[]): FakeQueryChain;
   values(...args: unknown[]): FakeQueryChain;
   onConflictDoNothing(...args: unknown[]): FakeQueryChain;
   onConflictDoUpdate(...args: unknown[]): FakeQueryChain;
@@ -101,6 +104,7 @@ function makeFakeDb(queue: unknown[]): { db: Db; calls: RecordedCall[] } {
       where: (...args) => record("where", args, result),
       orderBy: (...args) => record("orderBy", args, result),
       limit: (...args) => record("limit", args, result),
+      for: (...args) => record("for", args, result),
       values: (...args) => record("values", args, result),
       onConflictDoNothing: (...args) =>
         record("onConflictDoNothing", args, result),

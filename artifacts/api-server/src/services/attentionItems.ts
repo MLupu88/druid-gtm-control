@@ -370,6 +370,51 @@ export async function createAttentionItem(args: CreateAttentionItemArgs): Promis
 }
 
 // ---------------------------------------------------------------------
+// Find — the smallest read helper GTM V2 Stage 4, Unit 2's evaluation
+// resolution lifecycle needs (see
+// ../services/accountEvaluations.ts's applyProductionEvaluationLifecycleEffects):
+// locate the open items a lifecycle event should resolve, before calling
+// resolveAttentionItem on each row individually. Not a general-purpose
+// query builder — scoped to exactly the filters that caller needs.
+// ---------------------------------------------------------------------
+
+export interface FindOpenAttentionItemsArgs {
+  /** The plain pool, or a caller's already-open transaction — same Db | Tx convention as createAttentionItem above. */
+  db: Db | Tx;
+  accountId: string;
+  reasonCode: string;
+  source: AttentionItem["source"];
+}
+
+/**
+ * Returns every currently-open attention_items row matching
+ * (accountId, reasonCode, source). The dedup unique indexes guarantee at
+ * most one open row per (accountId, reasonCode, source, sourceRef)
+ * combination, but a caller scoped to (accountId, reasonCode, source)
+ * alone — as every Unit 2 lifecycle call site is, since evaluation_failed
+ * and evaluation_missing_inputs items are always created with
+ * sourceRef: null — may still legitimately find more than one row if
+ * historical schema/data ever allowed otherwise; this returns all of
+ * them rather than assuming exactly one.
+ */
+export async function findOpenAttentionItems(
+  args: FindOpenAttentionItemsArgs,
+): Promise<AttentionItem[]> {
+  const { db, accountId, reasonCode, source } = args;
+  return db
+    .select()
+    .from(attentionItems)
+    .where(
+      and(
+        eq(attentionItems.accountId, accountId),
+        eq(attentionItems.reasonCode, reasonCode),
+        eq(attentionItems.source, source),
+        eq(attentionItems.status, "open"),
+      ),
+    );
+}
+
+// ---------------------------------------------------------------------
 // Resolve — normalization
 // ---------------------------------------------------------------------
 

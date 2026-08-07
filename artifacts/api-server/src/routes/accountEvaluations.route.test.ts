@@ -75,6 +75,35 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
+// GTM V2 Stage 4, Unit 2: createAccountEvaluation now opens its own
+// db.transaction() around evaluateAndPersistFn/applyLifecycleEffectsFn —
+// this fake db is otherwise unused (evaluateAndPersistFn is always
+// injected below), but needs a working transaction() so that call
+// succeeds rather than throwing "db.transaction is not a function".
+// Invokes its callback with the fake db itself as `tx`, same spirit as
+// ../services/accountFacts.test.ts's own makeFakeDb. For a PRODUCTION
+// request, createAccountEvaluation also does one SELECT (resolve
+// accountId from the snapshot) and one locking SELECT ... FOR UPDATE
+// before calling evaluateAndPersistFn — this fake's select()/for() chain
+// exists so that still succeeds, returning a synthetic accountId no test
+// here cares about (evaluateAndPersistFn is always the injected fake).
+function fakeTransactionalDb() {
+  function chain() {
+    const result = {
+      from: () => result,
+      where: () => result,
+      limit: () => Promise.resolve([{ accountId: "fake-account-id" }]),
+      for: () => Promise.resolve([{ id: "fake-account-id" }]),
+    };
+    return result;
+  }
+  const db = {
+    select: () => chain(),
+    transaction: async (cb: (tx: unknown) => Promise<unknown>) => cb(db),
+  };
+  return db as never;
+}
+
 function buildTestApp(
   deps: Omit<AccountEvaluationsRouterDeps, "db">,
   operator?: Operator,
@@ -89,7 +118,7 @@ function buildTestApp(
     if (operator) req.operator = operator;
     next();
   });
-  app.use("/", createAccountEvaluationsRouter({ db: {} as never, ...deps }));
+  app.use("/", createAccountEvaluationsRouter({ db: fakeTransactionalDb(), ...deps }));
   return app;
 }
 

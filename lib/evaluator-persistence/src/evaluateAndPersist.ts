@@ -29,9 +29,26 @@ import {
 } from "./errors.js";
 import { mapEvaluationResultToInsertRow } from "./mapping.js";
 
+type Db = NodePgDatabase<typeof schema>;
+// Extracts the exact transaction-handle type db.transaction()'s callback
+// receives — same alias shape as
+// ../../artifacts/api-server/src/services/accountEvaluations.ts's own Tx.
+// Needed because GTM V2 Stage 4, Unit 2's createAccountEvaluation calls
+// this function from inside its own already-open transaction, so
+// evaluation persistence and the attention-item lifecycle it triggers
+// commit or roll back together.
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 export interface EvaluateAndPersistArgs {
-  /** Any drizzle db/transaction handle over the @workspace/db schema — passing a `tx` lets a caller nest this inside a larger transaction. */
-  db: NodePgDatabase<typeof schema>;
+  /**
+   * The plain pool, or a caller's already-open transaction. Either way
+   * this function nests its own db.transaction() call below — a real
+   * transaction over the pool, or a SAVEPOINT over an open tx, exactly
+   * like ../../artifacts/api-server/src/services/attentionItems.ts's
+   * createAttentionItem. Passing a `tx` lets a caller nest this inside a
+   * larger transaction.
+   */
+  db: Db | Tx;
   snapshotId: string;
   profileVersionId: string;
   evaluatorVersionId: string;
