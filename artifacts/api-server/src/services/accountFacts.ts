@@ -374,17 +374,33 @@ export async function recordAccountFact(
     );
   }
 
-  const [account] = await db
-    .select({ id: accounts.id })
-    .from(accounts)
-    .where(eq(accounts.id, accountId))
-    .limit(1);
-  if (!account) {
-    throw new AccountNotFoundError(accountId);
-  }
-
   try {
     return await db.transaction(async (tx) => {
+      // GTM V2 Stage 4, Unit 2: FOR UPDATE (not a plain SELECT) as the
+      // very first operation of this transaction, and the very first
+      // touch of this account's row — locks it for the transaction's
+      // whole duration, serializing this fact write against a concurrent
+      // production evaluation's own compare-then-resolve step for
+      // evaluation_stale (see ../services/accountEvaluations.ts's
+      // createAccountEvaluation, which acquires the same lock, on the
+      // same row, equally as its first operation, before it does
+      // anything else). Not for timestamp ordering — nothing here reads
+      // or compares a timestamp — purely mutual exclusion for the
+      // check-then-act race between "does current evidence match this
+      // evaluation's snapshot" and "a new fact is about to change what
+      // current evidence is". Moved inside the transaction (previously a
+      // separate pre-transaction SELECT) specifically so the lock is held
+      // through this whole transaction, not just its own statement.
+      const [account] = await tx
+        .select({ id: accounts.id })
+        .from(accounts)
+        .where(eq(accounts.id, accountId))
+        .limit(1)
+        .for("update");
+      if (!account) {
+        throw new AccountNotFoundError(accountId);
+      }
+
       const [inserted] = await tx
         .insert(accountFacts)
         .values({
