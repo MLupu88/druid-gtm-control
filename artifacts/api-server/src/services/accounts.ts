@@ -72,6 +72,67 @@ async function loadSnapshotsForReadiness(
 }
 
 // ---------------------------------------------------------------------
+// GTM V2 Stage 4, Unit 1 — staleness read model. Derived purely from open
+// attention_items rows (reasonCode: "evaluation_stale", source:
+// "evaluation", sourceRef: the evaluation's id — see
+// ../services/accountFacts.ts's recordAccountFact, the write path that
+// raises these) — no is_stale/is_current column exists or is added here.
+// Attached ONLY to the account's latest completed, production evaluation
+// (listAccounts' latestProductionEvaluation and getAccountById's
+// latestProductionEvaluationStaleness below), never to every historical
+// evaluation row: an older, already-superseded evaluation is never
+// "current" regardless of its own staleness history, so decorating every
+// row would surface a signal with no actionable meaning for anything but
+// the one evaluation that currently matters.
+// ---------------------------------------------------------------------
+
+export interface AccountEvaluationStaleness {
+  stale: boolean;
+  /** The open evaluation_stale attention_items row id, when stale — lets a caller deep-link straight to POST /internal/attention-items/:id/resolve. Always null when not stale. */
+  openAttentionItemId: string | null;
+}
+
+/** Batch-fetches which of the given evaluation ids currently have an open evaluation_stale attention item, keyed by evaluation id (sourceRef) — one query regardless of how many evaluations are on the page, never per-row. Skipped entirely (no query) when evaluationIds is empty, mirroring loadSnapshotsForReadiness's own early return. */
+async function loadOpenStalenessAttentionItemIds(
+  db: Db,
+  evaluationIds: string[],
+): Promise<Map<string, string>> {
+  if (evaluationIds.length === 0) return new Map();
+  const rows = await db
+    .select({ evaluationId: attentionItems.sourceRef, id: attentionItems.id })
+    .from(attentionItems)
+    .where(
+      and(
+        eq(attentionItems.source, "evaluation"),
+        eq(attentionItems.reasonCode, "evaluation_stale"),
+        eq(attentionItems.status, "open"),
+        inArray(attentionItems.sourceRef, evaluationIds),
+      ),
+    );
+  const byEvaluationId = new Map<string, string>();
+  for (const row of rows) {
+    // sourceRef is nullable at the column level (NULL means "no specific
+    // triggering row" for other sources), but every row this query can
+    // match was filtered to source="evaluation" AND reasonCode=
+    // "evaluation_stale" AND sourceRef IN (evaluationIds) — so a non-null
+    // sourceRef is guaranteed here by construction, not merely assumed.
+    if (row.evaluationId !== null) {
+      byEvaluationId.set(row.evaluationId, row.id);
+    }
+  }
+  return byEvaluationId;
+}
+
+function toEvaluationStaleness(
+  evaluationId: string,
+  openAttentionItemIdByEvaluationId: ReadonlyMap<string, string>,
+): AccountEvaluationStaleness {
+  const openAttentionItemId =
+    openAttentionItemIdByEvaluationId.get(evaluationId) ?? null;
+  return { stale: openAttentionItemId !== null, openAttentionItemId };
+}
+
+// ---------------------------------------------------------------------
 // List read-model. Deliberately excludes every jsonb column
 // (profileConfigSnapshot, eligibilityRestrictions, hardDisqualifiers,
 // scoreComponents, matchedRules, missingInputs) — list rows use scalar
@@ -217,10 +278,20 @@ export interface AccountAttentionSummary {
   reasonCodes: string[];
 }
 
+// GTM V2 Stage 4, Unit 1 — the latestProductionEvaluation-only staleness
+// enrichment (see the module comment above AccountEvaluationStaleness).
+// A distinct type from AccountEvaluationSummary, not an optional field
+// added to it, so latestEvaluation (which may itself be a preview or a
+// non-production row staleness was never computed for) can never be
+// mistaken for carrying a meaningful staleness value.
+export type AccountProductionEvaluationSummary = AccountEvaluationSummary & {
+  staleness: AccountEvaluationStaleness;
+};
+
 export interface AccountListItem {
   account: Account;
   latestEvaluation: AccountEvaluationSummary | null;
-  latestProductionEvaluation: AccountEvaluationSummary | null;
+  latestProductionEvaluation: AccountProductionEvaluationSummary | null;
   /** The account's most recent decision across all of its evaluations, or null if none exists yet. */
   latestDecision: AccountDecisionSummary | null;
   /** Derived at read time from attention_items — never a stored column. See AccountAttentionSummary. */
@@ -243,15 +314,20 @@ export interface AccountListResult {
 /**
  * Lists canonical accounts, deterministically ordered (updatedAt desc,
  * id desc), each paired with its newest evaluation (any mode), its newest
- * production evaluation (if any), its newest decision (if any), and its
- * open-attention-items summary (if any). Runs exactly six queries total
- * regardless of how many accounts are on the page — one count, one page of
- * accounts, one DISTINCT ON query each for "latest" and "latest
+ * production evaluation (if any, enriched with its staleness state — see
+ * AccountProductionEvaluationSummary), its newest decision (if any), and
+ * its open-attention-items summary (if any). Runs exactly six queries
+ * total regardless of how many accounts are on the page — one count, one
+ * page of accounts, one DISTINCT ON query each for "latest" and "latest
  * production" evaluations, one DISTINCT ON query for the latest decision,
  * and one GROUP BY aggregate query for open attention items — all scoped
  * to just this page's account ids. No per-account querying (no N+1); the
  * attention aggregate is skipped entirely when the page is empty (see the
- * early return below).
+ * early return below). Two further batched lookups (account_snapshots for
+ * mqlDecisionReadiness, and open evaluation_stale attention_items for
+ * staleness) run afterward, each independently skipped when there is
+ * nothing on the page for it to look up — never counted against the "six"
+ * above, and never per-account.
  */
 export async function listAccounts(
   args: ListAccountsArgs,
@@ -381,11 +457,23 @@ export async function listAccounts(
         .groupBy(attentionItems.accountId),
     ]);
 
-  const snapshotById = await loadSnapshotsForReadiness(db, [
-    ...new Set([
-      ...latestRows.map((row) => row.snapshotId),
-      ...latestProductionRows.map((row) => row.snapshotId),
+  // Run in parallel — independent lookups, both scoped to this page's
+  // rows: snapshotById by snapshot id (across latestRows AND
+  // latestProductionRows), stalenessByEvaluationId by evaluation id
+  // (latestProductionRows only — see the module comment on
+  // AccountEvaluationStaleness for why this is never computed for
+  // latestEvaluation).
+  const [snapshotById, stalenessByEvaluationId] = await Promise.all([
+    loadSnapshotsForReadiness(db, [
+      ...new Set([
+        ...latestRows.map((row) => row.snapshotId),
+        ...latestProductionRows.map((row) => row.snapshotId),
+      ]),
     ]),
+    loadOpenStalenessAttentionItemIds(
+      db,
+      latestProductionRows.map((row) => row.id),
+    ),
   ]);
 
   const latestByAccountId = new Map(
@@ -394,11 +482,19 @@ export async function listAccounts(
       toEvaluationSummary(row, snapshotById.get(row.snapshotId)),
     ]),
   );
-  const latestProductionByAccountId = new Map(
-    latestProductionRows.map((row) => [
-      row.accountId,
-      toEvaluationSummary(row, snapshotById.get(row.snapshotId)),
-    ]),
+  const latestProductionByAccountId = new Map<
+    string,
+    AccountProductionEvaluationSummary | null
+  >(
+    latestProductionRows.map((row) => {
+      const summary = toEvaluationSummary(row, snapshotById.get(row.snapshotId));
+      return [
+        row.accountId,
+        summary
+          ? { ...summary, staleness: toEvaluationStaleness(row.id, stalenessByEvaluationId) }
+          : null,
+      ];
+    }),
   );
   const latestDecisionByAccountId = new Map(
     latestDecisionRows.map(({ accountId, ...decision }) => [
@@ -454,8 +550,10 @@ export type AccountEvaluationDetail = AccountEvaluation & {
 
 export interface AccountDetail {
   account: Account;
-  /** Ordered by createdAt descending, then id descending. */
+  /** Ordered by createdAt descending, then id descending. Exact stored rows — never decorated with staleness (see latestProductionEvaluationStaleness below and the module comment on AccountEvaluationStaleness for why that stays a single top-level field rather than a per-row one). */
   evaluations: AccountEvaluationDetail[];
+  /** Staleness of the account's latest completed, production evaluation — the exact evaluation the first entry of `evaluations` satisfying (status: "completed", evaluationMode: "production") represents, the same row ../services/accountEvaluations.ts's findLatestCompletedProductionEvaluation would return. Derived the same way as listAccounts' AccountProductionEvaluationSummary.staleness. Null when no such evaluation exists yet (preview-only or failed-only accounts) — never a query-failure placeholder. */
+  latestProductionEvaluationStaleness: AccountEvaluationStaleness | null;
 }
 
 export async function getAccountById(
@@ -475,10 +573,26 @@ export async function getAccountById(
     .where(eq(accountEvaluations.accountId, accountId))
     .orderBy(desc(accountEvaluations.createdAt), desc(accountEvaluations.id));
 
-  const snapshotById = await loadSnapshotsForReadiness(
-    db,
-    [...new Set(evaluationRows.map((row) => row.snapshotId))],
+  // evaluationRows is already ordered newest-first, so the first row
+  // satisfying completed+production is the exact same row
+  // ../services/accountEvaluations.ts's findLatestCompletedProductionEvaluation
+  // would separately query for — reusing this already-fetched array
+  // avoids a redundant round trip ("the existing canonical read model",
+  // not a new query).
+  const latestProductionEvaluationRow = evaluationRows.find(
+    (row) => row.status === "completed" && row.evaluationMode === "production",
   );
+
+  const [snapshotById, stalenessByEvaluationId] = await Promise.all([
+    loadSnapshotsForReadiness(
+      db,
+      [...new Set(evaluationRows.map((row) => row.snapshotId))],
+    ),
+    loadOpenStalenessAttentionItemIds(
+      db,
+      latestProductionEvaluationRow ? [latestProductionEvaluationRow.id] : [],
+    ),
+  ]);
 
   const evaluations: AccountEvaluationDetail[] = evaluationRows.map((row) => ({
     ...row,
@@ -488,5 +602,11 @@ export async function getAccountById(
     ),
   }));
 
-  return { account, evaluations };
+  return {
+    account,
+    evaluations,
+    latestProductionEvaluationStaleness: latestProductionEvaluationRow
+      ? toEvaluationStaleness(latestProductionEvaluationRow.id, stalenessByEvaluationId)
+      : null,
+  };
 }

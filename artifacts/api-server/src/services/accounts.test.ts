@@ -17,6 +17,7 @@ import {
   getAccountById,
   type AccountEvaluationSummary,
   type AccountEvaluationDetail,
+  type AccountProductionEvaluationSummary,
 } from "./accounts.js";
 import { deriveMqlDecisionReadiness } from "./mqlDecisionReadiness.js";
 
@@ -181,6 +182,23 @@ function syntheticEvaluation(
     matchedRules: [],
     missingInputs: [],
     ...overrides,
+  };
+}
+
+// GTM V2 Stage 4, Unit 1 — mirrors ./accounts.ts's listAccounts mapping
+// for latestProductionEvaluation specifically: the same expectedSummary
+// shape above, plus the staleness enrichment that ONLY
+// latestProductionEvaluation ever carries. openAttentionItemId defaults
+// to null (not stale) since most fixtures below don't exercise staleness
+// itself — only the wiring/mapping (queue slot present, field attached).
+function expectedProductionSummary(
+  row: RawEvaluationSummaryRow,
+  snapshot: SnapshotRow | undefined,
+  openAttentionItemId: string | null = null,
+): AccountProductionEvaluationSummary {
+  return {
+    ...expectedSummary(row, snapshot),
+    staleness: { stale: openAttentionItemId !== null, openAttentionItemId },
   };
 }
 
@@ -359,6 +377,7 @@ test("listAccounts maps latestEvaluation and latestProductionEvaluation independ
     [], // latestDecision query: neither account has a decision
     [], // attention aggregate query: neither account has an open item
     [snapshot], // batched account_snapshots lookup for the readiness derivation
+    [], // GTM V2 Stage 4, Unit 1: batched staleness lookup — no open evaluation_stale item
   ]);
 
   const result = await listAccounts({
@@ -375,7 +394,7 @@ test("listAccounts maps latestEvaluation and latestProductionEvaluation independ
   assert.equal(itemB?.latestEvaluation, null);
   assert.deepEqual(
     itemB?.latestProductionEvaluation,
-    expectedSummary(latestProductionB, snapshot),
+    expectedProductionSummary(latestProductionB, snapshot),
   );
 });
 
@@ -400,6 +419,7 @@ test("listAccounts: a preview evaluation newer than the latest production evalua
     [], // latestDecision query: no decision yet
     [], // attention aggregate query: no open items
     [snapshot], // batched account_snapshots lookup for the readiness derivation
+    [], // GTM V2 Stage 4, Unit 1: batched staleness lookup — no open evaluation_stale item
   ]);
 
   const result = await listAccounts({
@@ -415,7 +435,7 @@ test("listAccounts: a preview evaluation newer than the latest production evalua
   );
   assert.deepEqual(
     result.items[0]?.latestProductionEvaluation,
-    expectedSummary(productionOlder, snapshot),
+    expectedProductionSummary(productionOlder, snapshot),
   );
 });
 
@@ -434,6 +454,7 @@ test("listAccounts: when the latest evaluation is itself the latest production e
     [],
     [],
     [snapshot],
+    [], // GTM V2 Stage 4, Unit 1: batched staleness lookup — no open evaluation_stale item
   ]);
 
   const result = await listAccounts({
@@ -449,7 +470,7 @@ test("listAccounts: when the latest evaluation is itself the latest production e
   );
   assert.deepEqual(
     result.items[0]?.latestProductionEvaluation,
-    expectedSummary(evaluation, snapshot),
+    expectedProductionSummary(evaluation, snapshot),
   );
 });
 
@@ -466,6 +487,7 @@ test("listAccounts derives intentConfigured=true when the evaluation's profileCo
     [],
     [],
     [syntheticSnapshotRow()],
+    [], // GTM V2 Stage 4, Unit 1: batched staleness lookup — no open evaluation_stale item
   ]);
 
   const result = await listAccounts({
@@ -498,6 +520,7 @@ test("listAccounts derives intentConfigured=false when the evaluation's profileC
     [],
     [],
     [syntheticSnapshotRow()],
+    [], // GTM V2 Stage 4, Unit 1: batched staleness lookup — no open evaluation_stale item
   ]);
 
   const result = await listAccounts({
@@ -523,6 +546,7 @@ test("listAccounts returns latestEvaluation/latestProductionEvaluation: null (ne
     [],
     [],
     [syntheticSnapshotRow()],
+    [], // GTM V2 Stage 4, Unit 1: batched staleness lookup — still fires (latestProductionRows has a row, even though it will map to a null summary below); no open item queued
   ]);
 
   const result = await listAccounts({
@@ -558,6 +582,7 @@ test("listAccounts: an invalid profileConfigSnapshot on one account's evaluation
     [],
     [],
     [snapshot],
+    [], // GTM V2 Stage 4, Unit 1: batched staleness lookup — no open evaluation_stale item (this test doesn't assert latestProductionEvaluation)
   ]);
 
   const result = await listAccounts({
@@ -626,6 +651,103 @@ test("listAccounts issues exactly six queries total regardless of how many accou
     (c) => c.method === "select" || c.method === "selectDistinctOn",
   );
   assert.equal(rootCalls.length, 6);
+});
+
+// ---------------------------------------------------------------------
+// GTM V2 Stage 4, Unit 1 — staleness read model wiring. Real SQL
+// filtering semantics (an older evaluation's stale item never affecting
+// the current one, a resolution actually clearing it) are proven against
+// real Postgres in ./accounts.integration.test.ts — this section covers
+// the batched-query wiring and outcome mapping a fake db can prove.
+// ---------------------------------------------------------------------
+
+test("listAccounts: latestProductionEvaluation.staleness reflects a matching entry from the batched staleness lookup", async () => {
+  const account = syntheticAccount();
+  const evaluation = syntheticEvaluationSummary({ id: "eval-prod-1" });
+  const snapshot = syntheticSnapshotRow();
+  const { db } = makeFakeDb([
+    [{ value: 1 }],
+    [account],
+    [evaluation],
+    [evaluation],
+    [],
+    [],
+    [snapshot],
+    [{ evaluationId: "eval-prod-1", id: "attn-open-1" }],
+  ]);
+
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  assert.deepEqual(result.items[0]?.latestProductionEvaluation?.staleness, {
+    stale: true,
+    openAttentionItemId: "attn-open-1",
+  });
+});
+
+test("listAccounts: latestProductionEvaluation.staleness is false when the batched staleness lookup returns no matching row", async () => {
+  const account = syntheticAccount();
+  const evaluation = syntheticEvaluationSummary({ id: "eval-prod-1" });
+  const snapshot = syntheticSnapshotRow();
+  const { db } = makeFakeDb([
+    [{ value: 1 }],
+    [account],
+    [evaluation],
+    [evaluation],
+    [],
+    [],
+    [snapshot],
+    [], // no open evaluation_stale items at all
+  ]);
+
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  assert.deepEqual(result.items[0]?.latestProductionEvaluation?.staleness, {
+    stale: false,
+    openAttentionItemId: null,
+  });
+});
+
+test("listAccounts: the batched staleness lookup is skipped (no query, no extra queue consumption) when no account on the page has a production evaluation", async () => {
+  const account = syntheticAccount();
+  const previewOnly = syntheticEvaluationSummary({ evaluationMode: "preview" });
+  const snapshot = syntheticSnapshotRow();
+  const { db, calls } = makeFakeDb([
+    [{ value: 1 }],
+    [account],
+    [previewOnly], // latestEvaluation has a row (preview)
+    [], // latestProductionEvaluation: none
+    [],
+    [],
+    [snapshot], // snapshot lookup still fires — latestRows has a snapshot id
+    // deliberately no 8th entry — must never be consumed
+  ]);
+
+  const result = await listAccounts({
+    db,
+    limit: 50,
+    offset: 0,
+    needsAttention: false,
+  });
+
+  assert.equal(result.items[0]?.latestProductionEvaluation, null);
+  const rootCalls = calls.filter(
+    (c) => c.method === "select" || c.method === "selectDistinctOn",
+  );
+  assert.equal(
+    rootCalls.length,
+    7,
+    "count + page + 4 parallel queries + snapshot lookup only — no staleness query",
+  );
 });
 
 // ---------------------------------------------------------------------
@@ -733,7 +855,11 @@ test("getAccountById returns the account with its exact evaluation rows in deter
     createdAt: new Date("2026-01-01T00:00:00Z"),
   });
   const snapshot = syntheticSnapshotRow();
-  const { db, calls } = makeFakeDb([[account], [newer, older], [snapshot]]);
+  // newer/older both default to status:"completed", evaluationMode:
+  // "production" (see syntheticEvaluationSummary) — newer is therefore the
+  // latestProductionEvaluationRow (first in already-sorted-desc order), so
+  // GTM V2 Stage 4, Unit 1's batched staleness lookup fires a 4th query.
+  const { db, calls } = makeFakeDb([[account], [newer, older], [snapshot], []]);
 
   const result = await getAccountById(db, account.id);
 
@@ -742,6 +868,10 @@ test("getAccountById returns the account with its exact evaluation rows in deter
     expectedEvaluationDetail(newer, snapshot),
     expectedEvaluationDetail(older, snapshot),
   ]);
+  assert.deepEqual(result?.latestProductionEvaluationStaleness, {
+    stale: false,
+    openAttentionItemId: null,
+  });
   const evaluationsOrderByCall = calls.find(
     (c, idx) =>
       c.method === "orderBy" &&
@@ -749,4 +879,59 @@ test("getAccountById returns the account with its exact evaluation rows in deter
   );
   assert.ok(evaluationsOrderByCall);
   assert.equal(evaluationsOrderByCall!.args.length, 2);
+});
+
+// ---------------------------------------------------------------------
+// GTM V2 Stage 4, Unit 1 — getAccountById's latestProductionEvaluationStaleness.
+// ---------------------------------------------------------------------
+
+test("getAccountById: latestProductionEvaluationStaleness is null when the account has no completed production evaluation", async () => {
+  const account = syntheticAccount();
+  const previewEval = syntheticEvaluation({
+    id: "eval-preview",
+    evaluationMode: "preview",
+  });
+  // Only 3 queue entries: account, evaluationRows, snapshot lookup — the
+  // staleness lookup must be skipped entirely (0 ids), never consuming a
+  // 4th slot, since no row here is completed+production.
+  const { db } = makeFakeDb([[account], [previewEval], []]);
+
+  const result = await getAccountById(db, account.id);
+
+  assert.equal(result?.latestProductionEvaluationStaleness, null);
+});
+
+test("getAccountById: latestProductionEvaluationStaleness targets the newest completed+production row specifically, ignoring a newer preview row and an older completed+production row", async () => {
+  const account = syntheticAccount();
+  const newestPreview = syntheticEvaluation({
+    id: "eval-preview-newest",
+    evaluationMode: "preview",
+    createdAt: new Date("2026-03-01T00:00:00Z"),
+  });
+  const newestProduction = syntheticEvaluation({
+    id: "eval-production-newest",
+    evaluationMode: "production",
+    createdAt: new Date("2026-02-01T00:00:00Z"),
+  });
+  const olderProduction = syntheticEvaluation({
+    id: "eval-production-older",
+    evaluationMode: "production",
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+  });
+  const snapshot = syntheticSnapshotRow();
+  const { db } = makeFakeDb([
+    [account],
+    // Already sorted desc, as the real ORDER BY (createdAt desc, id desc)
+    // would return.
+    [newestPreview, newestProduction, olderProduction],
+    [snapshot],
+    [{ evaluationId: "eval-production-newest", id: "attn-1" }],
+  ]);
+
+  const result = await getAccountById(db, account.id);
+
+  assert.deepEqual(result?.latestProductionEvaluationStaleness, {
+    stale: true,
+    openAttentionItemId: "attn-1",
+  });
 });

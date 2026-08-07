@@ -20,15 +20,27 @@
 //     need; a follow-up SELECT (only reached when the UPDATE affected zero
 //     rows) classifies not_found vs. replayed vs. conflict.
 //
-// Neither function wraps its write in an explicit transaction — each path
-// is exactly one write statement, with the two partial unique indexes,
-// the row lock the UPDATE itself takes, and the
-// attention_items_lifecycle_guard trigger (0011_attention_items_lifecycle.sql)
-// as the final authority. The trigger permits no UPDATE shape other than
-// a well-formed open -> resolved transition; this service's own
-// WHERE status = 'open' guard exists so the common "already resolved"
-// case is a normal zero-row UPDATE result, never a caught trigger
-// exception.
+// resolveAttentionItem wraps its write in no explicit transaction — it is
+// exactly one write statement, with the row lock the UPDATE itself takes
+// and the attention_items_lifecycle_guard trigger
+// (0011_attention_items_lifecycle.sql) as the final authority. The trigger
+// permits no UPDATE shape other than a well-formed open -> resolved
+// transition; this service's own WHERE status = 'open' guard exists so the
+// common "already resolved" case is a normal zero-row UPDATE result, never
+// a caught trigger exception.
+//
+// createAttentionItem DOES wrap its INSERT in a nested db.transaction()
+// (see below) — not for its own sake, but so the function is safe to call
+// with a caller-supplied `tx` handle already inside an outer transaction
+// (see ../services/accountFacts.ts's recordAccountFact, GTM V2 Stage 4,
+// Unit 1: the account-fact write and an evaluation_stale attention item
+// must commit atomically). When `db` is the plain pool this nested
+// transaction is a normal top-level transaction — functionally identical
+// to the single auto-committed statement this used to be. When `db` is
+// already an outer `tx`, it becomes a SAVEPOINT: a caught dedup-conflict
+// on the INSERT rolls back only that savepoint, never the caller's outer
+// work, and a genuine (non-dedup) failure propagates out to roll back the
+// caller's outer transaction too — exactly the atomicity Unit 1 needs.
 //
 // Only imports from @workspace/db/schema, never @workspace/db itself — the
 // database instance is always received via explicit injection, mirroring
@@ -40,6 +52,13 @@ import type * as schema from "@workspace/db/schema";
 import { accounts, attentionItems, type AttentionItem } from "@workspace/db/schema";
 
 type Db = NodePgDatabase<typeof schema>;
+// Extracts the exact transaction-handle type db.transaction()'s callback
+// receives — structurally the same query-builder surface as Db, but a
+// distinct drizzle-orm class, so a function that must accept either (the
+// plain pool, or a caller's already-open transaction) has to be typed
+// against this union rather than Db alone. Exact mirror of
+// ../services/identityResolution.ts's own Tx type alias.
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 // ---------------------------------------------------------------------
 // Errors
@@ -150,7 +169,8 @@ function isAttentionItemDedupConflict(err: unknown): boolean {
 // ---------------------------------------------------------------------
 
 export interface CreateAttentionItemArgs {
-  db: Db;
+  /** The plain pool, or a caller's already-open transaction (see the module comment above) — createAttentionItem nests its INSERT in its own db.transaction() either way, so both are safe. */
+  db: Db | Tx;
   accountId: string;
   reasonCode: string;
   reasonDetail: string | null;
@@ -237,7 +257,7 @@ export type CreateAttentionItemResult =
   | { outcome: "conflict"; existingItem: AttentionItem };
 
 async function fetchExistingOpenAttentionItem(
-  db: Db,
+  db: Db | Tx,
   accountId: string,
   reasonCode: string,
   source: AttentionItem["source"],
@@ -271,6 +291,20 @@ async function fetchExistingOpenAttentionItem(
  * resulting 23505, re-reads the open row the winner committed, and decides
  * duplicate vs. conflict via isDuplicateOfExisting. Never updates or
  * overwrites an existing row.
+ *
+ * The INSERT itself runs inside its own nested `db.transaction()` (a real
+ * transaction when `db` is the plain pool; a SAVEPOINT when `db` is
+ * already a caller's outer transaction — see the module comment above).
+ * The `catch` below is deliberately OUTSIDE that nested transaction call,
+ * not wrapped around it from the inside: a Postgres statement error
+ * poisons its entire enclosing transaction/savepoint until an explicit
+ * ROLLBACK (TO SAVEPOINT), and drizzle-orm only issues that rollback once
+ * the thrown error propagates out of the `db.transaction()` callback. Only
+ * once control reaches this outer `catch` — after that rollback has
+ * already happened — is `db` guaranteed query-able again for the
+ * classification SELECT below. Catching inside the callback instead would
+ * leave the scope poisoned and turn a benign dedup race into a raw
+ * "current transaction is aborted" error.
  */
 export async function createAttentionItem(args: CreateAttentionItemArgs): Promise<CreateAttentionItemResult> {
   const { db } = args;
@@ -285,23 +319,26 @@ export async function createAttentionItem(args: CreateAttentionItemArgs): Promis
     throw new AttentionAccountNotFoundError(normalized.accountId);
   }
 
+  let inserted: AttentionItem;
   try {
-    const [inserted] = await db
-      .insert(attentionItems)
-      .values({
-        accountId: normalized.accountId,
-        reasonCode: normalized.reasonCode,
-        reasonDetail: normalized.reasonDetail,
-        source: normalized.source,
-        sourceRef: normalized.sourceRef,
-        context: normalized.context,
-        createdBy: normalized.createdBy,
-      })
-      .returning();
-    if (!inserted) {
-      throw new Error("createAttentionItem: insert into attention_items returned no row.");
-    }
-    return { outcome: "created", item: inserted };
+    inserted = await db.transaction(async (spTx) => {
+      const [row] = await spTx
+        .insert(attentionItems)
+        .values({
+          accountId: normalized.accountId,
+          reasonCode: normalized.reasonCode,
+          reasonDetail: normalized.reasonDetail,
+          source: normalized.source,
+          sourceRef: normalized.sourceRef,
+          context: normalized.context,
+          createdBy: normalized.createdBy,
+        })
+        .returning();
+      if (!row) {
+        throw new Error("createAttentionItem: insert into attention_items returned no row.");
+      }
+      return row;
+    });
   } catch (err) {
     if (!isAttentionItemDedupConflict(err)) {
       throw err;
@@ -328,6 +365,8 @@ export async function createAttentionItem(args: CreateAttentionItemArgs): Promis
     }
     return { outcome: "conflict", existingItem: existing };
   }
+
+  return { outcome: "created", item: inserted };
 }
 
 // ---------------------------------------------------------------------

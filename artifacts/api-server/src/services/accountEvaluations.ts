@@ -11,7 +11,7 @@
 // This is what lets these functions (and anything that imports this
 // module) be unit-tested without a real Postgres connection.
 
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   accountEvaluations,
@@ -26,6 +26,14 @@ import {
 } from "./icpEvaluationResolvers.js";
 
 type Db = NodePgDatabase<typeof schema>;
+// Extracts the exact transaction-handle type db.transaction()'s callback
+// receives — structurally the same query-builder surface as Db, but a
+// distinct drizzle-orm class. findLatestCompletedProductionEvaluation
+// below must accept either, since ../services/accountFacts.ts's
+// recordAccountFact calls it from inside its own open transaction (GTM V2
+// Stage 4, Unit 1). Exact mirror of ../services/identityResolution.ts's
+// own Tx type alias.
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export type EvaluateAndPersistFn = typeof realEvaluateAndPersist;
 
@@ -83,6 +91,51 @@ export const getAccountEvaluationById: GetAccountEvaluationByIdFn = async (
     .limit(1);
   return row;
 };
+
+/**
+ * Retrieves the single evaluation an account currently has "on the books"
+ * for real decision-making purposes — the exact completed+production
+ * concept this module's own top-of-file comment on evaluationMode already
+ * names as "the only evaluations account_decisions may ever reference" and
+ * accountDecisions.ts's createAccountDecision already gates on. Never a
+ * preview evaluation (evaluationMode filter) and never a failed one
+ * (status filter) — an evaluation that failed or ran in preview mode was
+ * never "current" for any decision-relevant purpose, regardless of how
+ * recent it is. When the account's most recent production evaluation is
+ * itself 'failed' but an older 'completed' production evaluation exists,
+ * that older row is still returned here — it remains the account's real
+ * official evaluation until a newer one completes.
+ *
+ * Ties (identical createdAt, which the column's own timestamp resolution
+ * makes possible) are broken by id descending — the same deterministic
+ * tie-break already used throughout ../services/accounts.ts's DISTINCT ON
+ * queries — so exactly one row is ever "the" latest.
+ *
+ * Accepts either the plain pool or a caller's already-open transaction
+ * (see the Tx type above) — GTM V2 Stage 4, Unit 1's staleness trigger
+ * (../services/accountFacts.ts's recordAccountFact) calls this from
+ * inside its own transaction so the lookup and the resulting
+ * evaluation_stale attention item observe a consistent snapshot of
+ * account_evaluations.
+ */
+export async function findLatestCompletedProductionEvaluation(
+  db: Db | Tx,
+  accountId: string,
+): Promise<AccountEvaluation | undefined> {
+  const [row] = await db
+    .select()
+    .from(accountEvaluations)
+    .where(
+      and(
+        eq(accountEvaluations.accountId, accountId),
+        eq(accountEvaluations.status, "completed"),
+        eq(accountEvaluations.evaluationMode, "production"),
+      ),
+    )
+    .orderBy(desc(accountEvaluations.createdAt), desc(accountEvaluations.id))
+    .limit(1);
+  return row;
+}
 
 export interface RunPreviewIcpEvaluationForAccountArgs {
   db: Db;
