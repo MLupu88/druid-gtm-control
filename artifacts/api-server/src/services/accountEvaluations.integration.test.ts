@@ -479,8 +479,14 @@ test(
       profileId: malformedProfile.id,
     });
 
+    // Capture the complete open-attention-item baseline before the preview
+    // runs — deliberately not hard-coded to a specific count. Besides
+    // evaluation_stale + evaluation_failed, an open evaluation_missing_inputs
+    // item may already legitimately exist here too (GTM V2 Stage 4 Unit 2:
+    // syntheticProfileConfigWithIndustryFit's fit rule has no
+    // company.industry fact yet at the first evaluation, so that first
+    // evaluation's own missingInputs is non-empty).
     const openBefore = await openAttentionItems(account.id);
-    assert.equal(openBefore.length, 2); // evaluation_stale + evaluation_failed
 
     await runPreviewIcpEvaluationForAccount({
       db: db!,
@@ -491,7 +497,7 @@ test(
     const openAfter = await openAttentionItems(account.id);
     assert.equal(
       openAfter.length,
-      2,
+      openBefore.length,
       "a preview evaluation must not create, resolve, or otherwise touch any attention item",
     );
     assert.deepEqual(

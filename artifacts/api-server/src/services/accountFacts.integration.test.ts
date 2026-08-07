@@ -144,6 +144,29 @@ async function makeRootFact(
   return fact!;
 }
 
+// Filters to exactly the evaluation_stale condition Unit 1 tests exercise —
+// status = open, reasonCode = evaluation_stale, source = evaluation,
+// sourceRef = the given evaluation id. Deliberately narrower than "all open
+// attention items for the account": GTM V2 Stage 4 Unit 2
+// (applyProductionEvaluationLifecycleEffects) may legitimately also have an
+// open evaluation_missing_inputs item for the same account/evaluation
+// (whenever the evaluation's own missingInputs is non-empty), which is not
+// what these tests are about.
+async function openEvaluationStaleItems(accountId: string, evaluationId: string) {
+  return db!
+    .select()
+    .from(schema.attentionItems)
+    .where(
+      and(
+        eq(schema.attentionItems.accountId, accountId),
+        eq(schema.attentionItems.status, "open"),
+        eq(schema.attentionItems.reasonCode, "evaluation_stale"),
+        eq(schema.attentionItems.source, "evaluation"),
+        eq(schema.attentionItems.sourceRef, evaluationId),
+      ),
+    );
+}
+
 function syntheticProfileConfigWithIndustryFitAndIntent() {
   return {
     configSchemaVersion: "v1",
@@ -260,15 +283,7 @@ test(
       correctionReason: null,
     });
 
-    const openAfterFirst = await db!
-      .select()
-      .from(schema.attentionItems)
-      .where(
-        and(
-          eq(schema.attentionItems.accountId, account.id),
-          eq(schema.attentionItems.status, "open"),
-        ),
-      );
+    const openAfterFirst = await openEvaluationStaleItems(account.id, evaluation.id);
     assert.equal(openAfterFirst.length, 1);
     assert.equal(openAfterFirst[0]?.reasonCode, "evaluation_stale");
     assert.equal(openAfterFirst[0]?.source, "evaluation");
@@ -288,15 +303,7 @@ test(
       correctionReason: "corrected",
     });
 
-    const openAfterSecond = await db!
-      .select()
-      .from(schema.attentionItems)
-      .where(
-        and(
-          eq(schema.attentionItems.accountId, account.id),
-          eq(schema.attentionItems.status, "open"),
-        ),
-      );
+    const openAfterSecond = await openEvaluationStaleItems(account.id, evaluation.id);
     assert.equal(
       openAfterSecond.length,
       1,
@@ -331,11 +338,8 @@ test(
       correctionReason: null,
     });
 
-    const openItems = await db!
-      .select()
-      .from(schema.attentionItems)
-      .where(eq(schema.attentionItems.accountId, account.id));
-    assert.equal(openItems.length, 0);
+    const staleItems = await openEvaluationStaleItems(account.id, evaluation.id);
+    assert.equal(staleItems.length, 0);
   },
 );
 
@@ -460,21 +464,13 @@ test(
       .where(eq(schema.accountFacts.accountId, account.id));
     assert.equal(facts.length, 2, "both concurrent fact writes must have committed");
 
-    const openItems = await db!
-      .select()
-      .from(schema.attentionItems)
-      .where(
-        and(
-          eq(schema.attentionItems.accountId, account.id),
-          eq(schema.attentionItems.status, "open"),
-        ),
-      );
+    const openStaleItems = await openEvaluationStaleItems(account.id, evaluation.id);
     assert.equal(
-      openItems.length,
+      openStaleItems.length,
       1,
-      "the concurrent dedup race must converge to exactly one open item, not two",
+      "the concurrent dedup race must converge to exactly one open evaluation_stale item, not two",
     );
-    assert.equal(openItems[0]?.sourceRef, evaluation.id);
+    assert.equal(openStaleItems[0]?.sourceRef, evaluation.id);
   },
 );
 
