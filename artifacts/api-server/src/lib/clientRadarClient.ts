@@ -161,6 +161,16 @@ function presentString(value: string | null | undefined): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
+// RFC 4122-shaped uuid, any version/variant — deliberately not
+// version-pinned (e.g. "4" only): the durable identity link this guards
+// (see ../services/clientRadarAccountAlias.ts) only needs a stable,
+// well-formed uuid, not a specific generation scheme.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/gtm/research-runs
 // ---------------------------------------------------------------------------
@@ -343,6 +353,16 @@ export interface ClientRadarResultAccount {
   country: string | null;
   industry: string | null;
   account: Record<string, unknown> | null;
+  /**
+   * Client Radar's own account.id (its Postgres uuid primary key) —
+   * strictly validated here, never a generic non-empty-string check.
+   * Non-null exactly when `account` is non-null: Client Radar may
+   * legitimately return account: null (no account matched/created yet
+   * for this company), in which case there is nothing to validate and no
+   * durable identity link is possible for this result. See
+   * ../services/clientRadarAccountAlias.ts, the only consumer.
+   */
+  clientRadarAccountId: string | null;
   evidence: {
     items: ClientRadarEvidenceItem[];
     total: number;
@@ -412,6 +432,22 @@ function parseResultAccount(value: unknown): ClientRadarResultAccount {
       ? (record.account as Record<string, unknown>)
       : null;
 
+  // Required whenever account is present — a completed result that names
+  // an account but carries no valid Client Radar account id must fail
+  // parsing, not silently proceed without durable identity linkage (see
+  // ../services/clientRadarAccountAlias.ts, which depends on this id
+  // being trustworthy).
+  let clientRadarAccountId: string | null = null;
+  if (account !== null) {
+    if (!isUuid(account.id)) {
+      throw new ClientRadarApiError(
+        502,
+        "Client Radar account result is missing a valid account id.",
+      );
+    }
+    clientRadarAccountId = account.id;
+  }
+
   const evidence =
     typeof record.evidence === "object" && record.evidence !== null
       ? (record.evidence as Record<string, unknown>)
@@ -430,6 +466,7 @@ function parseResultAccount(value: unknown): ClientRadarResultAccount {
     country: nullableString(record.country),
     industry: nullableString(record.industry),
     account,
+    clientRadarAccountId,
     evidence: {
       items: evidence.items.map(parseEvidenceItem),
       total: evidence.total,
@@ -437,7 +474,13 @@ function parseResultAccount(value: unknown): ClientRadarResultAccount {
   };
 }
 
-function parseResultResponse(data: unknown): ClientRadarResultResponse {
+// Exported (only) so ./clientRadarClient.test.ts can exercise the
+// account.id validation directly against synthetic JSON, without a real
+// network call or CLIENT_RADAR_BASE_URL/CLIENT_RADAR_API_TOKEN — mirrors
+// this repo's convention of exporting parsing/normalization logic
+// specifically for direct unit testing (see
+// ../services/attentionItems.ts's normalizeCreateAttentionItemInput).
+export function parseResultResponse(data: unknown): ClientRadarResultResponse {
   if (typeof data !== "object" || data === null) {
     throw new ClientRadarApiError(
       502,

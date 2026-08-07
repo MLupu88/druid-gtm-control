@@ -29,9 +29,16 @@ import {
   submitClientRadarResearch,
   getClientRadarResearchStatus,
   getClientRadarResearchResult,
+  type ClientRadarResultAccount,
 } from "../lib/clientRadarClient";
+import { linkClientRadarAccountAlias } from "./clientRadarAccountAlias";
+import { createAttentionItem } from "./attentionItems";
 
 type Db = NodePgDatabase<typeof schema>;
+// Extracts the exact transaction-handle type db.transaction()'s callback
+// receives — same convention as ../services/attentionItems.ts's and
+// ../services/clientRadarAccountAlias.ts's own Tx alias.
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 type ResearchRunStatus = ClientRadarResearchRun["status"];
 
@@ -433,6 +440,48 @@ export async function refreshClientRadarResearchRun(
 // already-completed row without going through the status endpoint again.
 // ---------------------------------------------------------------------
 
+const CLIENT_RADAR_IDENTITY_CONFLICT_REASON_CODE = "client_radar_identity_conflict";
+
+/**
+ * Raises (or replays into) an open client_radar_identity_conflict
+ * attention item when linkClientRadarAccountAlias reports that Client
+ * Radar's account.id is already strongly aliased to a DIFFERENT GTM
+ * account. sourceRef is the Client Radar account id (not this research
+ * run's id), so repeated syncs — of this run or any later run for the
+ * same GTM account that resolves to the same conflicting Client Radar
+ * account — dedupe onto the same open item rather than raising a new one
+ * each time (see ../services/attentionItems.ts's createAttentionItem,
+ * whose own dedup key is exactly (accountId, reasonCode, source,
+ * sourceRef)). context deliberately carries only small, stable
+ * identifiers an operator needs to investigate — never the raw research
+ * payload. Always called with the SAME open transaction the run's
+ * completion update ran in, relying on createAttentionItem's
+ * nested-transaction/savepoint support — a genuine (non-dedup) failure
+ * here propagates out and rolls back the completion write too.
+ */
+async function raiseClientRadarIdentityConflictAttention(
+  tx: Tx,
+  accountId: string,
+  clientRadarAccountId: string,
+  conflictingAccountId: string,
+  researchRunId: string,
+): Promise<void> {
+  await createAttentionItem({
+    db: tx,
+    accountId,
+    reasonCode: CLIENT_RADAR_IDENTITY_CONFLICT_REASON_CODE,
+    reasonDetail: null,
+    source: "client_radar",
+    sourceRef: clientRadarAccountId,
+    context: {
+      clientRadarAccountId,
+      conflictingAccountId,
+      researchRunId,
+    },
+    createdBy: "system:client_radar",
+  });
+}
+
 /**
  * Assumes exactly one account per run: startClientRadarResearch always
  * submits a single company (companies: [company]), so a completed result
@@ -498,20 +547,81 @@ export async function syncClientRadarResearchResult(
   }
 
   const [result] = response.accounts;
+  return persistCompletedClientRadarResult(db, researchRunId, now, result);
+}
 
-  const [updated] = await db
-    .update(clientRadarResearchRunsTable)
-    .set({
-      status: "completed",
-      completedAt: now,
-      lastPolledAt: now,
-      updatedAt: now,
-      accountPayload: result.account,
-      evidencePayload: result.evidence.items,
-      lastError: null,
-    })
-    .where(eq(clientRadarResearchRunsTable.id, researchRunId))
-    .returning();
+/**
+ * Local completion work only — the outbound HTTP fetch that produced
+ * `result` must already have happened before this is called (mirrors
+ * this file's own startClientRadarResearch/submitAndPersist convention:
+ * a non-rollback-able side effect must run before, never inside, a
+ * transaction that could still roll back afterward). Persists
+ * accountPayload/evidencePayload and links the Client Radar account-id
+ * alias (or raises its conflict attention item) atomically in one
+ * db.transaction() — extracted from ../services/clientRadarResearchRuns.ts's
+ * syncClientRadarResearchResult specifically so this local-only logic is
+ * directly testable without mocking the HTTP layer (see
+ * ./clientRadarResearchRuns.test.ts). An unexpected error from
+ * linkClientRadarAccountAlias or createAttentionItem (a real
+ * programming/DB error, not the expected conflict outcome) propagates out
+ * of this callback and rolls back the payload update too — the run is
+ * never left "completed" with a payload but a half-attempted, unrecorded
+ * identity link.
+ */
+export async function persistCompletedClientRadarResult(
+  db: Db,
+  researchRunId: string,
+  now: Date,
+  result: ClientRadarResultAccount,
+): Promise<ClientRadarResearchRun> {
+  return await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(clientRadarResearchRunsTable)
+      .set({
+        status: "completed",
+        completedAt: now,
+        lastPolledAt: now,
+        updatedAt: now,
+        accountPayload: result.account,
+        evidencePayload: result.evidence.items,
+        lastError: null,
+      })
+      .where(eq(clientRadarResearchRunsTable.id, researchRunId))
+      .returning();
 
-  return updated;
+    if (!updated) {
+      throw new Error(
+        `persistCompletedClientRadarResult: update to client_radar_research_runs returned no row for id "${researchRunId}".`,
+      );
+    }
+
+    // result.clientRadarAccountId is null exactly when Client Radar
+    // returned no account for this company yet — nothing to link, and
+    // that is not a failure (see ../lib/clientRadarClient.ts's
+    // ClientRadarResultAccount doc comment).
+    if (result.clientRadarAccountId) {
+      const aliasResult = await linkClientRadarAccountAlias({
+        db: tx,
+        accountId: updated.accountId,
+        clientRadarAccountId: result.clientRadarAccountId,
+      });
+
+      // linked / already_linked: the identity link exists (or already
+      // did) — nothing further to do. The completed research payload
+      // persists either way; only a genuine conflict withholds the
+      // alias, never accountFacts (this function never touches
+      // accountFacts) and never the run's own completed status.
+      if (aliasResult.outcome === "conflict") {
+        await raiseClientRadarIdentityConflictAttention(
+          tx,
+          updated.accountId,
+          result.clientRadarAccountId,
+          aliasResult.conflictingAccountId,
+          updated.id,
+        );
+      }
+    }
+
+    return updated;
+  });
 }
