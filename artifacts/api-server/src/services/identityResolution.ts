@@ -45,27 +45,40 @@
 // @workspace/db itself — the database instance is always received via
 // explicit injection, mirroring every other service in this package.
 
-import { createHash } from "node:crypto";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "@workspace/db/schema";
 import {
-  accounts,
-  accountAliases,
   accountPeople,
   people,
   signals,
   identityResolutionEvents,
-  type Account,
-  type AccountAlias,
   type IdentityResolutionEvent,
 } from "@workspace/db/schema";
 import {
   NormalizedSignalV1Schema,
-  type SignalCompanyV1,
   type SignalPersonV1,
   type SignalResolutionLevelV1,
 } from "@workspace/identity";
+import {
+  applyCanonicalAccountResolutionPlan,
+  canonicalSourceKey,
+  finalizeCanonicalAccountResolution,
+  planCanonicalAccountResolution,
+  type AccountCandidateMatch,
+  type AccountPlan,
+  type AccountResolution,
+} from "./canonicalAccountResolution.js";
+
+export {
+  buildAccountKey,
+  buildCompanyIdentifierPairs,
+  buildExternalAccountKey,
+  canonicalSourceKey,
+  type AccountPlan,
+  type AccountResolution,
+  type CompanyIdentifierPair,
+} from "./canonicalAccountResolution.js";
 
 type Db = NodePgDatabase<typeof schema>;
 // Extracts the exact transaction-handle type db.transaction()'s callback
@@ -159,99 +172,10 @@ function isKnownRaceViolation(err: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------
-// Pure helpers — identifier collection, key/token construction. No db
-// access; each is independently unit-testable. Every collection here is
-// returned in a fixed, deterministic order (never raw JSON/object key
-// iteration order) so multi-row inserts derived from them acquire
-// unique-index locks in the same order across concurrent transactions,
-// reducing deadlock risk (see isKnownRaceViolation above for the
-// remaining, now-retryable exposure).
+// Pure person helper. Provider-neutral account helpers now live in
+// ./canonicalAccountResolution.ts and are re-exported above to preserve
+// this module's existing public surface.
 // ---------------------------------------------------------------------
-
-export function canonicalSourceKey(raw: string): string {
-  return raw.trim().toLowerCase();
-}
-
-export interface CompanyIdentifierPair {
-  aliasType: string;
-  normalizedValue: string;
-  rawValue: string;
-  identifierType: "domain" | "external_id";
-  source?: string;
-}
-
-function comparePairs(a: CompanyIdentifierPair, b: CompanyIdentifierPair): number {
-  return (
-    a.aliasType.localeCompare(b.aliasType) ||
-    a.normalizedValue.localeCompare(b.normalizedValue) ||
-    a.rawValue.localeCompare(b.rawValue)
-  );
-}
-
-/** Every strong company identifier the signal carries, sorted deterministically (aliasType, then normalizedValue, then rawValue) — company.name is deliberately never included, per Core Rule 2 (company-name-only must never auto-bind). */
-export function buildCompanyIdentifierPairs(company: SignalCompanyV1): CompanyIdentifierPair[] {
-  const pairs: CompanyIdentifierPair[] = [];
-  if (company.domain) {
-    pairs.push({ aliasType: "domain", normalizedValue: company.domain, rawValue: company.domain, identifierType: "domain" });
-  }
-  for (const [rawSource, value] of Object.entries(company.externalIds)) {
-    const source = canonicalSourceKey(rawSource);
-    pairs.push({
-      aliasType: `external_id:${source}`,
-      normalizedValue: value,
-      rawValue: value,
-      identifierType: "external_id",
-      source,
-    });
-  }
-  return pairs.sort(comparePairs);
-}
-
-/**
- * Collision-safe, delimiter-free, fixed-length key for an external-only
- * account — SHA-256 over the JSON-encoded (canonicalSource, externalId)
- * tuple, exactly mirroring @workspace/identity's own
- * buildSignalDedupeKey (JSON.stringify, not raw string concatenation,
- * so neither input's content can make two different pairs collide).
- * Independent of provider value length and never exposes the raw
- * source/external-ID value in the key itself — those remain visible
- * only on the strong account_aliases row, the actual identity
- * authority.
- */
-export function buildExternalAccountKey(canonicalSource: string, externalId: string): string {
-  const canonical = JSON.stringify([canonicalSource, externalId]);
-  const hash = createHash("sha256").update(canonical, "utf8").digest("hex");
-  return `ext:v1:${hash}`;
-}
-
-/**
- * account_key construction: `dom:<normalized-domain>` when a domain
- * exists — the pre-existing repository convention (see
- * bootstrapProductionData.ts), not a bare domain — otherwise
- * `buildExternalAccountKey` over the external ID whose source key
- * matches the signal's own source, or (when several external IDs exist
- * and none aligns) the lexicographically-first source key. account_key
- * is a human-legible label only — strong account_aliases rows remain
- * the actual binding authority, never this key.
- */
-export function buildAccountKey(
-  domain: string | null,
-  externalIds: Record<string, string>,
-  signalSource: string,
-): string {
-  if (domain) return `dom:${domain}`;
-
-  const entries = Object.entries(externalIds)
-    .map(([rawSource, value]) => ({ source: canonicalSourceKey(rawSource), value }))
-    .sort((a, b) => a.source.localeCompare(b.source) || a.value.localeCompare(b.value));
-  const canonicalSignalSource = canonicalSourceKey(signalSource);
-  const aligned = entries.find((e) => e.source === canonicalSignalSource);
-  const chosen = aligned ?? entries[0];
-  if (!chosen) {
-    throw new Error("buildAccountKey: no domain or external identifier available.");
-  }
-  return buildExternalAccountKey(chosen.source, chosen.value);
-}
 
 /**
  * The single external_id/external_id_source pair a new/matched person row
@@ -282,42 +206,13 @@ export function selectPersonExternalIdForPersistence(
 // candidateMatches — structured, non-PII conflict evidence only.
 // ---------------------------------------------------------------------
 
-export interface CandidateMatch {
-  entityType: "account" | "person";
-  identifierType: "domain" | "external_id" | "work_email";
+export interface PersonCandidateMatch {
+  entityType: "person";
+  identifierType: "external_id" | "work_email";
   matchedId: string;
   source?: string;
 }
-
-/**
- * Merges alias-table candidates with legacy/bootstrap direct-account
- * candidates (accounts matched by account_key/company_domain with no
- * alias row at all) into one deduplicated, deterministically-ordered
- * candidate list. Direct-account candidates are always domain-shaped,
- * since the compatibility lookup itself is domain-only.
- */
-function buildAccountConflictCandidates(aliasRows: AccountAlias[], directRows: Account[]): CandidateMatch[] {
-  const byAccount = new Map<string, CandidateMatch>();
-  for (const row of aliasRows) {
-    const isDomain = row.aliasType === "domain";
-    const candidate: CandidateMatch = {
-      entityType: "account",
-      identifierType: isDomain ? "domain" : "external_id",
-      matchedId: row.accountId,
-      ...(isDomain ? {} : { source: row.aliasType.slice("external_id:".length) }),
-    };
-    const existing = byAccount.get(row.accountId);
-    if (!existing || (isDomain && existing.identifierType !== "domain")) {
-      byAccount.set(row.accountId, candidate);
-    }
-  }
-  for (const row of directRows) {
-    if (!byAccount.has(row.id)) {
-      byAccount.set(row.id, { entityType: "account", identifierType: "domain", matchedId: row.id });
-    }
-  }
-  return [...byAccount.values()].sort((a, b) => a.matchedId.localeCompare(b.matchedId));
-}
+export type CandidateMatch = AccountCandidateMatch | PersonCandidateMatch;
 
 interface PersonMatchRow {
   personId: string;
@@ -334,7 +229,7 @@ function buildPersonConflictCandidates(matches: PersonMatchRow[]): CandidateMatc
     }
   }
   return [...byPerson.entries()]
-    .map(([personId, m]): CandidateMatch => ({
+    .map(([personId, m]): PersonCandidateMatch => ({
       entityType: "person",
       identifierType: m.kind === "work_email" ? "work_email" : "external_id",
       matchedId: personId,
@@ -360,19 +255,6 @@ function extractCandidateIds(value: unknown): string[] {
 // correction: outcome/resolutionLevel/accountId/personId are the only
 // fields real-ID equivalence ever hinges on for resolved outcomes.
 // ---------------------------------------------------------------------
-
-export type AccountResolution =
-  | {
-      outcome: "unresolved";
-      reasonToken: "no_strong_company_identity" | "account_identifier_conflict";
-      candidateMatches: CandidateMatch[] | null;
-    }
-  | {
-      outcome: "resolved";
-      accountId: string;
-      matchAction: "matched" | "created";
-      methodToken: "account_domain" | "account_external_id" | "account_created";
-    };
 
 export type PersonResolution =
   | { attempted: false }
@@ -505,128 +387,6 @@ export function isSemanticallyEquivalent(
 }
 
 // ---------------------------------------------------------------------
-// PLANNING (read-only) — account
-// ---------------------------------------------------------------------
-
-export type AccountPlan =
-  | {
-      outcome: "unresolved";
-      reasonToken: "no_strong_company_identity" | "account_identifier_conflict";
-      candidateMatches: CandidateMatch[] | null;
-    }
-  | {
-      outcome: "matched";
-      accountId: string;
-      methodToken: "account_domain" | "account_external_id";
-      missingAliasPairs: CompanyIdentifierPair[];
-    }
-  | {
-      outcome: "create";
-      accountKey: string;
-      companyDomain: string | null;
-      companyName: string | null;
-      aliasPairs: CompanyIdentifierPair[];
-      methodToken: "account_created";
-    };
-
-function aliasPairKey(aliasType: string, normalizedValue: string): string {
-  return `${aliasType} ${normalizedValue}`;
-}
-
-function aliasInsertValues(accountId: string, pair: CompanyIdentifierPair, signalSource: string) {
-  return {
-    accountId,
-    aliasType: pair.aliasType,
-    rawValue: pair.rawValue,
-    normalizedValue: pair.normalizedValue,
-    normalizationStrategy: pair.identifierType === "domain" ? ("domain" as const) : ("exact" as const),
-    isStrong: true,
-    source: signalSource,
-  };
-}
-
-/**
- * Read-only: never inserts anything. Evaluates every strong-alias match
- * PLUS (when a domain is supplied) a direct accounts.account_key/
- * company_domain lookup — the legacy/bootstrap compatibility path (see
- * this file's module comment) — before deciding match vs. create.
- * Deduplicates every candidate account id from both sources; more than
- * one distinct id (whether alias-vs-alias or alias-vs-direct) is an
- * account_identifier_conflict, never a guess.
- */
-async function planAccountResolution(
-  tx: Tx,
-  company: SignalCompanyV1,
-  signalSource: string,
-): Promise<AccountPlan> {
-  const pairs = buildCompanyIdentifierPairs(company);
-  if (pairs.length === 0) {
-    return { outcome: "unresolved", reasonToken: "no_strong_company_identity", candidateMatches: null };
-  }
-
-  const aliasRows = await tx
-    .select()
-    .from(accountAliases)
-    .where(
-      and(
-        eq(accountAliases.isStrong, true),
-        or(
-          ...pairs.map((p) =>
-            and(eq(accountAliases.aliasType, p.aliasType), eq(accountAliases.normalizedValue, p.normalizedValue)),
-          ),
-        ),
-      ),
-    );
-
-  let directRows: Account[] = [];
-  if (company.domain) {
-    const domain = company.domain;
-    directRows = await tx
-      .select()
-      .from(accounts)
-      .where(or(eq(accounts.accountKey, `dom:${domain}`), eq(accounts.accountKey, domain), eq(accounts.companyDomain, domain)));
-  }
-
-  const distinctAccountIds = new Set<string>([
-    ...aliasRows.map((r) => r.accountId),
-    ...directRows.map((r) => r.id),
-  ]);
-
-  if (distinctAccountIds.size > 1) {
-    return {
-      outcome: "unresolved",
-      reasonToken: "account_identifier_conflict",
-      candidateMatches: buildAccountConflictCandidates(aliasRows, directRows),
-    };
-  }
-
-  if (distinctAccountIds.size === 1) {
-    const accountId = [...distinctAccountIds][0]!;
-    const methodToken =
-      directRows.length > 0 || aliasRows.some((r) => r.aliasType === "domain") ? "account_domain" : "account_external_id";
-
-    const matchedKeys = new Set(aliasRows.map((r) => aliasPairKey(r.aliasType, r.normalizedValue)));
-    const missingAliasPairs = pairs.filter((p) => !matchedKeys.has(aliasPairKey(p.aliasType, p.normalizedValue)));
-
-    return { outcome: "matched", accountId, methodToken, missingAliasPairs };
-  }
-
-  // No candidate at all — create. Any unique-violation (or deadlock) on
-  // the writes this plan implies is a genuine cross-signal race,
-  // deliberately left uncaught here so it propagates out of the whole
-  // transaction — see resolveSignal's retry loop.
-  const accountKey = buildAccountKey(company.domain, company.externalIds, signalSource);
-  return {
-    outcome: "create",
-    accountKey,
-    companyDomain: company.domain,
-    companyName: company.name,
-    aliasPairs: pairs,
-    methodToken: "account_created",
-  };
-}
-
-// ---------------------------------------------------------------------
 // PLANNING (read-only) — person. Attempted only when the caller already
 // resolved (matched or planned-to-create) an account.
 // ---------------------------------------------------------------------
@@ -730,18 +490,6 @@ async function planPersonResolution(tx: Tx, person: SignalPersonV1, signalSource
 // plan, using the id APPLY actually produced or matched).
 // ---------------------------------------------------------------------
 
-function finalizeAccountResolution(
-  plan: Extract<AccountPlan, { outcome: "matched" } | { outcome: "create" }>,
-  accountId: string,
-): AccountResolution {
-  return {
-    outcome: "resolved",
-    accountId,
-    matchAction: plan.outcome === "create" ? "created" : "matched",
-    methodToken: plan.outcome === "create" ? "account_created" : plan.methodToken,
-  };
-}
-
 function finalizePersonResolution(
   plan: Extract<PersonPlan, { outcome: "matched" } | { outcome: "create" }>,
   personId: string,
@@ -773,50 +521,6 @@ export interface ResolveSignalTestHooks {
   beforeAccountAliasInsert?: () => Promise<void>;
   /** Invoked immediately before a brand-new person is inserted. */
   beforePersonInsert?: () => Promise<void>;
-}
-
-// ---------------------------------------------------------------------
-// APPLY (writes) — account
-// ---------------------------------------------------------------------
-
-async function applyAccountPlan(
-  tx: Tx,
-  plan: AccountPlan,
-  signalSource: string,
-  hooks: ResolveSignalTestHooks,
-): Promise<{ accountId: string | null; resolution: AccountResolution }> {
-  if (plan.outcome === "unresolved") {
-    return {
-      accountId: null,
-      resolution: { outcome: "unresolved", reasonToken: plan.reasonToken, candidateMatches: plan.candidateMatches },
-    };
-  }
-
-  if (plan.outcome === "matched") {
-    if (plan.missingAliasPairs.length > 0) {
-      await tx
-        .insert(accountAliases)
-        .values(plan.missingAliasPairs.map((p) => aliasInsertValues(plan.accountId, p, signalSource)))
-        .onConflictDoNothing({
-          target: [accountAliases.aliasType, accountAliases.normalizedValue],
-          where: sql`${accountAliases.isStrong} = true`,
-        });
-    }
-    return { accountId: plan.accountId, resolution: finalizeAccountResolution(plan, plan.accountId) };
-  }
-
-  // plan.outcome === "create"
-  await hooks.beforeAccountAliasInsert?.();
-  const [createdAccount] = await tx
-    .insert(accounts)
-    .values({ accountKey: plan.accountKey, companyDomain: plan.companyDomain, companyName: plan.companyName })
-    .returning();
-  if (!createdAccount) {
-    throw new Error("identityResolution: insert into accounts returned no row.");
-  }
-  await tx.insert(accountAliases).values(plan.aliasPairs.map((p) => aliasInsertValues(createdAccount.id, p, signalSource)));
-
-  return { accountId: createdAccount.id, resolution: finalizeAccountResolution(plan, createdAccount.id) };
 }
 
 // ---------------------------------------------------------------------
@@ -922,7 +626,11 @@ async function attemptResolve(
   const signalSource = canonicalSignal.source;
 
   // ---- PLANNING (read-only; no writes below this point until APPLY) ----
-  const accountPlan = await planAccountResolution(tx, canonicalSignal.company, signalSource);
+  const accountPlan = await planCanonicalAccountResolution(
+    tx,
+    canonicalSignal.company,
+    signalSource,
+  );
 
   let personPlan: PersonPlan = { attempted: false };
   if (accountPlan.outcome !== "unresolved" && canonicalSignal.person !== null) {
@@ -940,7 +648,7 @@ async function attemptResolve(
     if (accountPlan.outcome === "unresolved") {
       accountResolution = { outcome: "unresolved", reasonToken: accountPlan.reasonToken, candidateMatches: accountPlan.candidateMatches };
     } else if (accountPlan.outcome === "matched") {
-      accountResolution = finalizeAccountResolution(accountPlan, accountPlan.accountId);
+      accountResolution = finalizeCanonicalAccountResolution(accountPlan, accountPlan.accountId);
     } else {
       throw new Error("identityResolution: unreachable — forceApply must be true for a create plan.");
     }
@@ -967,7 +675,8 @@ async function attemptResolve(
   }
 
   // ---- APPLY (writes) — reached only when a new event will actually be appended ----
-  const { accountId, resolution: accountResolutionFinal } = await applyAccountPlan(tx, accountPlan, signalSource, hooks);
+  const { accountId, resolution: accountResolutionFinal } =
+    await applyCanonicalAccountResolutionPlan(tx, accountPlan, signalSource, hooks);
 
   let personId: string | null = null;
   let personResolutionFinal: PersonResolution = { attempted: false };
