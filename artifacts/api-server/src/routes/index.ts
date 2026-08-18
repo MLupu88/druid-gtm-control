@@ -15,6 +15,7 @@ import { createSignalsRouter } from "./signals";
 import { createSignalResolutionRouter } from "./signalResolution";
 import { createAttentionItemsRouter } from "./attentionItems";
 import { createAttentionItemResolutionRouter } from "./attentionItemResolution";
+import { createHubSpotCompanySyncRouter } from "./hubSpotCompanySync";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireServiceAuth } from "../middlewares/requireServiceAuth";
 
@@ -85,6 +86,11 @@ router.use(
   createIcpProfilesRouter({ db }),
 );
 router.use("/internal/accounts", requireAuth, createAccountsRouter({ db }));
+router.use(
+  "/internal/hubspot/company-sync",
+  requireAuth,
+  createHubSpotCompanySyncRouter({ db }),
+);
 router.use(
   "/internal/account-decisions",
   requireAuth,
