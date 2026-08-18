@@ -1,5 +1,30 @@
 # Product Roadmap
 
+> **2026-08-18 audit update.** This document was last substantively edited at
+> commit `5f866b0` and described "Current Product State" only through PR #27.
+> Sixteen more PRs have merged to `main` since, including ten (`#34`-`#43`)
+> implementing an entirely separate, previously undocumented architecture
+> track referred to in code/migration comments as **"GTM V2"** — signal
+> ingestion, identity resolution, attention items, evaluation staleness/
+> resolution, and Client Radar account mapping. A full read-only audit
+> (`PROJECT_AUDIT.md`) has now reconciled that track with this roadmap. See
+> the new **"GTM V2 — Signal, Identity & Attention Track"** section below and
+> **"Roadmap Corrections / Reclassified Work"** near the end of this
+> document. Everything below this notice is otherwise unchanged from the
+> pre-audit version except where a correction section explicitly says so —
+> per the audit's instructions, existing content is preserved, not rewritten.
+>
+> **2026-08-18 correction pass.** A follow-up review of the initial audit
+> flagged several imprecise claims, now corrected in place: the GTM↔Client
+> Radar call path (direct HTTP, not via n8n), the duplicate-account
+> mechanism (a weak/name-only signal was incorrectly said to be able to
+> create an account — it cannot), a new **"Current Verified State —
+> 2026-08-18"** section immediately below (so a fresh AI session reads
+> present-tense truth before historical PR #27 content), and two new
+> discrepancies (whether real signals reach GTM V2 at all, and a
+> Needs-Attention/MQL-Dismiss lifecycle conflict) — see `PROJECT_AUDIT.md`
+> DISC-07/DISC-08.
+
 This roadmap covers the **complete connected product**, spanning two separate
 applications, repositories, and deployments:
 
@@ -8,9 +33,17 @@ applications, repositories, and deployments:
 2. **Client Radar** (separate repository, separate deployment) — the
    research/enrichment service that Mission Control hands accounts off to.
 
-They are connected via an n8n orchestration boundary and a handoff contract,
-**not** by shared code, a shared database, or a shared deployment. Nothing in
-this roadmap merges the two repositories.
+n8n is a broader GTM orchestration boundary used for other functions (legacy
+signal intake/scoring, outbound activation dispatch) — it is **not** the call
+path between Mission Control and Client Radar specifically. That call path is
+a direct, authenticated HTTP integration from Mission Control's own API
+server to Client Radar's API (verified in code — zero n8n imports/calls exist
+anywhere in the Client Radar service files; see `PROJECT_AUDIT.md` §C).
+*(Corrected 2026-08-18 — this line previously stated the two products were
+connected "via an n8n orchestration boundary and a handoff contract," which
+did not hold for the implemented call path.)* The two products are **not**
+connected by shared code, a shared database, or a shared deployment either
+way. Nothing in this roadmap merges the two repositories.
 
 This file is the authoritative planning document for both products. It does
 not replace or simplify any previously defined architecture — it consolidates
@@ -28,7 +61,31 @@ asserted.
 
 ---
 
-## Current Product State (as of PR #27)
+## Current Verified State — 2026-08-18
+
+*This is the authoritative present-tense summary. Read this section, not the
+historical section below it, for "what is true right now." The section below
+("Historical Product State — Snapshot after PR #27") is preserved for
+historical continuity but describes the product as of an older commit and
+must not be read as current status on its own — a fresh AI/developer session
+should treat this section as overriding it wherever they conflict. Full
+evidence for every line below is in `PROJECT_AUDIT.md`.*
+
+- **Canonical accounts, ICP profiles/versions, and single-profile evaluation** are implemented and live in the product (`artifacts/druid-gtm` frontend against session-authenticated API routes) — this part of the historical section below remains accurate.
+- **A separate "GTM V2" backend track** (signal ingestion, identity resolution, attention items, evaluation staleness/resolution, Client Radar account mapping — 10 PRs, `#34`-`#43`) is implemented and unit-tested at the API/schema level. See the "GTM V2" section further below.
+- **The GTM V2 attention backend has zero frontend consumer.** The live "Needs Attention" UI still runs entirely on the older Sheet + `account_decisions` model described in the historical section below.
+- **Resolved signals/identity data does not feed ICP evaluation.** Evaluation input is built only from bare account identity plus manually-entered facts.
+- **Whether real operational signals (RB2B, Dealfront, a legacy n8n workflow, or anything else) currently reach the GTM V2 ingestion endpoint at all is UNKNOWN / REQUIRES RUNTIME VERIFICATION.** No caller of it was found anywhere in this repository. This must not be assumed either way.
+- **Client Radar** (Mission Control side only — the separate Client Radar repository was not audited): a real, direct HTTP integration exists for research submission, status, evidence display, and durable account-alias mapping. No candidate-fact/accept-reject layer exists at all.
+- **Multi-ICP-profile orchestration** (automatic multi-profile evaluation, comparison, best-profile recommendation) is not built — only single-profile authoring/evaluation is complete.
+- **Production runtime state is unverified.** Production builds from its own server-side git checkout rather than a pinned CI image, so the commit actually running in production is not guaranteed to equal this repository's `main` HEAD without an explicit, unattempted read-only check.
+
+See `PROJECT_AUDIT.md` for full citations and the "GTM V2" and "Roadmap
+Corrections / Reclassified Work" sections below for detail.
+
+---
+
+## Historical Product State — Snapshot after PR #27
 
 PR #27 (`feat/accounts-icp-completion`, commits `eb7eb87` and `4f0c193`) is
 **merged to `main`**. This section describes what that leaves the product
@@ -247,6 +304,79 @@ Corresponds to Packages 10–12 and 15 below.
 
 ---
 
+## GTM V2 — Signal, Identity & Attention Track (2026-08-18 audit addition)
+
+*GTM Mission Control, `artifacts/api-server` + `lib/db`. This section is new
+as of the 2026-08-18 audit — it did not exist in any markdown file before
+that audit. Its stage/unit structure was reconstructed entirely from code
+and migration comments (`grep -rn "GTM V2 Stage\|GTM V2 Unit"`), not from any
+prior planning document. Full evidence in `PROJECT_AUDIT.md` §Q.*
+
+Ten PRs (`#34`-`#43`) merged to `main` between the "Historical Product
+State — Snapshot after PR #27" snapshot above and this audit, building a
+parallel canonical foundation for
+signal ingestion, identity resolution, and operational attention — separate
+from, and not yet connected to, the ICP evaluation and product-surface work
+described elsewhere in this roadmap.
+
+| Stage.Unit | PR | What it built | Verified status |
+|---|---|---|---|
+| Unit 1 | #34 | `signals` / `identity_resolution_events` / `account_aliases` / `account_people` / `people` schema foundation | ✅ Verified implemented |
+| Unit 2 | #35 | Idempotent signal ingestion API (`POST /internal/signals`) | ✅ Verified implemented |
+| Unit 3 | #36 | Deterministic runtime identity resolution (domain/external-id/email matching, conflict detection, replay-safe) | ✅ Verified implemented |
+| Stage 2, Unit 4 | #37 | Current identity binding read model | ✅ Verified implemented |
+| Stage 3, Unit 1 | #38 | `attention_items` lifecycle schema (open→resolved, DB-enforced, dedup) | ✅ Verified implemented |
+| Stage 3, Unit 2 | #39 | Attention item create/resolve service API | ✅ Verified implemented |
+| Stage 3, Unit 3 | #40 | Account attention read models (`needsAttention` filter + `AccountAttentionSummary` on `GET /internal/accounts`) | ✅ Verified implemented (backend) — **not consumed by the frontend at all; see correction below** |
+| Stage 4, Unit 1 | #41 | Evaluation staleness lifecycle (`account_facts` change → `evaluation_stale` attention item) | ✅ Verified implemented |
+| Stage 4, Unit 2 | #42 | Evaluation resolution lifecycle (causal auto-resolve of evaluation attention items) | ✅ Verified implemented |
+| Stage 5, Unit 1 | #43 | Durable Client Radar account mapping (via `account_aliases`) | ✅ Verified implemented |
+
+**Two questions this track's own correctness does NOT answer** (added in the
+2026-08-18 correction pass — see `PROJECT_AUDIT.md` DISC-07):
+
+- **A. Implemented contract (verified):** if a correctly-shaped signal reaches `POST /internal/signals`, the resolution logic itself is correct — covered by 30+ passing unit tests.
+- **B. Unverified live bridge:** whether any real operational signal source (RB2B, Dealfront, a legacy n8n workflow, or anything else) currently delivers a signal to that endpoint at all. **No caller of it exists anywhere in this repository.** This is a distinct, unresolved question from A, and this track's test coverage is not evidence for B.
+
+**What this track does NOT yet do** (see `PROJECT_AUDIT.md` §F, §G, DISC-02,
+DISC-03, DISC-06, DISC-08 for full evidence):
+
+- Resolved signals, identified people, and attention items have **no effect
+  on ICP evaluation** — the evaluation input builder
+  (`icpEvaluationResolvers.ts`) never reads `signals`, `identity_resolution_events`,
+  or `account_people`; it only reads `accounts` + manually-entered
+  `account_facts`. The evaluator's own `NormalizedEngagementV1Schema` and
+  `intent` rule dimension are fully built to receive exactly this data — it
+  is simply never wired.
+- The attention/accounts read model this track built (Stage 3) has **no
+  frontend consumer** — the live "Needs Attention" view still runs entirely
+  on the older Sheet + `accountDecisions.routingOutput` model this roadmap
+  describes above. **Additionally, MQL/Dismiss decisions do not resolve
+  attention items** (`accountDecisions.ts` never touches `attention_items`),
+  and the attention-item resolve endpoint is service-auth-gated, unreachable
+  from the browser session — so a naive frontend wiring that reuses the old
+  "hide once decided" logic would be wrong under the canonical model. See
+  DISC-08.
+- No orphaned/unresolved signal can currently be re-attached to a
+  newly-matched account, and no account-merge mechanism exists. **Corrected
+  mechanism** (a company-name-only signal can never create an account —
+  verified in code, `identityResolution.ts:192-208, 557-565`): duplicates
+  instead arise from (1) an account created outside the resolver (e.g.
+  bootstrap import) that a later signal identified only by a non-domain
+  strong identifier cannot find, or (2) two different strong identifiers for
+  the same real company that never co-occur on one signal. See DISC-06.
+
+**Recommended sequencing (revised in the correction pass — see
+`PROJECT_AUDIT.md` §R):** (1) implementation now — wire the Stage 3 attention
+read model's *membership* into the frontend, read-only, without the old
+MQL/Dismiss local-state logic (DISC-08); (2) verification, in parallel, not a
+prerequisite for (1) — runtime-verify whether any real signal reaches GTM V2
+ingestion at all (DISC-07); (3) product decision, after (2) — what should
+feed Intent scoring (DISC-02). See `NEXT_SESSION.md` for the operational
+detail.
+
+---
+
 ## Permanent invariants
 
 Carried forward unconditionally — not one-time migration steps:
@@ -265,8 +395,8 @@ Carried forward unconditionally — not one-time migration steps:
 ## Detailed Scope and Historical Package Reference
 
 This section preserves the full package-level detail, acceptance criteria,
-and dependency history that "Current Product State" and "Next Delivery
-Sequence" above summarize. Status labels have been updated to reflect
+and dependency history that "Historical Product State — Snapshot after PR
+#27" and "Next Delivery Sequence" above summarize. Status labels have been updated to reflect
 what's actually merged to `main`; detailed requirements are otherwise left
 intact even where their foundation is now complete, since they still define
 the acceptance bar for remaining/related work.
@@ -344,7 +474,8 @@ contract):**
 
 **Status:** partially implemented as scattered, tested logic across the
 frontend (see Package 1), plus canonical persistence for decisions and
-evaluations delivered through PR #27 (see "Current Product State" above).
+evaluations delivered through PR #27 (see "Historical Product State —
+Snapshot after PR #27" above).
 Formalizing the full `message_context` contract into one canonical,
 persisted object is still required work, and is a hard dependency for
 Package 6 (Client Radar composer enrichment) — enrichment may not bypass or
@@ -390,7 +521,8 @@ open and is carried forward into Packages 2 and 3.
 **Status update:** Phase 0 (rule discovery), Phase 1 (persistent canonical
 records), Phase 2 (canonical deterministic evaluator), and account-level
 profile selection/evaluation preview/evaluation history (mounted via PR #23)
-are merged to `main` — see "Current Product State" above. Phase 3 (decision
+are merged to `main` — see "Historical Product State — Snapshot after PR
+#27" above. Phase 3 (decision
 and routing policy) is delivered for MQL/Dismiss specifically (PR #27); the
 full routing set (Sales Review, Pipeline Assist, Owner Alert, Retarget,
 Nurture, Suppressed) is carried forward into Next Delivery Sequence #1.
@@ -550,16 +682,28 @@ MQLs, new disqualifications, unchanged accounts).
 
 *GTM Mission Control.*
 
-**Status update:** the canonical-records foundation this package depends on
-(Package 2, Phase 1) is merged to `main`, and Accounts/Needs Attention now
-operate on it — the description below of a "mock-data / Sheets-backed"
-Queue view is superseded; see "Current Product State" above. What remains
-open from this package is the full set of independent, database-derived
-operational queues (MQL, Sales Review, Pipeline Assist, Owner Alert,
-Retarget, Nurture, Suppressed, failed/incomplete, missing identity/
-enrichment, re-score review) beyond Accounts/Needs Attention, plus the forms
-and persistence behaviors below not yet confirmed built. This is Next
-Delivery Sequence #1. It also completes the canonical `message_context`
+**Status update (precision-corrected 2026-08-18 — see `PROJECT_AUDIT.md`
+DISC-03):** the canonical-records foundation this package depends on
+(Package 2, Phase 1) is merged to `main`. **Accounts** is fully canonical —
+every canonically resolved company lives there, backed by persisted
+records. **Needs Attention is only partially canonical, and in a different
+sense than the newer GTM V2 work below implies.** As of PR #27, Needs
+Attention became "an operational view inside Accounts" filtered by canonical
+`account_decisions` (see "Historical Product State" above) — a real
+improvement over a raw Sheets-only queue, but its underlying data source is
+still the Sheet-backed incoming queue joined to canonical accounts/decisions,
+**not** the purpose-built `attention_items` canonical read model GTM V2
+Stage 3 (`#38`-`#40`) later added. That newer, more canonical backend
+read model (`GET /internal/accounts?needsAttention=true` +
+`AccountAttentionSummary`) exists, is DB-verified, and is currently consumed
+by **zero** frontend code — wiring the frontend onto it is this audit's
+recommended next implementation unit (see `NEXT_SESSION.md`), not yet done.
+What else remains open from this package is the full set of independent,
+database-derived operational queues (MQL, Sales Review, Pipeline Assist,
+Owner Alert, Retarget, Nurture, Suppressed, failed/incomplete, missing
+identity/enrichment, re-score review) beyond Accounts/Needs Attention, plus
+the forms and persistence behaviors below not yet confirmed built. This is
+Next Delivery Sequence #1. It also completes the canonical `message_context`
 contract described in the cross-cutting prerequisite section, so every view
 and form here operates on one persisted, explainable record — not scattered
 frontend logic.
@@ -636,7 +780,8 @@ frontend logic.
 
 *Client Radar — separate repository, separate deployment.*
 
-**Status update:** merged to `main` — see "Current Product State" above.
+**Status update:** merged to `main` — see "Historical Product State —
+Snapshot after PR #27" above.
 
 #### Scope
 
@@ -745,7 +890,8 @@ Product State" above.
 
 **Status update:** the Client Radar core integration this package builds on
 (handoff, status sync, completed-result retrieval, evidence display) is
-complete — see "Current Product State" above. This package itself
+complete — see "Historical Product State — Snapshot after PR #27" above.
+This package itself
 (composer enrichment) has not started; it is Next Delivery Sequence #2.
 
 #### Scope
@@ -890,3 +1036,99 @@ Delivery Sequence #8.
 - Concurrent multi-profile orchestration
 - Final enterprise permissions architecture
 - Merging the Mission Control and Client Radar repositories or deployments
+
+---
+
+## Roadmap Corrections / Reclassified Work (2026-08-18 audit)
+
+Added by the 2026-08-18 read-only audit (`PROJECT_AUDIT.md`). Nothing above
+this section was rewritten — this section only records where the audit found
+current runtime/code behavior to differ from what a package's status label
+above implies, or where a previously-complete package needs a new named
+cross-cutting fix that would otherwise disappear because its package is
+marked complete. Full evidence for every item below is in `PROJECT_AUDIT.md`.
+
+- **Package 2 ("Canonical Account Evaluation & Configurable ICP Profiles")
+  is accurately labeled "substantially delivered" for single-profile
+  authoring, versioning, and evaluation** — the audit confirms Phases 0-2 and
+  the account-level evaluation UI work exactly as claimed. **However, the
+  roadmap does not currently say — and should — that the evaluator's Intent
+  input is disconnected from any real behavioral signal today.** Evaluation
+  input is built only from bare account identity plus manually-entered
+  `account_facts`; the GTM V2 signal/identity track (see the new section
+  above) has zero effect on it. This is not a regression in Package 2 — it
+  predates GTM V2 — but it means "Intent" in every evaluation persisted to
+  date is not measuring engagement/behavior in any automated sense. See
+  `PROJECT_AUDIT.md` DISC-02.
+
+- **Package 3 ("Persistent Canonical Records and Leads Workspace") should be
+  re-scoped to include wiring the GTM V2 Stage 3 attention backend into the
+  frontend**, not only the originally-scoped MQL/Sales Review/etc. queues.
+  Four already-merged PRs (`#38`-`#40`) built and tested a canonical
+  `attention_items` read model that zero frontend code currently consumes.
+  See `PROJECT_AUDIT.md` DISC-03 — this is this audit's recommended single
+  next implementation unit (`NEXT_SESSION.md`).
+
+- **Package 4/5 (Client Radar Handoff and Server-to-Server API), marked ✅
+  Completed, remain accurately completed on the Mission Control side** for
+  the scope they originally described. **This audit inspected only this
+  repository (`druid-gtm-control`) — the separate Client Radar
+  repository/deployment's own internal implementation and runtime state were
+  not audited**, so "Completed" here means the Mission Control-side handoff
+  contract, HTTP client, status/result handling, persistence, evidence
+  rendering, and account-alias mapping — not a certification of Client
+  Radar's own codebase. A significant amount of additional Client Radar work
+  has since landed under the GTM V2 track (Stage 5: durable account mapping,
+  identity-conflict handling) that predates this roadmap section entirely —
+  see the new GTM V2 section above for what it covers, and
+  `PROJECT_AUDIT.md` §K for the full lifecycle status, including
+  confirmation that no candidate-fact/accept-reject layer exists yet (this
+  matches, and does not contradict, Package 6's "not started" label below).
+  Also corrected in this pass: the GTM↔Client Radar call path is a direct
+  HTTP integration, not routed through n8n (see the corrected opening
+  paragraph of this document).
+
+- **No package above was found to be mislabeled as complete when it is
+  actually broken.** The reclassifications above are additions/clarifications
+  (previously-invisible scope, or a caveat about what "Intent" currently
+  means), not corrections of a false "complete" claim.
+
+- **New named cross-cutting fix, not owned by any single package above:**
+  CI (`.github/workflows/pr-checks.yml`) does not run the Client Radar or
+  ICP-profile test suites on any PR, even though those suites exist and pass
+  locally. Small, mechanical fix; see `PROJECT_AUDIT.md` DISC-05.
+
+- **New named cross-cutting limitation, not owned by any single package
+  above — mechanism corrected in this pass:** no account-merge mechanism
+  exists. A company-name-only signal can never create an account by itself
+  (verified in code — this document previously stated otherwise and has been
+  corrected); the real risk is two different *strong* identifiers for the
+  same real company never being cross-linked (e.g. an account created
+  outside the resolver, such as a bootstrap import, that a later
+  strong-identifier signal cannot find; or two strong identifier types that
+  never co-occur on one signal). This is a deliberate, documented scope
+  boundary in the GTM V2 schema (not a bug), but it was not previously named
+  correctly in any roadmap document. See `PROJECT_AUDIT.md` DISC-06.
+
+- **New discrepancy surfaced in the 2026-08-18 correction pass, not present
+  in the original audit's headline framing:** whether any real operational
+  signal (RB2B, Dealfront, a legacy n8n workflow, or anything else) actually
+  reaches the GTM V2 signal-ingestion API is **UNKNOWN / REQUIRES RUNTIME
+  VERIFICATION** — no caller of `POST /internal/signals` exists anywhere in
+  this repository. This is logically prior to the Package 2 Intent-input gap
+  above: the resolver's correctness (proven) says nothing about whether it
+  currently receives real signals at all. See `PROJECT_AUDIT.md` DISC-07 and
+  the "GTM V2" section above — this should be the next *verification* step,
+  run alongside (not blocking) the Needs Attention frontend-wiring unit.
+
+- **New discrepancy surfaced in the 2026-08-18 correction pass:** an
+  `account_decisions` write (MQL/Dismiss) does not resolve any open
+  `attention_items` row, and the attention-item resolve endpoint cannot
+  currently be called by the browser-session frontend at all (it is
+  service-auth-gated). A naive frontend implementation that reuses the old
+  "hide once decided" local-state rule on top of the new canonical
+  `attention_items` read model would be incorrect — an account can be
+  MQL'd/Dismissed while still carrying an unrelated open attention item, and
+  the canonical model says it still needs attention. See `PROJECT_AUDIT.md`
+  DISC-08 and `NEXT_SESSION.md` for the corrected scope of the Needs
+  Attention unit.
