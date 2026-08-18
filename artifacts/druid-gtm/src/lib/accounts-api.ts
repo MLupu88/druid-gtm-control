@@ -116,12 +116,21 @@ export interface AccountEvaluation extends AccountEvaluationSummary {
 
 // Compact summary of an account's most recent canonical decision — see
 // services/accounts.ts's AccountDecisionSummary, which this mirrors
-// field-for-field. Just enough for NeedsAttentionView to decide whether a
-// resolved queue row still needs attention, without a per-row fetch.
+// field-for-field. This is display/context data only; Needs Attention
+// membership comes exclusively from open attention_items.
 export interface AccountDecisionSummary {
   id: string;
   routingOutput: RoutingOutput;
   createdAt: string;
+}
+
+// Derived exclusively from open attention_items by the canonical accounts
+// read model. A non-null summary therefore always represents at least one
+// open item; null means the account has no open attention items.
+export interface AccountAttentionSummary {
+  openCount: number;
+  oldestOpenAttentionAt: string;
+  reasonCodes: string[];
 }
 
 export interface AccountListItem {
@@ -129,6 +138,7 @@ export interface AccountListItem {
   latestEvaluation: AccountEvaluationSummary | null;
   latestProductionEvaluation: AccountEvaluationSummary | null;
   latestDecision: AccountDecisionSummary | null;
+  attention: AccountAttentionSummary | null;
 }
 
 export interface AccountsListResponse {
@@ -167,7 +177,7 @@ async function throwForResponse(
 }
 
 export async function fetchAccounts(
-  args: { limit?: number; offset?: number } = {},
+  args: { limit?: number; offset?: number; needsAttention?: boolean } = {},
 ): Promise<AccountsListResponse> {
   const limit = args.limit ?? DEFAULT_LIMIT;
   const offset = args.offset ?? DEFAULT_OFFSET;
@@ -175,6 +185,9 @@ export async function fetchAccounts(
     limit: String(limit),
     offset: String(offset),
   });
+  if (args.needsAttention !== undefined) {
+    params.set("needsAttention", String(args.needsAttention));
+  }
   const res = await fetch(`/api/internal/accounts?${params.toString()}`, {
     credentials: "include",
   });
@@ -207,13 +220,14 @@ export async function fetchAccountDetail(
 // call site (and any future cache invalidation) agrees on the exact key
 // shape without duplicating the literal array per call site.
 export function accountsListQueryKey(
-  args: { limit?: number; offset?: number } = {},
+  args: { limit?: number; offset?: number; needsAttention?: boolean } = {},
 ) {
   return [
     "accounts",
     "list",
     args.limit ?? DEFAULT_LIMIT,
     args.offset ?? DEFAULT_OFFSET,
+    args.needsAttention ?? false,
   ] as const;
 }
 

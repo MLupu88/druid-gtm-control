@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "wouter";
+import { Link, useParams, useSearchParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle, ArrowLeft, Building2, Globe } from "lucide-react";
@@ -49,6 +49,8 @@ function findLatestCompletedProductionEvaluation(
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AccountDetailPage() {
   const { accountId } = useParams<{ accountId: string }>();
+  const [searchParams] = useSearchParams();
+  const showDismiss = searchParams.get("from") === "attention";
 
   const detailQ = useQuery({
     queryKey: accountDetailQueryKey(accountId ?? ""),
@@ -93,7 +95,9 @@ export default function AccountDetailPage() {
         </div>
       )}
 
-      {detailQ.data && <AccountDetailContent detail={detailQ.data} />}
+      {detailQ.data && (
+        <AccountDetailContent detail={detailQ.data} showDismiss={showDismiss} />
+      )}
     </div>
   );
 }
@@ -101,8 +105,10 @@ export default function AccountDetailPage() {
 // ─── Content ──────────────────────────────────────────────────────────────────
 function AccountDetailContent({
   detail,
+  showDismiss,
 }: {
   detail: NonNullable<Awaited<ReturnType<typeof fetchAccountDetail>>>;
+  showDismiss: boolean;
 }) {
   const { account, evaluations } = detail;
   const identity = accountIdentity(account);
@@ -170,6 +176,7 @@ function AccountDetailContent({
         <DecisionControls
           accountId={account.id}
           latestCompletedProductionEvaluation={latestProduction}
+          showDismiss={showDismiss}
         />
       </div>
 

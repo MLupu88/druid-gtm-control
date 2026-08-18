@@ -34,11 +34,14 @@ function sameSubmission(a: EffectiveSubmission, b: EffectiveSubmission): boolean
 interface DecisionControlsProps {
   accountId: string;
   latestCompletedProductionEvaluation: AccountEvaluation | null;
+  /** Only exposed when this account was opened from canonical Needs Attention. */
+  showDismiss?: boolean;
 }
 
 export function DecisionControls({
   accountId,
   latestCompletedProductionEvaluation,
+  showDismiss = false,
 }: DecisionControlsProps) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
@@ -188,6 +191,16 @@ export function DecisionControls({
           >
             Keep for review
           </Button>
+          {showDismiss && (
+            <Button
+              onClick={() => submit("dismissed")}
+              disabled={mutation.isPending}
+              variant="outline"
+              className="flex-1"
+            >
+              Dismiss account
+            </Button>
+          )}
         </div>
 
         {mutation.isPending && (

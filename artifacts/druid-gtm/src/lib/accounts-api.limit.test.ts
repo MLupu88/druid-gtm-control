@@ -38,6 +38,15 @@ test("every known accounts call site uses the shared max-limit constant", () => 
   }
 });
 
+test("Needs Attention requests canonical membership from the accounts API", () => {
+  const source = readFileSync(
+    path.join(SRC_DIR, "components/needs-attention-view.tsx"),
+    "utf8",
+  );
+  assert.ok(source.includes("needsAttention: true"));
+  assert.ok(source.includes("offset: 0"));
+});
+
 test("no known accounts call site hardcodes a numeric limit above the API maximum", () => {
   for (const relativePath of CALL_SITES) {
     const source = readFileSync(path.join(SRC_DIR, relativePath), "utf8");

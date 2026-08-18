@@ -39,10 +39,9 @@ function capitalize(value: string): string {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
-// Single top-level Accounts entry point: "Needs attention" (the former
-// standalone /queue experience, unmodified — see
-// ../components/needs-attention-view.tsx) is the default view, "All
-// accounts" is the existing canonical PostgreSQL list. Both are plain
+// Single top-level Accounts entry point: "Needs attention" is the canonical
+// open-attention-items view (with a separate preview-only Sample Mode), while
+// "All accounts" is the existing canonical PostgreSQL list. Both are plain
 // query-string-driven views of the same page, not separate routes, so
 // /accounts?view=attention and /accounts?view=all are both directly
 // linkable/bookmarkable.
@@ -63,7 +62,7 @@ export default function AccountsPage() {
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             {view === "attention"
-              ? "Signals that still need a human decision before anything happens."
+              ? "Canonical accounts with one or more open attention items."
               : "Canonical accounts and their most recent evaluations."}
           </p>
         </div>
