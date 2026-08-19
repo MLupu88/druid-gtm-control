@@ -5,9 +5,9 @@ const STORAGE_KEY = "druid-theme";
 
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof localStorage === "undefined") return "light";
+    if (typeof localStorage === "undefined") return "dark";
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved === "dark" ? "dark" : "light";
+    return saved === "light" ? "light" : "dark";
   });
 
   useEffect(() => {

@@ -8,8 +8,15 @@
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
   --color-border: hsl(var(--border));
+  --color-border-strong: hsl(var(--border-strong));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+  --color-surface-1: hsl(var(--surface-1));
+  --color-surface-2: hsl(var(--surface-2));
+  --color-surface-3: hsl(var(--surface-3));
+  --color-content-primary: hsl(var(--content-primary));
+  --color-content-secondary: hsl(var(--content-secondary));
+  --color-content-muted: hsl(var(--content-muted));
 
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
@@ -38,6 +45,22 @@
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
   --color-destructive-border: var(--destructive-border);
+
+  --color-status-neutral: hsl(var(--status-neutral));
+  --color-status-neutral-foreground: hsl(var(--status-neutral-foreground));
+  --color-status-neutral-border: hsl(var(--status-neutral-border));
+  --color-status-info: hsl(var(--status-info));
+  --color-status-info-foreground: hsl(var(--status-info-foreground));
+  --color-status-info-border: hsl(var(--status-info-border));
+  --color-status-success: hsl(var(--status-success));
+  --color-status-success-foreground: hsl(var(--status-success-foreground));
+  --color-status-success-border: hsl(var(--status-success-border));
+  --color-status-warning: hsl(var(--status-warning));
+  --color-status-warning-foreground: hsl(var(--status-warning-foreground));
+  --color-status-warning-border: hsl(var(--status-warning-border));
+  --color-status-danger: hsl(var(--status-danger));
+  --color-status-danger-foreground: hsl(var(--status-danger-foreground));
+  --color-status-danger-border: hsl(var(--status-danger-border));
 
   --color-chart-1: hsl(var(--chart-1));
   --color-chart-2: hsl(var(--chart-2));
@@ -104,13 +127,37 @@
   --radius: 0.75rem;
   --tracking-normal: 0em;
   --spacing: 0.25rem;
+
+  /* Product density and layout */
+  --control-height-compact: 1.75rem;
+  --control-height-default: 2rem;
+  --control-height-comfortable: 2.25rem;
+  --content-width-narrow: 52.5rem;
+  --content-width-standard: 70rem;
+  --content-width-wide: 90rem;
+  --page-gutter: 1rem;
+  --page-block-padding: 1.25rem;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.18);
+  --shadow-overlay: 0 24px 64px rgb(0 0 0 / 0.38);
 }
 
-/* ─── Light mode (default) ────────────────────────────────────────────────── */
+@media (min-width: 48rem) {
+  :root {
+    --page-gutter: 1.5rem;
+    --page-block-padding: 1.5rem;
+  }
+}
+
+@media (min-width: 80rem) {
+  :root {
+    --page-gutter: 2rem;
+  }
+}
+
+/* ─── Light mode (optional) ───────────────────────────────────────────────── */
 /* page bg #f5f7f6 · card #ffffff · border #dde0e6 · text #1a1a1a
    muted text #6b7280 · primary green #00c158 · muted surface #f3f4f6        */
 
-:root,
 [data-theme="light"] {
   --button-outline: rgba(0,0,0, .08);
   --badge-outline: rgba(0,0,0, .05);
@@ -122,8 +169,15 @@
   --background:         150 11% 97%;   /* #f5f7f6 */
   --foreground:         0   0%  10%;   /* #1a1a1a */
   --border:             221 15% 88%;   /* #dde0e6 */
+  --border-strong:      220 12% 76%;
   --input:              220 15% 96%;   /* #f3f4f6 */
   --ring:               147 100% 38%;  /* #00c158 */
+  --surface-1:          0 0% 100%;
+  --surface-2:          150 11% 97%;
+  --surface-3:          220 15% 94%;
+  --content-primary:    0 0% 10%;
+  --content-secondary:  220 9% 38%;
+  --content-muted:      220 9% 47%;
 
   /* Card */
   --card:               0   0%  100%;  /* #ffffff */
@@ -154,6 +208,23 @@
   /* Destructive */
   --destructive:        0   72% 51%;
   --destructive-foreground: 0 0% 100%;
+
+  /* Semantic status surfaces */
+  --status-neutral: 220 15% 96%;
+  --status-neutral-foreground: 220 11% 38%;
+  --status-neutral-border: 220 13% 84%;
+  --status-info: 211 100% 96%;
+  --status-info-foreground: 213 76% 38%;
+  --status-info-border: 212 72% 82%;
+  --status-success: 149 55% 94%;
+  --status-success-foreground: 151 68% 28%;
+  --status-success-border: 150 47% 76%;
+  --status-warning: 43 100% 94%;
+  --status-warning-foreground: 35 85% 30%;
+  --status-warning-border: 42 78% 75%;
+  --status-danger: 0 86% 97%;
+  --status-danger-foreground: 0 67% 42%;
+  --status-danger-border: 0 68% 84%;
 
   /* Sidebar — white, premium */
   --sidebar:            0   0%  100%;
@@ -198,10 +269,11 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
-/* ─── Dark mode ───────────────────────────────────────────────────────────── */
+/* ─── Dark mode (default) ─────────────────────────────────────────────────── */
 /* bg #0a0f0d · card #111816 · border #1f2924 · input #1a2220
    primary green #00e676 · muted text #9ca3af                                 */
 
+:root,
 [data-theme="dark"] {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
@@ -213,8 +285,15 @@
   --background:         156 20% 5%;    /* #0a0f0d */
   --foreground:         0   0%  100%;  /* #ffffff */
   --border:             149 14% 14%;   /* #1f2924 */
+  --border-strong:      150 12% 23%;
   --input:              164 13% 12%;   /* #1a2220 */
   --ring:               151 100% 45%;  /* #00e676 */
+  --surface-1:          162 17% 8%;
+  --surface-2:          160 15% 10%;
+  --surface-3:          157 14% 13%;
+  --content-primary:    140 20% 96%;
+  --content-secondary:  214 11% 69%;
+  --content-muted:      216 9% 52%;
 
   /* Card */
   --card:               162 17% 8%;    /* #111816 */
@@ -245,6 +324,23 @@
   /* Destructive */
   --destructive:        0   72% 51%;
   --destructive-foreground: 0 0% 100%;
+
+  /* Semantic status surfaces */
+  --status-neutral: 160 12% 12%;
+  --status-neutral-foreground: 216 10% 72%;
+  --status-neutral-border: 155 10% 22%;
+  --status-info: 211 44% 15%;
+  --status-info-foreground: 211 88% 72%;
+  --status-info-border: 211 42% 29%;
+  --status-success: 151 42% 12%;
+  --status-success-foreground: 148 64% 68%;
+  --status-success-border: 151 38% 27%;
+  --status-warning: 38 48% 13%;
+  --status-warning-foreground: 43 90% 70%;
+  --status-warning-border: 39 45% 28%;
+  --status-danger: 0 42% 14%;
+  --status-danger-foreground: 0 86% 76%;
+  --status-danger-border: 0 42% 30%;
 
   /* Sidebar — shade darker than bg */
   --sidebar:            156 24% 4%;    /* ~#080d0b */
@@ -296,13 +392,14 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    min-width: 20rem;
   }
 
-  /* Logo visibility — black logo in light mode, white logo in dark mode */
-  .logo-white { display: none; }
-  .logo-black { display: inline; }
-  [data-theme="dark"] .logo-white { display: inline; }
-  [data-theme="dark"] .logo-black { display: none; }
+  /* Dark-first logo visibility with a light-theme override. */
+  .logo-white { display: inline; }
+  .logo-black { display: none; }
+  [data-theme="light"] .logo-white { display: none; }
+  [data-theme="light"] .logo-black { display: inline; }
 }
 
 /* ── Signal Pulse wave animation ──────────────────────────────────────────── */

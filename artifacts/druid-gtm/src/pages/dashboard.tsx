@@ -203,7 +203,7 @@ export default function DashboardPage() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-            Marketplace signals overview
+            DRUID Signals overview
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             See what the GTM signal engine is finding, what needs attention, and what is only being logged for now.
