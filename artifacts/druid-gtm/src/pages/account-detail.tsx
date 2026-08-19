@@ -116,9 +116,11 @@ function AccountDetailContent({
       />
 
       <Tabs value={tab} onValueChange={onTabChange} className="space-y-3">
-        <TabsList className="w-full justify-start overflow-x-auto">
-          {ACCOUNT_TABS.map((item) => <TabsTrigger key={item.value} value={item.value}>{item.label}</TabsTrigger>)}
-        </TabsList>
+        <div className="sticky top-12 z-10 -mx-1 bg-background/95 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/85 md:top-14">
+          <TabsList className="w-full justify-start overflow-x-auto whitespace-nowrap">
+            {ACCOUNT_TABS.map((item) => <TabsTrigger key={item.value} value={item.value}>{item.label}</TabsTrigger>)}
+          </TabsList>
+        </div>
 
         <TabsContent value="overview" className="space-y-4">
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
