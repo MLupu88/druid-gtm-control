@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Building2, Globe } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Globe } from "lucide-react";
 import {
   fetchAccountDetail,
   accountDetailQueryKey,
@@ -123,10 +123,12 @@ function AccountDetailContent({
         </div>
 
         <TabsContent value="overview" className="space-y-4">
+          <AccountSnapshot account={account} evaluation={latestProduction} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
             <AccountFactsPanel accountId={account.id} />
             <LatestEvaluationPanel evaluation={latestProduction} />
           </div>
+          <OverviewWorkspaceCues onTabChange={onTabChange} />
         </TabsContent>
         <TabsContent value="activity"><WorkspaceEmptyState title="No account activity yet" description="No account activity is available yet." /></TabsContent>
         <TabsContent value="people"><WorkspaceEmptyState title="People data is not available" description="No canonical people or contact data is available for this account yet." /></TabsContent>
@@ -142,6 +144,57 @@ function AccountDetailContent({
           </div>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function AccountSnapshot({
+  account,
+  evaluation,
+}: {
+  account: Account;
+  evaluation: AccountEvaluation | null;
+}) {
+  return (
+    <section className="rounded-lg border border-border bg-card/50 px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-primary">Account snapshot</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">Canonical identity and latest known evaluation state.</p>
+        </div>
+        <p className="text-[11px] text-muted-foreground">Updated {formatDateTime(account.updatedAt)}</p>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+        <MetaField label="Account key" value={account.accountKey} />
+        <MetaField label="Created" value={formatDateTime(account.createdAt)} />
+        <MetaField label="Identity" value={evaluation?.identityResolutionLevel ?? null} />
+        <MetaField label="Confidence" value={evaluation?.identityConfidence ?? null} />
+      </div>
+    </section>
+  );
+}
+
+function OverviewWorkspaceCues({ onTabChange }: { onTabChange: (tab: string) => void }) {
+  const destinations = [
+    { tab: "intelligence", label: "Research intelligence" },
+    { tab: "icp", label: "ICP" },
+    { tab: "actions", label: "Actions" },
+    { tab: "history", label: "History" },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border/70 pt-3">
+      <span className="text-[11px] text-muted-foreground">Workspace:</span>
+      {destinations.map((destination) => (
+        <button
+          key={destination.tab}
+          type="button"
+          onClick={() => onTabChange(destination.tab)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          {destination.label}
+          <ArrowRight className="size-3" />
+        </button>
+      ))}
     </div>
   );
 }
