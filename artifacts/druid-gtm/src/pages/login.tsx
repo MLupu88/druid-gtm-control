@@ -28,8 +28,8 @@ export default function LoginPage() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.07),transparent_38%)]" />
       <div className="relative w-full max-w-sm">
         <div className="mb-6 flex items-center justify-center gap-3">
-          <img src={logoWhite} alt="DRUID" className="logo-white h-7 w-auto" />
-          <img src={logoBlack} alt="DRUID" className="logo-black h-7 w-auto" />
+          <img src={logoWhite} alt="DRUID" className="hidden h-7 w-auto dark:block" />
+          <img src={logoBlack} alt="DRUID" className="block h-7 w-auto dark:hidden" />
           <div className="h-6 w-px bg-border" aria-hidden="true" />
           <p className="text-sm font-semibold text-foreground">Mission Control</p>
         </div>

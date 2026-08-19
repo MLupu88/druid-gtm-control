@@ -56,3 +56,11 @@ test("operator and shell utilities remain available", () => {
   assert.ok(source.includes("logout.mutate()"));
   assert.ok(source.includes('setTheme(option)'));
 });
+
+test("the DRUID logo uses the active theme without rendering both variants", () => {
+  const source = readFileSync(SOURCE_PATH, "utf8");
+  assert.ok(source.includes('className="hidden h-7 w-auto max-w-[116px] object-contain dark:block'));
+  assert.ok(source.includes('className="block h-7 w-auto max-w-[116px] object-contain dark:hidden'));
+  assert.ok(!source.includes('className="logo-white'));
+  assert.ok(!source.includes('className="logo-black'));
+});

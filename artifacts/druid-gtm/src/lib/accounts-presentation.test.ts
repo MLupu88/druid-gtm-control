@@ -6,7 +6,11 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getEvaluationSummaryIntentLabel } from "./accounts-presentation.js";
+import {
+  accountDecisionLabel,
+  formatAccountListDate,
+  getEvaluationSummaryIntentLabel,
+} from "./accounts-presentation.js";
 
 test("getEvaluationSummaryIntentLabel returns 'Intent not configured' when intentConfigured is false, even if a fallback tier string is present", () => {
   assert.equal(
@@ -27,4 +31,15 @@ test("getEvaluationSummaryIntentLabel returns null when intentConfigured is true
     getEvaluationSummaryIntentLabel({ intentConfigured: true, intentTier: null }),
     null,
   );
+});
+
+test("accountDecisionLabel covers every persisted routing output with operator language", () => {
+  assert.equal(accountDecisionLabel("mql"), "Promoted to MQL");
+  assert.equal(accountDecisionLabel("dismissed"), "Dismissed");
+  assert.equal(accountDecisionLabel("pipeline_assist"), "Pipeline assist");
+});
+
+test("formatAccountListDate renders valid timestamps and safely rejects invalid ones", () => {
+  assert.notEqual(formatAccountListDate("2026-08-18T00:00:00.000Z"), "—");
+  assert.equal(formatAccountListDate("not-a-date"), "—");
 });

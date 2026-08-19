@@ -106,12 +106,12 @@ function AppSidebar() {
           <img
             src={logoWhite}
             alt="DRUID"
-            className="logo-white h-7 w-auto max-w-[116px] object-contain group-data-[collapsible=icon]:hidden"
+            className="hidden h-7 w-auto max-w-[116px] object-contain dark:block group-data-[collapsible=icon]:hidden"
           />
           <img
             src={logoBlack}
             alt="DRUID"
-            className="logo-black h-7 w-auto max-w-[116px] object-contain group-data-[collapsible=icon]:hidden"
+            className="block h-7 w-auto max-w-[116px] object-contain dark:hidden group-data-[collapsible=icon]:hidden"
           />
           <span className="hidden size-7 items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-sm font-semibold text-primary group-data-[collapsible=icon]:flex">
             D

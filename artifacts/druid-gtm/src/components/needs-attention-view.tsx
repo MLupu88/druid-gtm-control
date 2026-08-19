@@ -18,6 +18,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -46,12 +54,15 @@ import {
   safeWhyNow,
 } from "@/lib/queue-helpers";
 import { useSampleMode } from "@/lib/sample-mode";
+import {
+  accountDecisionLabel,
+  formatAccountListDate,
+} from "@/lib/accounts-presentation";
 import { cn } from "@/lib/utils";
 import {
   ArrowRight,
   Building2,
   Filter,
-  Info,
   Search,
 } from "lucide-react";
 
@@ -110,35 +121,31 @@ function CanonicalNeedsAttentionView({
   const total = accountsQ.data?.pagination.total ?? 0;
 
   return (
-    <div className="space-y-5">
-      <PageToolbar>
-        <p className="text-sm text-muted-foreground">
-          {accountsQ.isLoading
-            ? "Loading…"
-            : `${total} account${total !== 1 ? "s" : ""} with open attention items`}
-        </p>
-        <ViewModeToggle viewMode="live" onChange={onViewModeChange} />
+    <div className="space-y-3">
+      <PageToolbar className="p-2">
+        <div className="relative w-full sm:max-w-sm">
+          <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search accounts needing attention…"
+            className="h-8 pl-9 text-xs"
+          />
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {accountsQ.isLoading
+              ? "Loading…"
+              : `${total} account${total !== 1 ? "s" : ""}`}
+          </span>
+          <StatusBadge tone="warning" dot>Open attention</StatusBadge>
+          <ViewModeToggle viewMode="live" onChange={onViewModeChange} />
+        </div>
       </PageToolbar>
 
-      <InlineNotice tone="neutral" title="What this list shows" icon={Info}>
-        <div className="space-y-1">
-          <p>
-            These canonical accounts have one or more open attention items. Account decisions do
-            not remove an account from this list; it leaves only after the backend reports that no
-            open attention item remains.
-          </p>
-        </div>
-      </InlineNotice>
-
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search by name, domain, or account key…"
-          className="pl-9 h-10 bg-input border-border text-sm"
-        />
-      </div>
+      <p className="px-1 text-[11px] leading-4 text-muted-foreground">
+        Membership comes from open canonical attention items. Account decisions do not clear them.
+      </p>
 
       {/* The former Live chips depended on Sheet-only recommendation and
           review-state fields. The canonical accounts contract does not
@@ -146,9 +153,11 @@ function CanonicalNeedsAttentionView({
           identity search as All Accounts without fabricating replacements. */}
 
       {accountsQ.isLoading && (
-        <div className="space-y-2">
-          {[...Array(4)].map((_, index) => (
-            <Skeleton key={index} className="h-24 rounded-xl" />
+        <div className="overflow-hidden rounded-lg border border-border bg-card/30">
+          {[...Array(5)].map((_, index) => (
+            <div key={index} className="border-b border-border p-3 last:border-b-0">
+              <Skeleton className="h-10 w-full rounded-md" />
+            </div>
           ))}
         </div>
       )}
@@ -179,10 +188,24 @@ function CanonicalNeedsAttentionView({
         )}
 
       {visibleItems.length > 0 && (
-        <div className="space-y-2">
-          {visibleItems.map((item) => (
-            <CanonicalAttentionRow key={item.account.id} item={item} />
-          ))}
+        <div className="overflow-hidden rounded-lg border border-border bg-card/30">
+          <Table className="table-fixed">
+            <TableHeader className="bg-muted/35">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[28%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em]">Account</TableHead>
+                <TableHead className="w-[34%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em]">Why attention</TableHead>
+                <TableHead className="hidden w-[20%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] md:table-cell">Current state</TableHead>
+                <TableHead className="w-[12%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:table-cell">Open</TableHead>
+                <TableHead className="hidden w-[16%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] lg:table-cell">Oldest open</TableHead>
+                <TableHead className="w-20 px-2"><span className="sr-only">Inspect account</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleItems.map((item) => (
+                <CanonicalAttentionRow key={item.account.id} item={item} />
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
@@ -194,45 +217,94 @@ function CanonicalAttentionRow({ item }: { item: AccountListItem }) {
   const attention = item.attention;
 
   return (
-    <Link href={`/accounts/${item.account.id}?from=attention`}>
-      <div className="w-full text-left rounded-xl border border-border bg-card hover:bg-white/[0.03] transition-colors px-4 py-4 group cursor-pointer">
-        <div className="flex items-start gap-3">
-          <Building2 className="w-4 h-4 text-muted-foreground shrink-0 mt-1" />
+    <TableRow className="group h-[64px] hover:bg-accent/45">
+      <TableCell className="px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/60 text-muted-foreground">
+            <Building2 className="size-3.5" />
+          </span>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-foreground">{identity.primary}</span>
-              {identity.secondary && (
-                <span className="text-xs text-muted-foreground">{identity.secondary}</span>
-              )}
-              {attention && (
-                <StatusBadge tone="info">
-                  {attention.openCount} open
-                </StatusBadge>
-              )}
+            <Link
+              href={`/accounts/${item.account.id}?from=attention`}
+              className="block truncate text-sm font-semibold text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {identity.primary}
+            </Link>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {identity.secondary ?? item.account.accountKey}
+            </p>
+            <div className="mt-1 md:hidden">
+              <CanonicalAccountState item={item} compact />
             </div>
-
-            {attention && (
-              <div className="mt-2 space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">
-                  Oldest open item: {formatAttentionDate(attention.oldestOpenAttentionAt)}
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {attention.reasonCodes.map((reasonCode) => (
-                    <StatusBadge
-                      key={reasonCode}
-                      tone="neutral"
-                    >
-                      {formatAttentionReason(reasonCode)}
-                    </StatusBadge>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
-          <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
-      </div>
-    </Link>
+      </TableCell>
+      <TableCell className="px-3 py-2">
+        <div className="flex flex-wrap gap-1">
+          {attention?.reasonCodes.length ? (
+            attention.reasonCodes.map((reasonCode) => (
+              <StatusBadge key={reasonCode} tone="neutral">
+                {formatAttentionReason(reasonCode)}
+              </StatusBadge>
+            ))
+          ) : attention ? (
+            <span className="text-xs text-muted-foreground">Open attention item</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">Attention summary unavailable</span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="hidden px-3 py-2 md:table-cell">
+        <CanonicalAccountState item={item} />
+      </TableCell>
+      <TableCell className="px-3 py-2 sm:table-cell">
+        {attention ? (
+          <StatusBadge tone="warning" dot>{attention.openCount}</StatusBadge>
+        ) : (
+          <StatusBadge tone="neutral">—</StatusBadge>
+        )}
+      </TableCell>
+      <TableCell className="hidden px-3 py-2 lg:table-cell">
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {attention ? formatAttentionDate(attention.oldestOpenAttentionAt) : "—"}
+        </span>
+      </TableCell>
+      <TableCell className="px-2 py-2 text-right">
+        <Button asChild size="sm" variant="ghost" className="relative z-10 h-7 px-2">
+          <Link href={`/accounts/${item.account.id}?from=attention`}>
+            Inspect
+            <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function CanonicalAccountState({
+  item,
+  compact = false,
+}: {
+  item: AccountListItem;
+  compact?: boolean;
+}) {
+  return (
+    <div className={cn("space-y-1", compact && "flex flex-wrap items-center gap-1 space-y-0")}>
+      {item.latestEvaluation ? (
+        <StatusBadge tone={item.latestEvaluation.status === "failed" ? "danger" : "neutral"}>
+          {item.latestEvaluation.evaluationMode === "production" ? "Production" : "Preview"}
+          {item.latestEvaluation.status === "failed" ? " failed" : " evaluated"}
+        </StatusBadge>
+      ) : (
+        <StatusBadge tone="neutral">Not evaluated</StatusBadge>
+      )}
+      {item.latestDecision && (
+        <p className="truncate text-[10px] text-muted-foreground">
+          Account decision: {accountDecisionLabel(item.latestDecision.routingOutput)} ·{" "}
+          {formatAccountListDate(item.latestDecision.createdAt)}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -288,68 +360,32 @@ function SampleNeedsAttentionView({
   }, [rows, source, filter, search]);
 
   return (
-    <div className="space-y-5">
-      <PageToolbar>
-        <p className="text-sm text-muted-foreground">
-          {unresolvedCount} sample signal{unresolvedCount !== 1 ? "s" : ""} — not from the live
-          review list
-        </p>
-        <ViewModeToggle viewMode="sample" onChange={onViewModeChange} />
+    <div className="space-y-3">
+      <PageToolbar className="p-2">
+        <div className="relative w-full sm:max-w-sm">
+          <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search sample accounts or contacts…"
+            className="h-8 pl-9 text-xs"
+          />
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {unresolvedCount} sample signal{unresolvedCount !== 1 ? "s" : ""}
+          </span>
+          <ViewModeToggle viewMode="sample" onChange={onViewModeChange} />
+        </div>
       </PageToolbar>
 
       <InlineNotice tone="info">
         <p>
-          Sample data — these are example signals to illustrate the full review workflow. Actions
-          are shown for demonstration only and will not be sent. Switch to Live data to review real
-          signals.
+          Sample data only. Actions are preview-only and will not be sent.
         </p>
       </InlineNotice>
 
-      <InlineNotice tone="neutral" title="What this list shows" icon={Info}>
-        <div className="space-y-1">
-          <p>
-            Each row is an account or buying signal the GTM engine thinks may need action. The
-            colored label on the left is the recommendation. The score is secondary — use the
-            recommendation, the reason, and whether we are allowed to act to make the call.
-          </p>
-          <p>
-            These are sample signals so stakeholders can understand the workflow. No action will
-            be sent.
-          </p>
-        </div>
-      </InlineNotice>
-
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search by company or contact…"
-          className="pl-9 h-10 bg-input border-border text-sm"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-[11px] text-muted-foreground/70 leading-relaxed px-0.5">
-          Start with the recommendation on the left. The score helps explain priority, but the
-          decision should be based on the recommendation, the reason, and whether we are allowed to
-          act.
-        </p>
-
-        <div className="flex flex-wrap gap-x-5 gap-y-1 px-0.5">
-          {[
-            { term: "Recommendation", def: "What the system thinks should happen next" },
-            { term: "Identity", def: "How confident we are about who the visitor is" },
-            { term: "Needs review", def: "No human decision recorded yet" },
-            { term: "Sample data", def: "Example signal — no action will be sent" },
-          ].map(({ term, def }) => (
-            <span key={term} className="text-[10px] text-muted-foreground">
-              <span className="font-medium text-foreground/60">{term}:</span> {def}
-            </span>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap gap-2 items-center">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-card/30 p-2">
           <Filter className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <FilterChip
             label="All"
@@ -380,7 +416,6 @@ function SampleNeedsAttentionView({
                 onClick={() => setFilter(type)}
               />
             ))}
-        </div>
       </div>
 
       {filter === "mql_ready" && (
@@ -397,7 +432,7 @@ function SampleNeedsAttentionView({
           isSampleMode
         />
       ) : (
-        <div className="space-y-2">
+        <div className="overflow-hidden rounded-lg border border-border bg-card/30 divide-y divide-border">
           {filteredRows.map((row, index) => (
             <SampleQueueRow
               key={row.queue_key ?? row.account_key ?? String(index)}
@@ -440,10 +475,10 @@ function FilterChip({
     <button
       onClick={onClick}
       className={cn(
-        "px-3 py-1 rounded-full text-xs font-medium transition-all border",
+        "h-7 rounded-md border px-2 text-[11px] font-medium transition-colors",
         active
-          ? "bg-primary/20 text-primary border-primary/50"
-          : "bg-white/5 text-muted-foreground border-border hover:bg-white/10 hover:text-foreground",
+          ? "border-primary/40 bg-primary/12 text-primary"
+          : "border-transparent bg-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground",
       )}
     >
       {label}
@@ -475,10 +510,10 @@ function SampleQueueRow({
   return (
     <button
       onClick={onClick}
-      className="w-full text-left rounded-xl border border-border bg-card hover:bg-white/[0.03] transition-colors px-4 py-4 group"
+      className="group w-full px-3 py-2.5 text-left transition-colors hover:bg-accent/45"
     >
-      <div className="flex items-start gap-3">
-        <div className="shrink-0 pt-0.5 w-36 text-left">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 md:grid-cols-[150px_minmax(0,1fr)_auto]">
+        <div className="hidden shrink-0 text-left md:block">
           <OutputTypeBadge outputType={outputType} showSub />
           {score !== null && (
             <span className="text-[10px] text-muted-foreground/50 mt-1 block pl-0.5 tabular-nums">
@@ -486,7 +521,7 @@ function SampleQueueRow({
             </span>
           )}
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-foreground">
               {row.company_name || row.company_domain}
@@ -504,20 +539,20 @@ function SampleQueueRow({
               </Badge>
             )}
             {needsAttention && (
-              <Badge
-                className="text-[10px] px-1.5 py-0 bg-primary/20 text-primary border-primary/50 rounded-full"
+              <StatusBadge
+                tone="warning"
                 title="Needs review: no human decision has been recorded yet"
               >
                 Needs review
-              </Badge>
+              </StatusBadge>
             )}
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 py-0 text-amber-400 border-amber-500/30 bg-amber-500/10"
+            <StatusBadge
+              tone="info"
               title="Sample data: example signal — no action will be sent"
             >
               Sample data
-            </Badge>
+            </StatusBadge>
+            <span className="md:hidden"><OutputTypeBadge outputType={outputType} /></span>
           </div>
           {whyNow && (
             <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2 leading-relaxed">

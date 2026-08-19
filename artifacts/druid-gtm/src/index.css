@@ -395,11 +395,6 @@
     min-width: 20rem;
   }
 
-  /* Dark-first logo visibility with a light-theme override. */
-  .logo-white { display: inline; }
-  .logo-black { display: none; }
-  [data-theme="light"] .logo-white { display: none; }
-  [data-theme="light"] .logo-black { display: inline; }
 }
 
 /* ── Signal Pulse wave animation ──────────────────────────────────────────── */

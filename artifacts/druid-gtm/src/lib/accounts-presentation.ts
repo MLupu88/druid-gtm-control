@@ -4,6 +4,7 @@
 // jsdom/testing-library — see ./accounts-api.limit.test.ts) and so the
 // page itself stays a thin rendering layer over these.
 
+import type { RoutingOutput } from "./account-decisions-api";
 import type { AccountEvaluationSummary } from "./accounts-api";
 
 /**
@@ -25,4 +26,29 @@ export function getEvaluationSummaryIntentLabel(
   if (summary.intentConfigured === false) return "Intent not configured";
   if (summary.intentTier) return `Intent: ${summary.intentTier}`;
   return null;
+}
+
+export function formatAccountListDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+const ROUTING_OUTPUT_LABELS: Record<RoutingOutput, string> = {
+  mql: "Promoted to MQL",
+  sales_review: "Kept for review",
+  pipeline_assist: "Pipeline assist",
+  owner_alert: "Owner alert",
+  retarget: "Retarget",
+  nurture: "Nurture",
+  suppressed: "Suppressed",
+  dismissed: "Dismissed",
+};
+
+export function accountDecisionLabel(routingOutput: RoutingOutput): string {
+  return ROUTING_OUTPUT_LABELS[routingOutput];
 }

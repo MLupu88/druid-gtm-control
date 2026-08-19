@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "wouter";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,6 +13,14 @@ import {
 } from "@/components/ui/empty";
 import { ArrowRight, Building2, Search } from "lucide-react";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   fetchAccounts,
   accountsListQueryKey,
   ACCOUNTS_LIST_MAX_LIMIT,
@@ -25,7 +32,11 @@ import { NeedsAttentionView } from "@/components/needs-attention-view";
 import { InlineNotice } from "@/components/inline-notice";
 import { PageHeader, PageLayout, PageToolbar } from "@/components/page-layout";
 import { StatusBadge } from "@/components/status-badge";
-import { getEvaluationSummaryIntentLabel } from "@/lib/accounts-presentation";
+import {
+  accountDecisionLabel,
+  formatAccountListDate,
+  getEvaluationSummaryIntentLabel,
+} from "@/lib/accounts-presentation";
 
 type View = "attention" | "all";
 type SortKey = "updated" | "name";
@@ -62,13 +73,13 @@ export default function AccountsPage() {
   }
 
   return (
-    <PageLayout className="space-y-6">
+    <PageLayout width="wide" className="space-y-5">
       <PageHeader
         title="Accounts"
         description={
           view === "attention"
-            ? "Canonical accounts with one or more open attention items."
-            : "Canonical accounts and their most recent evaluations."
+            ? "Triage canonical accounts with open attention items."
+            : "Scan canonical account identity, evaluation, attention, and decision state."
         }
         actions={
           <Tabs value={view} onValueChange={setView}>
@@ -136,18 +147,23 @@ function AllAccountsList() {
   }, [items, search, sortKey]);
 
   return (
-    <div className="space-y-4">
-      <PageToolbar>
-        <div className="relative flex-1 sm:max-w-sm">
+    <div className="space-y-3">
+      <PageToolbar className="p-2">
+        <div className="relative w-full sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name, domain, or account key…"
-            className="pl-9 h-10 bg-input border-border text-sm"
+            className="h-8 pl-9 text-xs"
           />
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+          {!accountsQ.isLoading && !accountsQ.isError && (
+            <span className="mr-2 text-xs tabular-nums text-muted-foreground">
+              {visibleItems.length} of {items.length}
+            </span>
+          )}
           <span className="text-xs text-muted-foreground">Sort:</span>
           <Button
             size="sm"
@@ -169,9 +185,11 @@ function AllAccountsList() {
       </PageToolbar>
 
       {accountsQ.isLoading && (
-        <div className="space-y-2">
+        <div className="overflow-hidden rounded-lg border border-border bg-card/30">
           {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-xl" />
+            <div key={i} className="border-b border-border p-3 last:border-b-0">
+              <Skeleton className="h-10 w-full rounded-md" />
+            </div>
           ))}
         </div>
       )}
@@ -207,10 +225,25 @@ function AllAccountsList() {
         )}
 
       {visibleItems.length > 0 && (
-        <div className="space-y-2">
-          {visibleItems.map((item) => (
-            <AccountRow key={item.account.id} item={item} />
-          ))}
+        <div className="overflow-hidden rounded-lg border border-border bg-card/30">
+          <Table className="table-fixed">
+            <TableHeader className="bg-muted/35">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[30%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em]">Account</TableHead>
+                <TableHead className="hidden w-[16%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] lg:table-cell">Domain</TableHead>
+                <TableHead className="w-[38%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:w-[32%]">Current evaluation</TableHead>
+                <TableHead className="hidden w-[14%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:table-cell">Attention</TableHead>
+                <TableHead className="hidden w-[18%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] xl:table-cell">Latest decision</TableHead>
+                <TableHead className="hidden w-[13%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] md:table-cell">Updated</TableHead>
+                <TableHead className="w-10 px-2"><span className="sr-only">Inspect account</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleItems.map((item) => (
+                <AccountRow key={item.account.id} item={item} />
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
@@ -231,47 +264,78 @@ function AccountRow({ item }: { item: AccountListItem }) {
     latestProductionEvaluation.id !== latestEvaluation?.id;
 
   return (
-    <Link href={`/accounts/${account.id}`}>
-      <Card className="border-border bg-card hover:bg-white/[0.03] transition-colors cursor-pointer">
-        <div className="flex items-start gap-3 px-4 py-3">
-          <Building2 className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-foreground truncate">
-                {identity.primary}
-              </span>
-              {identity.secondary && (
-                <span className="text-xs text-muted-foreground truncate">
-                  {identity.secondary}
-                </span>
-              )}
-            </div>
-
-            <div className="mt-1.5 space-y-1">
-              {latestEvaluation ? (
-                <EvaluationSummaryLine
-                  label={
-                    latestEvaluation.evaluationMode === "production" && !productionDiffers
-                      ? "Latest evaluation (production)"
-                      : "Latest evaluation"
-                  }
-                  summary={latestEvaluation}
-                />
-              ) : (
-                <p className="text-xs text-muted-foreground/70">No evaluations yet</p>
-              )}
-              {productionDiffers && latestProductionEvaluation && (
-                <EvaluationSummaryLine
-                  label="Latest production evaluation"
-                  summary={latestProductionEvaluation}
-                />
-              )}
-            </div>
+    <TableRow className="group h-[60px] hover:bg-accent/45">
+      <TableCell className="px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/60 text-muted-foreground">
+            <Building2 className="size-3.5" />
+          </span>
+          <div className="min-w-0">
+            <Link
+              href={`/accounts/${account.id}`}
+              className="block truncate text-sm font-semibold text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {identity.primary}
+            </Link>
+            <p className="truncate text-[11px] text-muted-foreground lg:hidden">
+              {account.companyDomain ?? account.accountKey}
+            </p>
           </div>
-          <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
         </div>
-      </Card>
-    </Link>
+      </TableCell>
+      <TableCell className="hidden px-3 py-2 lg:table-cell">
+        <span className="block truncate text-xs text-muted-foreground">
+          {account.companyDomain ?? "—"}
+        </span>
+      </TableCell>
+      <TableCell className="px-3 py-2">
+        <div className="space-y-1">
+          {latestEvaluation ? (
+            <EvaluationSummaryLine label="Latest" summary={latestEvaluation} />
+          ) : (
+            <StatusBadge tone="neutral">Not evaluated</StatusBadge>
+          )}
+          {productionDiffers && latestProductionEvaluation && (
+            <div className="hidden xl:block">
+              <EvaluationSummaryLine label="Production" summary={latestProductionEvaluation} />
+            </div>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="hidden px-3 py-2 sm:table-cell">
+        {item.attention ? (
+          <StatusBadge tone="warning" dot>{item.attention.openCount} open</StatusBadge>
+        ) : (
+          <StatusBadge tone="neutral">Clear</StatusBadge>
+        )}
+      </TableCell>
+      <TableCell className="hidden px-3 py-2 xl:table-cell">
+        {item.latestDecision ? (
+          <div>
+            <p className="truncate text-xs font-medium text-foreground">
+              {accountDecisionLabel(item.latestDecision.routingOutput)}
+            </p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              {formatAccountListDate(item.latestDecision.createdAt)}
+            </p>
+          </div>
+        ) : (
+          <span className="text-xs text-muted-foreground">None</span>
+        )}
+      </TableCell>
+      <TableCell className="hidden px-3 py-2 md:table-cell">
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {formatAccountListDate(account.updatedAt)}
+        </span>
+      </TableCell>
+      <TableCell className="px-2 py-2 text-right">
+        <Button asChild size="sm" variant="ghost" className="h-7 w-7 px-0">
+          <Link href={`/accounts/${account.id}`} aria-label={`Inspect ${identity.primary}`}>
+            <ArrowRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+          </Link>
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }
 

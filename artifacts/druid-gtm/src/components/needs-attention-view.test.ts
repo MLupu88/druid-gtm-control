@@ -30,10 +30,15 @@ function functionBlock(source: string, name: string, nextName?: string): string 
 }
 
 test("Live Needs Attention uses only the canonical filtered accounts query", () => {
+  const membershipBlock = functionBlock(
+    COMPONENT_SOURCE,
+    "CanonicalNeedsAttentionView",
+    "CanonicalAttentionRow",
+  );
   assert.ok(COMPONENT_SOURCE.includes("needsAttention: true"));
   assert.ok(COMPONENT_SOURCE.includes("fetchAccounts(queryArgs)"));
   assert.ok(!COMPONENT_SOURCE.includes("/api/sheets/queue"));
-  assert.ok(!COMPONENT_SOURCE.includes("latestDecision.routingOutput"));
+  assert.ok(!membershipBlock.includes("latestDecision"));
 });
 
 test("the consumed transformation and canonical summary fields drive the live rows", () => {
@@ -67,8 +72,8 @@ test("Sample Mode preserves the former preview presentation without live queue i
   for (const marker of [
     "SAMPLE_ROWS",
     "previewOnly",
-    "Start with the recommendation on the left",
-    "Recommendation",
+    "OutputTypeBadge",
+    "Sample data only. Actions are preview-only and will not be sent.",
     "MQL / Ready for Sales",
     "Showing accounts that are ready for sales action now.",
   ]) {
@@ -94,6 +99,17 @@ test("Sheet-derived recommendation filters remain Sample-only", () => {
 });
 
 test("Accounts page describes the canonical open-attention model", () => {
-  assert.ok(PAGE_SOURCE.includes("Canonical accounts with one or more open attention items."));
+  assert.ok(PAGE_SOURCE.includes("Triage canonical accounts with open attention items."));
   assert.ok(!PAGE_SOURCE.includes("Signals that still need a human decision"));
+});
+
+test("Accounts and Needs Attention use dense canonical account tables without research joins", () => {
+  for (const marker of ["<Table", "Current evaluation", "Latest decision", "Updated"]) {
+    assert.ok(PAGE_SOURCE.includes(marker), `missing All Accounts table marker: ${marker}`);
+  }
+  for (const marker of ["Why attention", "Current state", "Oldest open", "Inspect"]) {
+    assert.ok(COMPONENT_SOURCE.includes(marker), `missing Needs Attention table marker: ${marker}`);
+  }
+  assert.ok(!PAGE_SOURCE.includes("fetchLatestClientRadarResearchRun"));
+  assert.ok(!COMPONENT_SOURCE.includes("fetchLatestClientRadarResearchRun"));
 });
