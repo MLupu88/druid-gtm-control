@@ -2,12 +2,17 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "wouter";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertCircle, ArrowRight, Building2, Search } from "lucide-react";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { ArrowRight, Building2, Search } from "lucide-react";
 import {
   fetchAccounts,
   accountsListQueryKey,
@@ -17,6 +22,9 @@ import {
   type AccountListItem,
 } from "@/lib/accounts-api";
 import { NeedsAttentionView } from "@/components/needs-attention-view";
+import { InlineNotice } from "@/components/inline-notice";
+import { PageHeader, PageLayout, PageToolbar } from "@/components/page-layout";
+import { StatusBadge } from "@/components/status-badge";
 import { getEvaluationSummaryIntentLabel } from "@/lib/accounts-presentation";
 
 type View = "attention" | "all";
@@ -54,28 +62,26 @@ export default function AccountsPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-            Accounts
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            {view === "attention"
-              ? "Canonical accounts with one or more open attention items."
-              : "Canonical accounts and their most recent evaluations."}
-          </p>
-        </div>
-        <Tabs value={view} onValueChange={setView}>
-          <TabsList>
-            <TabsTrigger value="attention">Needs attention</TabsTrigger>
-            <TabsTrigger value="all">All accounts</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+    <PageLayout className="space-y-6">
+      <PageHeader
+        title="Accounts"
+        description={
+          view === "attention"
+            ? "Canonical accounts with one or more open attention items."
+            : "Canonical accounts and their most recent evaluations."
+        }
+        actions={
+          <Tabs value={view} onValueChange={setView}>
+            <TabsList>
+              <TabsTrigger value="attention">Needs attention</TabsTrigger>
+              <TabsTrigger value="all">All accounts</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        }
+      />
 
       {view === "attention" ? <NeedsAttentionView /> : <AllAccountsList />}
-    </div>
+    </PageLayout>
   );
 }
 
@@ -131,7 +137,7 @@ function AllAccountsList() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <PageToolbar>
         <div className="relative flex-1 sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -160,7 +166,7 @@ function AllAccountsList() {
             Company name
           </Button>
         </div>
-      </div>
+      </PageToolbar>
 
       {accountsQ.isLoading && (
         <div className="space-y-2">
@@ -171,29 +177,33 @@ function AllAccountsList() {
       )}
 
       {accountsQ.isError && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <p className="text-sm text-red-300">
+        <InlineNotice tone="danger">
+          <p>
             {accountsQ.error instanceof Error
               ? accountsQ.error.message
               : "Could not load accounts."}
           </p>
-        </div>
+        </InlineNotice>
       )}
 
       {!accountsQ.isLoading && !accountsQ.isError && items.length === 0 && (
-        <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-          <p className="text-sm text-muted-foreground">No accounts yet.</p>
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No accounts yet</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       )}
 
       {!accountsQ.isLoading &&
         !accountsQ.isError &&
         items.length > 0 &&
         visibleItems.length === 0 && (
-          <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-            <p className="text-sm text-muted-foreground">No accounts match that search.</p>
-          </div>
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>No matching accounts</EmptyTitle>
+              <EmptyDescription>No accounts match that search.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
 
       {visibleItems.length > 0 && (
@@ -277,41 +287,37 @@ export function EvaluationSummaryLine({
   return (
     <div className="flex items-center gap-1.5 flex-wrap text-xs">
       <span className="text-muted-foreground/70">{label}:</span>
-      <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-border text-muted-foreground">
+      <StatusBadge tone="neutral">
         {capitalize(summary.evaluationMode)}
-      </Badge>
+      </StatusBadge>
       {summary.status === "failed" ? (
-        <Badge
-          variant="outline"
-          className="text-[10px] px-1.5 py-0 text-red-400 border-red-500/30 bg-red-500/10"
-        >
+        <StatusBadge tone="danger">
           Failed
-        </Badge>
+        </StatusBadge>
       ) : (
         <>
           {summary.fitTier && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-border text-muted-foreground">
+            <StatusBadge tone="neutral">
               Fit: {summary.fitTier}
-            </Badge>
+            </StatusBadge>
           )}
           {intentLabel && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-border text-muted-foreground">
+            <StatusBadge tone="neutral">
               {intentLabel}
-            </Badge>
+            </StatusBadge>
           )}
           {summary.eligibilityOutcome && (
-            <Badge
-              variant="outline"
-              className={
+            <StatusBadge
+              tone={
                 summary.eligibilityOutcome === "eligible"
-                  ? "text-[10px] px-1.5 py-0 text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                  ? "success"
                   : summary.eligibilityOutcome === "restricted"
-                    ? "text-[10px] px-1.5 py-0 text-amber-400 border-amber-500/30 bg-amber-500/10"
-                    : "text-[10px] px-1.5 py-0 text-red-400 border-red-500/30 bg-red-500/10"
+                    ? "warning"
+                    : "danger"
               }
             >
               {capitalize(summary.eligibilityOutcome)}
-            </Badge>
+            </StatusBadge>
           )}
         </>
       )}

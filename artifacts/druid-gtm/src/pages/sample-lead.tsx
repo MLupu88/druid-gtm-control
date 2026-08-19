@@ -4,8 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { AlertCircle, CheckCircle2, FlaskConical } from "lucide-react";
+import { CheckCircle2, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { InlineNotice } from "@/components/inline-notice";
+import { PageHeader, PageLayout } from "@/components/page-layout";
 
 interface N8nStatusResponse {
   configured: boolean;
@@ -154,47 +156,43 @@ export default function SampleLeadPage() {
   }
 
   return (
-    <div className="p-6 max-w-2xl space-y-6">
+    <PageLayout width="narrow" className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-          Try a Sample Lead
-        </h1>
-        <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
-          Sends a test lead to the automation engine to see how it would be
-          scored. This is different from the sample data view on the Dashboard
-          and Review Queue, which shows the interface without touching the
-          automation engine.
-        </p>
-      </div>
+      <PageHeader
+        title="Try a Sample Lead"
+        description={
+          <p className="leading-relaxed">
+            Sends a test lead to the automation engine to see how it would be
+            scored. This is different from the sample data view on the Dashboard
+            and Review Queue, which shows the interface without touching the
+            automation engine.
+          </p>
+        }
+      />
 
       {/* Context note */}
-      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-muted/30 border border-border">
-        <AlertCircle className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
-        <p className="text-xs text-muted-foreground leading-relaxed">
+      <InlineNotice tone="neutral">
+        <p>
           The automation is still being set up, so a sample sent here may not
           always create a visible row in the queue yet. Nothing is sent to
           anyone.
         </p>
-      </div>
+      </InlineNotice>
 
       {/* Connection warning */}
       {!n8nQ.isLoading && (!n8nConfigured || !n8nReachable) && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-amber-300">
-              {!n8nConfigured
-                ? "Automation engine not connected"
-                : "Automation engine not responding"}
-            </p>
-            <p className="text-xs text-amber-300/70 mt-0.5 leading-relaxed">
+        <InlineNotice
+          tone="warning"
+          title={!n8nConfigured
+            ? "Automation engine not connected"
+            : "Automation engine not responding"}
+        >
+          <p>
               {!n8nConfigured
                 ? "The automation engine URL isn't configured, so sample leads can't be sent right now."
                 : "The automation engine isn't responding. Sample leads can't be sent until it's reachable."}
             </p>
-          </div>
-        </div>
+        </InlineNotice>
       )}
 
       {/* Success state */}
@@ -216,12 +214,11 @@ export default function SampleLeadPage() {
             </div>
 
             {!submittedQueueWriteOn && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-left w-full">
-                <AlertCircle className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-blue-300 leading-relaxed">
+              <InlineNotice tone="info" className="w-full text-left">
+                <p>
                   To see this result in the list, turn queue writing on in Settings.
                 </p>
-              </div>
+              </InlineNotice>
             )}
 
             <div className="flex gap-3 flex-wrap justify-center">
@@ -296,10 +293,7 @@ export default function SampleLeadPage() {
 
             {/* Error */}
             {phase === "error" && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <p className="text-xs text-red-300">{errorMessage}</p>
-              </div>
+              <InlineNotice tone="danger">{errorMessage}</InlineNotice>
             )}
 
             {/* Submit */}
@@ -342,18 +336,17 @@ export default function SampleLeadPage() {
 
             {/* Queue writing off note */}
             {!accountQueueWriteOn && n8nReachable && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                <AlertCircle className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
-                <p className="text-[11px] text-blue-300 leading-relaxed">
+              <InlineNotice tone="info">
+                <p>
                   Queue writing is currently off. You can send a sample through
                   the scoring system, but it will not appear in the review list
                   until queue writing is turned on in Settings.
                 </p>
-              </div>
+              </InlineNotice>
             )}
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageLayout>
   );
 }

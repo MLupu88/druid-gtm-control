@@ -1,12 +1,14 @@
 import { useState, type MouseEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
-import { ArrowLeft, AlertCircle, Info } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { SettingsNav } from "@/components/settings-nav";
+import { InlineNotice } from "@/components/inline-notice";
+import { PageHeader, PageLayout } from "@/components/page-layout";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { TechnicalDetails } from "@/components/technical-details";
 import { IcpProfileDraftEditor } from "@/components/icp-profile-draft-editor";
 import { ActivateVersionAction, CloneVersionAction } from "@/components/icp-profile-lifecycle-actions";
@@ -281,24 +283,13 @@ function ProfileDetailContent({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-          {profile.name}
-        </h1>
-        {profile.description && (
-          <p className="text-sm text-muted-foreground mt-1">{profile.description}</p>
-        )}
-      </div>
+      <PageHeader title={profile.name} description={profile.description} />
 
-      <Alert>
-        <Info className="h-4 w-4" />
-        <AlertTitle>Activating a version doesn&apos;t change past evaluations</AlertTitle>
-        <AlertDescription>
+      <InlineNotice tone="info" title="Activating a version doesn't change past evaluations">
           Activating a new profile version does not automatically change evaluations
           already saved on existing accounts. Each saved evaluation stays tied to the
           profile version it was actually run against.
-        </AlertDescription>
-      </Alert>
+      </InlineNotice>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card className="border-border bg-card">
@@ -417,7 +408,7 @@ export default function IcpProfileDetailPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl space-y-6">
+    <PageLayout className="space-y-6">
       <SettingsNav />
       <Link
         href="/settings/icp-profiles"
@@ -431,27 +422,20 @@ export default function IcpProfileDetailPage() {
       {detailQ.isLoading && <DetailSkeleton />}
 
       {detailQ.isError && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <p className="text-sm text-red-300">
+        <InlineNotice tone="danger" title="Could not load ICP profile"><p>
             {detailQ.error instanceof Error
               ? detailQ.error.message
               : "Could not load this ICP profile."}
-          </p>
-        </div>
+          </p></InlineNotice>
       )}
 
       {!detailQ.isLoading && !detailQ.isError && detailQ.data === null && (
-        <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-          <p className="text-sm text-muted-foreground">
-            No ICP profile exists with that ID.
-          </p>
-        </div>
+        <Empty><EmptyHeader><EmptyTitle>ICP profile not found</EmptyTitle><EmptyDescription>No ICP profile exists with that ID.</EmptyDescription></EmptyHeader></Empty>
       )}
 
       {detailQ.data && (
         <ProfileDetailContent detail={detailQ.data} onDraftDirtyChange={setDraftDirty} />
       )}
-    </div>
+    </PageLayout>
   );
 }

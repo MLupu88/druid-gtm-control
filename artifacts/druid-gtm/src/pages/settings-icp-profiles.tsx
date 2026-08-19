@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { AlertCircle, ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { SettingsNav } from "@/components/settings-nav";
+import { InlineNotice } from "@/components/inline-notice";
+import { PageHeader, PageLayout } from "@/components/page-layout";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,15 +50,12 @@ function ListSkeleton() {
 function ListErrorState({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   const message = error instanceof Error ? error.message : "Could not load ICP profiles.";
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-      <div className="flex items-start gap-2.5">
-        <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-        <p className="text-sm text-red-300">{message}</p>
-      </div>
+    <InlineNotice tone="danger" title="Could not load ICP profiles">
+      <p>{message}</p>
       <Button variant="outline" size="sm" onClick={onRetry}>
         Retry
       </Button>
-    </div>
+    </InlineNotice>
   );
 }
 
@@ -123,24 +122,19 @@ export default function SettingsIcpProfilesPage() {
   const profiles = profilesQ.data ?? [];
 
   return (
-    <div className="p-6 max-w-3xl space-y-6">
+    <PageLayout width="narrow" className="space-y-6">
       <SettingsNav />
 
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-            ICP Profiles
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Define and manage the criteria used to evaluate accounts against your
-            ideal customer profile.
-          </p>
-        </div>
-        <Button onClick={() => setNewProfileOpen(true)}>
-          <Plus className="w-4 h-4 mr-1.5" />
-          New ICP profile
-        </Button>
-      </div>
+      <PageHeader
+        title="ICP Profiles"
+        description="Define and manage the criteria used to evaluate accounts against your ideal customer profile."
+        actions={
+          <Button onClick={() => setNewProfileOpen(true)}>
+            <Plus className="w-4 h-4 mr-1.5" />
+            New ICP profile
+          </Button>
+        }
+      />
 
       {profilesQ.isLoading && <ListSkeleton />}
 
@@ -149,7 +143,7 @@ export default function SettingsIcpProfilesPage() {
       )}
 
       {!profilesQ.isLoading && !profilesQ.isError && profiles.length === 0 && (
-        <Empty className="border border-border rounded-xl bg-card py-10">
+        <Empty>
           <EmptyHeader>
             <EmptyTitle>No ICP profiles yet</EmptyTitle>
             <EmptyDescription>
@@ -169,6 +163,6 @@ export default function SettingsIcpProfilesPage() {
       )}
 
       <NewIcpProfileDialog open={newProfileOpen} onOpenChange={setNewProfileOpen} />
-    </div>
+    </PageLayout>
   );
 }

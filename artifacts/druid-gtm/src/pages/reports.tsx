@@ -15,10 +15,19 @@ import {
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { ViewModeToggle } from "@/components/view-mode-toggle";
+import { InlineNotice } from "@/components/inline-notice";
+import { PageHeader, PageLayout } from "@/components/page-layout";
+import { StatusBadge } from "@/components/status-badge";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { useSampleMode } from "@/lib/sample-mode";
 import { cn } from "@/lib/utils";
 import {
-  AlertCircle,
   Download,
   ExternalLink,
   FileText,
@@ -1950,19 +1959,22 @@ export default function ReportsPage() {
   // ── Sample mode: unchanged experience ──────────────────────────────────────
   if (isSample) {
     return (
-      <div className="p-6 max-w-5xl space-y-8">
+      <PageLayout width="wide" className="space-y-8">
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">Campaign signal reports</h1>
-            <p className="text-sm text-muted-foreground mt-1">Compare campaign activity, estimated action cost, and manual export progress.</p>
-            {ANALYTICS_URL && (
-              <p className="text-xs text-muted-foreground/70 mt-2 max-w-lg leading-relaxed">
-                Use Marketplace Analytics for traffic and campaign source performance. Use this page for GTM signal review, action cost estimates, manual exports, and month-over-month signal reporting.
-              </p>
-            )}
-          </div>
-          <div className="flex items-start gap-3 flex-wrap">
+        <PageHeader
+          title="DRUID Signals reports"
+          description={
+            <>
+              <p>Compare campaign activity, estimated action cost, and manual export progress.</p>
+              {ANALYTICS_URL && (
+                <p className="text-xs text-muted-foreground/70 mt-2 max-w-lg leading-relaxed">
+                  Use Marketplace Analytics for traffic and campaign source performance. Use this page for DRUID Signals review, action cost estimates, manual exports, and month-over-month signal reporting.
+                </p>
+              )}
+            </>
+          }
+          actions={
+            <div className="flex items-start gap-3 flex-wrap">
             {ANALYTICS_URL && (
               <a
                 href={ANALYTICS_URL}
@@ -1990,13 +2002,13 @@ export default function ReportsPage() {
               </p>
             </div>
             <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
-          </div>
-        </div>
+            </div>
+          }
+        />
 
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs">
-          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+        <InlineNotice tone="info">
           Showing sample data — this illustrates the full reporting workflow. Switch to Live data when campaign activity has been recorded.
-        </div>
+        </InlineNotice>
 
         {/* Campaign selector */}
         <Section title="Campaign">
@@ -2238,7 +2250,7 @@ export default function ReportsPage() {
         </Section>
 
         <DataReadiness isSample />
-      </div>
+      </PageLayout>
     );
   }
 
@@ -2294,31 +2306,33 @@ export default function ReportsPage() {
   );
 
   const pageHeader = (
-    <div className="flex items-start justify-between gap-4 flex-wrap">
-      <div>
-        <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">Campaign signal reports</h1>
-        <p className="text-sm text-muted-foreground mt-1">Compare campaign activity, estimated action cost, and manual export progress.</p>
-        {ANALYTICS_URL && (
-          <p className="text-xs text-muted-foreground/70 mt-2 max-w-lg leading-relaxed">
-            Use Marketplace Analytics for traffic and campaign source performance. Use this page for GTM signal review, action cost estimates, manual exports, and month-over-month signal reporting.
-          </p>
-        )}
-      </div>
-      {headerControls}
-    </div>
+    <PageHeader
+      title="DRUID Signals reports"
+      description={
+        <>
+          <p>Compare campaign activity, estimated action cost, and manual export progress.</p>
+          {ANALYTICS_URL && (
+            <p className="text-xs text-muted-foreground/70 mt-2 max-w-lg leading-relaxed">
+              Use Marketplace Analytics for traffic and campaign source performance. Use this page for DRUID Signals review, action cost estimates, manual exports, and month-over-month signal reporting.
+            </p>
+          )}
+        </>
+      }
+      actions={headerControls}
+    />
   );
 
   // Loading (first fetch, nothing to show yet)
   if (campaignReportQ.isLoading && !campaignReportQ.data) {
     return (
-      <div className="p-6 max-w-5xl space-y-8">
+      <PageLayout width="wide" className="space-y-8">
         {pageHeader}
         <Skeleton className="h-10 w-full rounded-lg" />
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 rounded-xl" />)}
         </div>
         <Skeleton className="h-40 rounded-xl" />
-      </div>
+      </PageLayout>
     );
   }
 
@@ -2326,14 +2340,15 @@ export default function ReportsPage() {
   if (campaignReportQ.isError) {
     const isAuthError = campaignReportQ.error instanceof CampaignReportAuthError;
     return (
-      <div className="p-6 max-w-4xl space-y-5">
+      <PageLayout width="wide" className="space-y-5">
         {pageHeader}
-        <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-6 py-10 text-center space-y-3">
-          <AlertCircle className="w-6 h-6 text-red-400 mx-auto" />
-          <p className="text-sm font-medium text-foreground">
-            {isAuthError ? "You're not authorized to view live campaign reports." : "The campaign report could not be loaded."}
-          </p>
-          <p className="text-xs text-muted-foreground max-w-md mx-auto">
+        <InlineNotice
+          tone="danger"
+          title={isAuthError
+            ? "You're not authorized to view live campaign reports."
+            : "The campaign report could not be loaded."}
+        >
+          <p>
             {campaignReportQ.error?.message ?? "An unexpected error occurred while contacting the reporting endpoint."}
           </p>
           {!isAuthError && (
@@ -2341,8 +2356,8 @@ export default function ReportsPage() {
               Retry
             </Button>
           )}
-        </div>
-      </div>
+        </InlineNotice>
+      </PageLayout>
     );
   }
 
@@ -2351,33 +2366,36 @@ export default function ReportsPage() {
   // Defensive — should not happen once isLoading/isError are both false, but keeps TS honest.
   if (!report) {
     return (
-      <div className="p-6 max-w-5xl space-y-8">
+      <PageLayout width="wide" className="space-y-8">
         {pageHeader}
         <Skeleton className="h-40 rounded-xl" />
-      </div>
+      </PageLayout>
     );
   }
 
   // No campaigns at all (e.g. Google Sheets not configured, or nothing recorded yet).
   if (report.campaigns.length === 0) {
     return (
-      <div className="p-6 max-w-4xl space-y-5">
+      <PageLayout width="wide" className="space-y-5">
         {pageHeader}
         {report.usingSampleData && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          <InlineNotice tone="warning">
             Google Sheets is not configured — live figures cannot be produced until it's connected.
-          </div>
+          </InlineNotice>
         )}
-        <div className="rounded-xl border border-border bg-card px-6 py-14 text-center space-y-3">
-          <p className="text-sm font-medium text-foreground">No campaigns have been recorded yet.</p>
-          <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No campaigns have been recorded yet.</EmptyTitle>
+            <EmptyDescription>
             Reports are built from campaign activity in the canonical reporting endpoint. Once activity is recorded, campaigns will appear here automatically.
-          </p>
-          <Button size="sm" variant="outline" className="text-xs mt-1" onClick={() => setViewMode("sample")}>
-            View sample report
-          </Button>
-        </div>
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button size="sm" variant="outline" className="text-xs" onClick={() => setViewMode("sample")}>
+              View sample report
+            </Button>
+          </EmptyContent>
+        </Empty>
         {report.limitations.length > 0 && (
           <div className="rounded-lg border border-border bg-card px-4 py-3">
             <p className="text-xs font-semibold text-foreground mb-1.5">Data limitations</p>
@@ -2386,7 +2404,7 @@ export default function ReportsPage() {
             ))}
           </div>
         )}
-      </div>
+      </PageLayout>
     );
   }
 
@@ -2402,14 +2420,13 @@ export default function ReportsPage() {
   const momError = momCurrentQ.isError || momPreviousQ.isError;
 
   return (
-    <div className="p-6 max-w-5xl space-y-8">
+    <PageLayout width="wide" className="space-y-8">
       {pageHeader}
 
       {report.usingSampleData && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
-          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+        <InlineNotice tone="warning">
           Google Sheets is not configured — the figures below reflect an empty campaign packet, not invented data.
-        </div>
+        </InlineNotice>
       )}
 
       {/* Campaign selector */}
@@ -2917,7 +2934,7 @@ export default function ReportsPage() {
           </div>
         )}
       </Section>
-    </div>
+    </PageLayout>
   );
 }
 
@@ -2960,9 +2977,9 @@ function MetaPair({ label, value }: { label: string; value: string }) {
 // ─── Sample badge ─────────────────────────────────────────────────────────────
 function SampleBadge() {
   return (
-    <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30 bg-amber-500/10">
+    <StatusBadge tone="warning">
       Sample data
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -2977,35 +2994,32 @@ function EmptyNote({ text }: { text: string }) {
 
 // ─── Execution status badge (sample cost table) ──────────────────────────────
 function ExecStatusBadge({ status }: { status: string }) {
-  const cls =
-    status === "Active"       ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" :
-    status === "Pending tool" ? "text-amber-400 border-amber-500/30 bg-amber-500/10" :
-    status === "Manual export"? "text-blue-400 border-blue-500/30 bg-blue-500/10" :
-    status === "Pending sync" ? "text-purple-400 border-purple-500/30 bg-purple-500/10" :
-    status === "Locked"       ? "text-red-400 border-red-500/30 bg-red-500/10" :
-                                "text-muted-foreground border-border bg-muted/30";
-  return <Badge variant="outline" className={cn("text-[10px]", cls)}>{status}</Badge>;
+  const tone =
+    status === "Active"       ? "success" :
+    status === "Pending tool" ? "warning" :
+    status === "Manual export" || status === "Pending sync" ? "info" :
+    status === "Locked" ? "danger" :
+    "neutral";
+  return <StatusBadge tone={tone}>{status}</StatusBadge>;
 }
 
 // ─── Export status badge ──────────────────────────────────────────────────────
 function ExportStatusBadge({ status }: { status: string }) {
-  const cls =
-    status === "Ready for export"     ? "text-blue-400 border-blue-500/30 bg-blue-500/10" :
-    status === "Exported for Dripify" ? "text-amber-400 border-amber-500/30 bg-amber-500/10" :
-    status === "Imported to Dripify"  ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" :
-    status === "Outcome received"     ? "text-primary border-primary/30 bg-primary/10" :
-                                        "text-muted-foreground border-border bg-muted/30";
-  return <Badge variant="outline" className={cn("text-[10px]", cls)}>{status}</Badge>;
+  const tone =
+    status === "Ready for export" ? "info" :
+    status === "Exported for Dripify" ? "warning" :
+    status === "Imported to Dripify" || status === "Outcome received" ? "success" :
+    "neutral";
+  return <StatusBadge tone={tone}>{status}</StatusBadge>;
 }
 
 // ─── Cost status badge (live mode — mirrors the endpoint's cost_status) ──────
 function CostStatusBadge({ status }: { status: string }) {
-  const cls =
-    status === "actual"      ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10" :
-    status === "estimated"   ? "text-amber-400 border-amber-500/30 bg-amber-500/10" :
-    status === "unavailable" ? "text-muted-foreground border-border bg-muted/30" :
-                                "text-muted-foreground border-border bg-muted/30";
-  return <Badge variant="outline" className={cn("text-[10px]", cls)}>{status}</Badge>;
+  const tone =
+    status === "actual" ? "success" :
+    status === "estimated" ? "warning" :
+    "neutral";
+  return <StatusBadge tone={tone}>{status}</StatusBadge>;
 }
 
 // ─── Direction icon ───────────────────────────────────────────────────────────

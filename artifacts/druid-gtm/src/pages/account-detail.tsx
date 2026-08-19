@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useParams, useSearchParams } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, ArrowLeft, Building2, Globe } from "lucide-react";
+import { ArrowLeft, Building2, Globe } from "lucide-react";
 import {
   fetchAccountDetail,
   accountDetailQueryKey,
@@ -16,6 +16,14 @@ import { ClientRadarResearchPanel } from "@/components/client-radar-research-pan
 import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
 import { AccountFactsPanel } from "@/components/account-facts-panel";
 import { EvaluationRunsList } from "@/components/evaluation-runs-list";
+import { InlineNotice } from "@/components/inline-notice";
+import { PageHeader, PageLayout } from "@/components/page-layout";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 
 function accountIdentity(account: Account): { primary: string; secondary: string | null } {
   if (account.companyName) {
@@ -59,7 +67,7 @@ export default function AccountDetailPage() {
   });
 
   return (
-    <div className="p-6 max-w-6xl space-y-6">
+    <PageLayout width="wide" className="space-y-6">
       <Link
         href="/accounts"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -77,28 +85,28 @@ export default function AccountDetailPage() {
       )}
 
       {detailQ.isError && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <p className="text-sm text-red-300">
+        <InlineNotice tone="danger" title="Could not load account">
+          <p>
             {detailQ.error instanceof Error
               ? detailQ.error.message
               : "Could not load this account."}
           </p>
-        </div>
+        </InlineNotice>
       )}
 
       {!detailQ.isLoading && !detailQ.isError && detailQ.data === null && (
-        <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-          <p className="text-sm text-muted-foreground">
-            No account exists with that ID.
-          </p>
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>Account not found</EmptyTitle>
+            <EmptyDescription>No account exists with that ID.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       )}
 
       {detailQ.data && (
         <AccountDetailContent detail={detailQ.data} showDismiss={showDismiss} />
       )}
-    </div>
+    </PageLayout>
   );
 }
 
@@ -117,24 +125,28 @@ function AccountDetailContent({
   return (
     <div className="space-y-6">
       {/* Identity */}
-      <div>
-        <div className="flex items-center gap-2">
-          <Building2 className="w-5 h-5 text-muted-foreground shrink-0" />
-          <h1 className="text-2xl font-bold font-display tracking-tight text-foreground truncate">
-            {identity.primary}
-          </h1>
-        </div>
-        {identity.secondary && (
-          <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1.5">
-            <Globe className="w-3.5 h-3.5" />
-            {identity.secondary}
-          </p>
-        )}
-        <p className="text-[11px] text-muted-foreground/60 mt-2">
-          {account.accountKey} · created {formatDateTime(account.createdAt)} · updated{" "}
-          {formatDateTime(account.updatedAt)}
-        </p>
-      </div>
+      <PageHeader
+        title={
+          <span className="flex min-w-0 items-center gap-2">
+            <Building2 className="size-5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{identity.primary}</span>
+          </span>
+        }
+        description={
+          <span className="space-y-1">
+            {identity.secondary && (
+              <span className="flex items-center gap-1.5">
+                <Globe className="size-3.5" />
+                {identity.secondary}
+              </span>
+            )}
+            <span className="block text-xs text-muted-foreground/70">
+              {account.accountKey} · created {formatDateTime(account.createdAt)} · updated{" "}
+              {formatDateTime(account.updatedAt)}
+            </span>
+          </span>
+        }
+      />
 
       <AccountFactsPanel accountId={account.id} />
 

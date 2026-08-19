@@ -8,12 +8,22 @@ import {
   firstValidNumber,
 } from "@workspace/gtm-shared";
 import { AccountDetailSheet } from "@/components/account-detail-sheet";
+import { InlineNotice } from "@/components/inline-notice";
 import { OutputTypeBadge } from "@/components/output-type-badge";
+import { PageToolbar } from "@/components/page-layout";
+import { StatusBadge } from "@/components/status-badge";
 import { ViewModeToggle } from "@/components/view-mode-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import {
   ACCOUNTS_LIST_MAX_LIMIT,
   accountsListQueryKey,
@@ -38,7 +48,6 @@ import {
 import { useSampleMode } from "@/lib/sample-mode";
 import { cn } from "@/lib/utils";
 import {
-  AlertCircle,
   ArrowRight,
   Building2,
   Filter,
@@ -102,26 +111,24 @@ function CanonicalNeedsAttentionView({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <PageToolbar>
         <p className="text-sm text-muted-foreground">
           {accountsQ.isLoading
             ? "Loading…"
             : `${total} account${total !== 1 ? "s" : ""} with open attention items`}
         </p>
         <ViewModeToggle viewMode="live" onChange={onViewModeChange} />
-      </div>
+      </PageToolbar>
 
-      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-muted/10">
-        <Info className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
-        <div className="text-xs text-muted-foreground leading-relaxed space-y-1">
-          <p className="font-medium text-foreground/80 text-sm">What this list shows</p>
+      <InlineNotice tone="neutral" title="What this list shows" icon={Info}>
+        <div className="space-y-1">
           <p>
             These canonical accounts have one or more open attention items. Account decisions do
             not remove an account from this list; it leaves only after the backend reports that no
             open attention item remains.
           </p>
         </div>
-      </div>
+      </InlineNotice>
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -147,14 +154,13 @@ function CanonicalNeedsAttentionView({
       )}
 
       {accountsQ.isError && (
-        <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <p className="text-sm text-red-300">
+        <InlineNotice tone="danger">
+          <p>
             {accountsQ.error instanceof Error
               ? accountsQ.error.message
               : "Could not load accounts needing attention."}
           </p>
-        </div>
+        </InlineNotice>
       )}
 
       {!accountsQ.isLoading && !accountsQ.isError && items.length === 0 && (
@@ -199,9 +205,9 @@ function CanonicalAttentionRow({ item }: { item: AccountListItem }) {
                 <span className="text-xs text-muted-foreground">{identity.secondary}</span>
               )}
               {attention && (
-                <Badge className="text-[10px] px-1.5 py-0 bg-primary/20 text-primary border-primary/50 rounded-full">
+                <StatusBadge tone="info">
                   {attention.openCount} open
-                </Badge>
+                </StatusBadge>
               )}
             </div>
 
@@ -212,13 +218,12 @@ function CanonicalAttentionRow({ item }: { item: AccountListItem }) {
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {attention.reasonCodes.map((reasonCode) => (
-                    <Badge
+                    <StatusBadge
                       key={reasonCode}
-                      variant="outline"
-                      className="text-[10px] px-1.5 py-0 border-border text-muted-foreground"
+                      tone="neutral"
                     >
                       {formatAttentionReason(reasonCode)}
-                    </Badge>
+                    </StatusBadge>
                   ))}
                 </div>
               </div>
@@ -284,38 +289,35 @@ function SampleNeedsAttentionView({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <PageToolbar>
         <p className="text-sm text-muted-foreground">
           {unresolvedCount} sample signal{unresolvedCount !== 1 ? "s" : ""} — not from the live
           review list
         </p>
         <ViewModeToggle viewMode="sample" onChange={onViewModeChange} />
-      </div>
+      </PageToolbar>
 
-      <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs">
-        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-        <span>
+      <InlineNotice tone="info">
+        <p>
           Sample data — these are example signals to illustrate the full review workflow. Actions
           are shown for demonstration only and will not be sent. Switch to Live data to review real
           signals.
-        </span>
-      </div>
+        </p>
+      </InlineNotice>
 
-      <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-muted/10">
-        <Info className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
-        <div className="text-xs text-muted-foreground leading-relaxed space-y-1">
-          <p className="font-medium text-foreground/80 text-sm">What this list shows</p>
+      <InlineNotice tone="neutral" title="What this list shows" icon={Info}>
+        <div className="space-y-1">
           <p>
             Each row is an account or buying signal the GTM engine thinks may need action. The
             colored label on the left is the recommendation. The score is secondary — use the
             recommendation, the reason, and whether we are allowed to act to make the call.
           </p>
-          <p className="text-blue-300/80">
+          <p>
             These are sample signals so stakeholders can understand the workflow. No action will
             be sent.
           </p>
         </div>
-      </div>
+      </InlineNotice>
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -545,28 +547,29 @@ function CanonicalEmptyState({
 }) {
   if (!hasItems) {
     return (
-      <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
-        <p className="text-sm font-medium text-foreground mb-1">
-          No accounts need attention right now.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Accounts with open attention items will appear here.
-        </p>
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>No accounts need attention right now.</EmptyTitle>
+          <EmptyDescription>Accounts with open attention items will appear here.</EmptyDescription>
+        </EmptyHeader>
         {onViewSample && (
-          <Button size="sm" variant="outline" onClick={onViewSample} className="text-xs mt-4">
-            View sample workflow
-          </Button>
+          <EmptyContent>
+            <Button size="sm" variant="outline" onClick={onViewSample} className="text-xs">
+              View sample workflow
+            </Button>
+          </EmptyContent>
         )}
-      </div>
+      </Empty>
     );
   }
   if (hasSearch) {
     return (
-      <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-        <p className="text-sm text-muted-foreground">
-          No accounts match that search. Try clearing it.
-        </p>
-      </div>
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>No matching accounts</EmptyTitle>
+          <EmptyDescription>No accounts match that search. Try clearing it.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return null;
@@ -587,30 +590,33 @@ function EmptyState({
 }) {
   if (!hasRows || showAttentionEmpty) {
     return (
-      <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
-        <p className="text-sm font-medium text-foreground mb-1">
-          No signals need review right now.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {hasRows
-            ? "Everything in the queue has been actioned — nothing is waiting for a decision."
-            : "When the GTM engine finds signals that need a decision, they will appear here."}
-        </p>
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>No signals need review right now.</EmptyTitle>
+          <EmptyDescription>
+            {hasRows
+              ? "Everything in the queue has been actioned — nothing is waiting for a decision."
+              : "When the GTM engine finds signals that need a decision, they will appear here."}
+          </EmptyDescription>
+        </EmptyHeader>
         {!hasRows && !isSampleMode && onViewSample && (
-          <Button size="sm" variant="outline" onClick={onViewSample} className="text-xs mt-4">
-            View sample workflow
-          </Button>
+          <EmptyContent>
+            <Button size="sm" variant="outline" onClick={onViewSample} className="text-xs">
+              View sample workflow
+            </Button>
+          </EmptyContent>
         )}
-      </div>
+      </Empty>
     );
   }
   if (hasFilter) {
     return (
-      <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-        <p className="text-sm text-muted-foreground">
-          No signals match that filter. Try clearing it.
-        </p>
-      </div>
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>No matching signals</EmptyTitle>
+          <EmptyDescription>No signals match that filter. Try clearing it.</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return null;

@@ -29,11 +29,13 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { SettingsNav } from "@/components/settings-nav";
+import { InlineNotice } from "@/components/inline-notice";
+import { PageHeader, PageLayout } from "@/components/page-layout";
+import { StatusBadge } from "@/components/status-badge";
 import {
   AlertTriangle,
   Lock,
   Unlock,
-  AlertCircle,
   FlaskConical,
 } from "lucide-react";
 
@@ -55,12 +57,6 @@ interface N8nStatusResponse {
   configured: boolean;
   reachable: boolean | null;
 }
-
-const MODE_DOT: Record<string, string> = {
-  green: "bg-emerald-400",
-  amber: "bg-amber-400",
-  red: "bg-red-500",
-};
 
 // ─── Config mutation helper ───────────────────────────────────────────────────
 async function postConfig(payload: {
@@ -162,16 +158,9 @@ export default function SettingsPage() {
   const n8nConnected = n8nConfigured && n8nReachable === true;
 
   return (
-    <div className="p-6 max-w-3xl space-y-8">
+    <PageLayout width="narrow" className="space-y-8">
       <SettingsNav />
-      <div>
-        <h1 className="text-2xl font-bold font-display tracking-tight text-foreground">
-          Settings
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Review and adjust how the system behaves.
-        </p>
-      </div>
+      <PageHeader title="Settings" description="Review and adjust how the system behaves." />
 
       {/* 1. Is sending turned on? */}
       <SettingsSection
@@ -204,9 +193,9 @@ export default function SettingsPage() {
           </p>
         )}
         {configMutation.isError && (
-          <p className="text-xs text-destructive mt-2">
+          <InlineNotice tone="danger" className="mt-3">
             {configMutation.error?.message ?? "Something went wrong."}
-          </p>
+          </InlineNotice>
         )}
       </SettingsSection>
 
@@ -377,19 +366,13 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard title="Live data" loading={configLoading}>
             {usingSampleData ? (
-              <Badge
-                variant="outline"
-                className="text-amber-400 border-amber-500/40 bg-amber-500/10"
-              >
+              <StatusBadge tone="warning" dot>
                 Using sample data
-              </Badge>
+              </StatusBadge>
             ) : (
-              <Badge
-                variant="outline"
-                className="text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
-              >
+              <StatusBadge tone="success" dot>
                 Connected
-              </Badge>
+              </StatusBadge>
             )}
             <p className="text-xs text-muted-foreground mt-2">
               {usingSampleData
@@ -406,17 +389,12 @@ export default function SettingsPage() {
           </StatCard>
 
           <StatCard title="Sending state" loading={configLoading}>
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "inline-block w-2 h-2 rounded-full shrink-0",
-                  MODE_DOT[currentMode.color] ?? "bg-zinc-500",
-                )}
-              />
-              <span className="font-medium text-foreground">
-                {currentMode.label}
-              </span>
-            </div>
+            <StatusBadge
+              tone={currentMode.color === "green" ? "success" : currentMode.color === "amber" ? "warning" : "danger"}
+              dot
+            >
+              {currentMode.label}
+            </StatusBadge>
             <p className="text-xs text-muted-foreground mt-2">
               {currentMode.detail}
             </p>
@@ -424,26 +402,17 @@ export default function SettingsPage() {
 
           <StatCard title="Automation engine" loading={n8nQ.isLoading}>
             {!n8nConfigured ? (
-              <Badge
-                variant="outline"
-                className="text-muted-foreground border-border"
-              >
+              <StatusBadge tone="neutral" dot>
                 Not connected
-              </Badge>
+              </StatusBadge>
             ) : n8nReachable ? (
-              <Badge
-                variant="outline"
-                className="text-emerald-400 border-emerald-500/40 bg-emerald-500/10"
-              >
+              <StatusBadge tone="success" dot>
                 Reachable
-              </Badge>
+              </StatusBadge>
             ) : (
-              <Badge
-                variant="outline"
-                className="text-amber-400 border-amber-500/40 bg-amber-500/10"
-              >
+              <StatusBadge tone="warning" dot>
                 Not responding
-              </Badge>
+              </StatusBadge>
             )}
             <p className="text-xs text-muted-foreground mt-2">
               {!n8nConfigured
@@ -491,7 +460,7 @@ export default function SettingsPage() {
           </Card>
         </div>
       </SettingsSection>
-    </div>
+    </PageLayout>
   );
 }
 
@@ -1007,7 +976,3 @@ function StatCard({
     </Card>
   );
 }
-
-// Suppress unused import warning — AlertCircle used in other pages
-const _keepAlertCircle = AlertCircle;
-void _keepAlertCircle;
