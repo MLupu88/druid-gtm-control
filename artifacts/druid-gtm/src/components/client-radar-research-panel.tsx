@@ -19,13 +19,8 @@ import { describeClientRadarFailure } from "@/lib/client-radar-error-presentatio
 import { cn } from "@/lib/utils";
 import { TechnicalDetails } from "@/components/technical-details";
 
-// Two-column "findings" fields (short values) vs full-width "narrative"
-// fields (longer free text) — mirrors account-detail.tsx's own split
-// between its compact MetaField grid and separate prose blocks.
-// Deliberately excludes accountPayload.status (Client Radar's own
-// internal status string — distinct from this run's own status) and
-// accountPayload.sources (undefined JSON shape) — neither is rendered
-// anywhere in this component.
+// These are the existing Client Radar payload fields, organized for seller
+// scanning. Nothing here is derived into a score or canonical account fact.
 type AccountPayloadTextKey =
   | "opportunity_type"
   | "ai_maturity"
@@ -38,20 +33,18 @@ type AccountPayloadTextKey =
   | "derived_fit"
   | "caveat";
 
-const FINDINGS_FIELDS: { key: AccountPayloadTextKey; label: string }[] = [
-  { key: "opportunity_type", label: "Opportunity type" },
+const SNAPSHOT_FIELDS: { key: AccountPayloadTextKey; label: string }[] = [
   { key: "ai_maturity", label: "AI maturity" },
-  { key: "signal_confidence", label: "Signal confidence" },
   { key: "derived_fit", label: "Derived fit" },
+  { key: "target_persona", label: "Target persona" },
+  { key: "matched_use_case", label: "Identified use case" },
+  { key: "opportunity_type", label: "Opportunity type" },
+  { key: "signal_confidence", label: "Signal confidence" },
 ];
 
-const NARRATIVE_FIELDS: { key: AccountPayloadTextKey; label: string }[] = [
+const CONTEXT_FIELDS: { key: AccountPayloadTextKey; label: string }[] = [
   { key: "value_hook", label: "Value hook" },
-  { key: "matched_use_case", label: "Matched use case" },
-  { key: "target_persona", label: "Target persona" },
   { key: "detected_stack", label: "Detected stack" },
-  { key: "druid_fit_hypothesis", label: "DRUID fit hypothesis" },
-  { key: "caveat", label: "Caveat" },
 ];
 
 function formatDateTime(iso: string | null): string {
@@ -243,19 +236,54 @@ function EvidenceList({ items }: { items: ClientRadarEvidenceItem[] | null }) {
   );
 }
 
-function AccountFindings({ payload }: { payload: ClientRadarAccountPayload }) {
+function AccountFindings({
+  payload,
+  evidenceCount,
+}: {
+  payload: ClientRadarAccountPayload;
+  evidenceCount: number;
+}) {
+  const hypothesis = payload.druid_fit_hypothesis ?? payload.value_hook ?? payload.matched_use_case;
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 text-xs">
-        {FINDINGS_FIELDS.map((field) => (
+    <div className="space-y-5">
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-primary">Research snapshot</h3>
+          <span className="text-[11px] text-muted-foreground/70">{evidenceCount} evidence {evidenceCount === 1 ? "item" : "items"}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-border/70 bg-background/20 p-3 sm:grid-cols-3">
+        {SNAPSHOT_FIELDS.map((field) => (
           <FindingField key={field.key} label={field.label} value={payload[field.key]} />
         ))}
-      </div>
-      <div className="space-y-3">
-        {NARRATIVE_FIELDS.map((field) => (
-          <NarrativeField key={field.key} label={field.label} value={payload[field.key]} />
-        ))}
-      </div>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-primary">Opportunity hypothesis</h3>
+          <p className="mt-1 text-[11px] text-muted-foreground/70">Research intelligence to validate, not a recommendation or confirmed account fact.</p>
+        </div>
+        <p className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-relaxed text-foreground">
+          {hypothesis ?? <span className="text-muted-foreground">No opportunity hypothesis was returned.</span>}
+        </p>
+      </section>
+
+      {payload.caveat && (
+        <section className="space-y-1 rounded-lg border border-status-warning-border bg-status-warning/5 px-3 py-2.5">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-status-warning-foreground">Needs validation</h3>
+          <p className="text-sm leading-relaxed text-foreground">{payload.caveat}</p>
+        </section>
+      )}
+
+      <section className="space-y-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Research context</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {CONTEXT_FIELDS.map((field) => (
+            <NarrativeField key={field.key} label={field.label} value={payload[field.key]} />
+          ))}
+          <NarrativeField label="DRUID fit hypothesis" value={payload.druid_fit_hypothesis} />
+        </div>
+      </section>
     </div>
   );
 }
@@ -320,7 +348,7 @@ function CompletedResult({ run }: { run: ClientRadarResearchRun }) {
           Client Radar completed this run without resolving a matching account.
         </p>
       ) : (
-        <AccountFindings payload={run.accountPayload} />
+        <AccountFindings payload={run.accountPayload} evidenceCount={run.evidencePayload?.length ?? 0} />
       )}
 
       <div>
