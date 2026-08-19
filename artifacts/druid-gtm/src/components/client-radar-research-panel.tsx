@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, ExternalLink, Info } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, ExternalLink, Info } from "lucide-react";
 import {
   fetchLatestClientRadarResearchRun,
   startClientRadarResearch,
@@ -16,6 +16,7 @@ import {
   type ClientRadarEvidenceItem,
 } from "@/lib/client-radar-research-api";
 import { describeClientRadarFailure } from "@/lib/client-radar-error-presentation";
+import { cn } from "@/lib/utils";
 import { TechnicalDetails } from "@/components/technical-details";
 
 // Two-column "findings" fields (short values) vs full-width "narrative"
@@ -166,20 +167,37 @@ function NarrativeField({ label, value }: { label: string; value: string | null 
 }
 
 function EvidenceEntry({ item }: { item: ClientRadarEvidenceItem }) {
+  const [expanded, setExpanded] = useState(false);
   const sourceLabel = item.source_type
     ? item.source_type.replace(/_/g, " ")
     : "Research source";
+  const content = item.content ?? "No summary available.";
+  const canExpand = content.length > 280;
   return (
     <div className="rounded-lg border border-border bg-card/50 px-3 py-2.5 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium text-foreground">
           {item.title ?? sourceLabel}
         </p>
-        {item.source_type && <Badge variant="outline">{item.source_type}</Badge>}
+        <Badge variant="outline" className="text-[10px] capitalize text-muted-foreground">
+          {sourceLabel}
+        </Badge>
       </div>
-      <p className="text-xs text-muted-foreground leading-relaxed">
-        {item.content ?? "No summary available."}
+      <p className={cn("text-xs leading-relaxed text-muted-foreground", !expanded && canExpand && "line-clamp-4")}>
+        {content}
       </p>
+      {canExpand && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+        >
+          {expanded ? "Collapse" : "Expand"}
+          {expanded ? <ChevronUp className="ml-1 size-3" /> : <ChevronDown className="ml-1 size-3" />}
+        </Button>
+      )}
       <div className="flex items-center gap-3">
         <p className="text-[11px] text-muted-foreground/60">{formatDateTime(item.created_at)}</p>
         {item.url && (
@@ -210,6 +228,9 @@ function EvidenceList({ items }: { items: ClientRadarEvidenceItem[] | null }) {
 
   return (
     <div className="space-y-2">
+      <p className="text-[11px] text-muted-foreground/70">
+        Showing {Math.min(visibleCount, items.length)} of {items.length} evidence items
+      </p>
       {items.slice(0, visibleCount).map((item) => (
         <EvidenceEntry key={item.id} item={item} />
       ))}
