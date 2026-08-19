@@ -400,11 +400,14 @@ export function ClientRadarResearchPanel({ accountId }: { accountId: string }) {
     <Card className="border-border bg-card">
       <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-xs font-semibold uppercase tracking-wider text-primary">
-          Client Radar research
+          Research intelligence · Client Radar
         </CardTitle>
         {run && <StatusBadge run={run} />}
       </CardHeader>
       <CardContent className="space-y-4">
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Research findings can inform the account but are not automatically treated as confirmed facts.
+        </p>
         {researchQ.isLoading && (
           <div className="space-y-2">
             <Skeleton className="h-4 w-2/3 rounded" />

@@ -65,13 +65,13 @@ export function AccountFactsPanel({ accountId }: AccountFactsPanelProps) {
     <Card className="border-border bg-card">
       <CardHeader>
         <CardTitle className="text-xs font-semibold uppercase tracking-wider text-primary">
-          Company facts
+          Confirmed account facts
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Manually confirmed facts are used as real evidence in future official
-          evaluations. Unconfirmed fields remain unknown — nothing here is guessed.
+          These manually confirmed values belong to the account record. Unconfirmed fields remain
+          unknown — nothing here is guessed.
         </p>
 
         {factsQ.isLoading && (
