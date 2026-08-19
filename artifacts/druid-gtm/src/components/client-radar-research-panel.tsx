@@ -166,11 +166,14 @@ function NarrativeField({ label, value }: { label: string; value: string | null 
 }
 
 function EvidenceEntry({ item }: { item: ClientRadarEvidenceItem }) {
+  const sourceLabel = item.source_type
+    ? item.source_type.replace(/_/g, " ")
+    : "Research source";
   return (
     <div className="rounded-lg border border-border bg-card/50 px-3 py-2.5 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium text-foreground">
-          {item.title ?? "Untitled evidence"}
+          {item.title ?? sourceLabel}
         </p>
         {item.source_type && <Badge variant="outline">{item.source_type}</Badge>}
       </div>
@@ -196,6 +199,7 @@ function EvidenceEntry({ item }: { item: ClientRadarEvidenceItem }) {
 }
 
 function EvidenceList({ items }: { items: ClientRadarEvidenceItem[] | null }) {
+  const [visibleCount, setVisibleCount] = useState(3);
   if (!items || items.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -206,9 +210,14 @@ function EvidenceList({ items }: { items: ClientRadarEvidenceItem[] | null }) {
 
   return (
     <div className="space-y-2">
-      {items.map((item) => (
+      {items.slice(0, visibleCount).map((item) => (
         <EvidenceEntry key={item.id} item={item} />
       ))}
+      {visibleCount < items.length && (
+        <Button variant="outline" size="sm" onClick={() => setVisibleCount((count) => Math.min(count + 3, items.length))}>
+          Show more evidence ({items.length - visibleCount} remaining)
+        </Button>
+      )}
     </div>
   );
 }
