@@ -1,5 +1,15 @@
 # Product Roadmap
 
+> **⚠️ STALE — superseded by `NEXT_SESSION.md`, verified 2026-08-20.** This
+> document (and `PROJECT_HANDOFF.md`, `PROJECT_AUDIT.md`) describes the
+> repository as of commit `4a34112` (2026-08-18). At least 14 commits have
+> since merged to `main`, including a full Milestone 0-3 restructuring
+> (HubSpot integration, Account Workspace UX redesign, canonical attention
+> wiring) that this document's "GTM V2" framing does not reflect. **Do not
+> treat this file as current execution truth.** Read `NEXT_SESSION.md` first
+> for present-tense state; this file is retained for historical/audit-trail
+> value only until a dedicated reconciliation pass.
+
 > **2026-08-18 audit update.** This document was last substantively edited at
 > commit `5f866b0` and described "Current Product State" only through PR #27.
 > Sixteen more PRs have merged to `main` since, including ten (`#34`-`#43`)

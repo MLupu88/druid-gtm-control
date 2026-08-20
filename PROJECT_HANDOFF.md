@@ -1,5 +1,10 @@
 # PROJECT_HANDOFF.md — DRUID GTM Mission Control
 
+> **⚠️ STALE — superseded by `NEXT_SESSION.md`, verified 2026-08-20.** This
+> document's HEAD (`4a34112`) is at least 14 commits behind `main`. Do not
+> treat this as current execution truth — see `NEXT_SESSION.md`. Retained for
+> historical/audit-trail value only.
+
 Durable, self-contained implementation-state reference. A fresh ChatGPT,
 Claude Code, or Codex session should be able to read this file (plus
 `ROADMAP.md` and `PROJECT_AUDIT.md`) and understand the project without any

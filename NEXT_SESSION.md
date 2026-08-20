@@ -1,425 +1,572 @@
-# NEXT_SESSION.md — DRUID GTM Mission Control
+# DRUID GTM Mission Control — Next Session Handoff
 
-Concise, operational resume point. For full context, read the files below
-first — do not re-derive decisions already made in them.
+## 1. Read this first
 
----
+This file is the current execution handoff for the next coding agent. It is
+an operational summary, not a replacement for the deeper project records.
+Repository/runtime evidence wins over stale assumptions. Do not restart
+completed work.
 
-## Resume point
+Before implementing anything, read `ROADMAP.md`, `PROJECT_HANDOFF.md`, and
+the relevant audit documents referenced below. Confirm the current git state
+and inspect the implementation that actually exists.
 
-A full read-only repository audit completed 2026-08-18 (`PROJECT_AUDIT.md`),
-which also updated `ROADMAP.md` (added a "GTM V2" section and a "Roadmap
-Corrections" section) and created `PROJECT_HANDOFF.md`. A follow-up
-correction pass, also 2026-08-18, fixed several imprecise claims across all
-four documents (see each document's own correction note) and narrowed the
-scope of the unit below — most importantly, it removed an internal
-contradiction this file originally had between "membership is determined by
-canonical open attention items" and "preserve the old MQL/Dismiss
-local-state hiding logic." **No application code, schema, or migration was
-changed by either pass.** The single next implementation unit is below,
-alongside a separate verification step and a separate product decision that
-are not part of it.
+## 2. Working method
 
----
+- Repository: `/Users/mihailupu/Projects/druid-gtm-control`
+- GitHub: `MLupu88/druid-gtm-control`
+- The user uses Claude Code/Codex for repository implementation and review.
+- Normal Terminal/SSH is used for Git, Docker, deployment, and verification.
+- Work one concrete step at a time.
+- No production, deployment, schema, migration, or secrets work without explicit user approval.
+- Never touch the unrelated untracked root `n8n` file.
 
-## Files to read first
+## 3. Current production state
 
-1. `PROJECT_HANDOFF.md` — durable implementation-state reference
-2. `ROADMAP.md` — canonical roadmap (see "Current Verified State — 2026-08-18" near the top, the "GTM V2" section, and "Roadmap Corrections / Reclassified Work" near the end)
-3. `PROJECT_AUDIT.md` — full evidence/citations behind every claim in the two files above (see DISC-07 and DISC-08 specifically for this unit's corrected scope)
-4. `design-system-extract.md` (supplemental, visual reference only — see "Design reference" below)
+- Production server: `88.99.81.51`
+- Production repository: `/root/gtm-control`
+- Public app: `https://gtm.aiexperiments.eu`
+- Current deployed/main commit: `7b219f5`
+- Docker app service: `gtm-control`
+- Production health was verified internally and externally after deployment.
 
----
+## 4. Completed work
 
-## Preflight
+### Milestone 0 — Canonical Core
 
-`4a341126a59cd33337a36af9be8f3d6088fc9333` ("GTM V2: add durable Client
-Radar account mapping (#43)") is the **audited application-code baseline** —
-the commit every claim in `PROJECT_HANDOFF.md`/`PROJECT_AUDIT.md` was
-verified against. It is **not** necessarily the literal HEAD you'll see:
-committing the four documentation files this audit produced moves HEAD past
-it, and that is expected, not a discrepancy. What actually matters is
-whether any *application-code-bearing* change (schema, migrations, backend,
-frontend, CI, config, dependencies — anything other than these four
-markdown files) has landed since that baseline. Run this and compare against
-the two valid states below **before making any change**. If reality matches
-neither, **STOP and report the discrepancy before implementing anything.**
+DONE.
 
-```bash
-git -C /Users/mihailupu/Projects/druid-gtm-control rev-parse --show-toplevel
-git -C /Users/mihailupu/Projects/druid-gtm-control branch --show-current
-git -C /Users/mihailupu/Projects/druid-gtm-control log -1 --format="%H %ci %s"
-git -C /Users/mihailupu/Projects/druid-gtm-control status --short
-git -C /Users/mihailupu/Projects/druid-gtm-control diff --name-only 4a341126a59cd33337a36af9be8f3d6088fc9333..HEAD
+### Milestone 1 — External Input Proof
+
+DONE for:
+
+- HubSpot controlled identity connector
+- Client Radar direct backend integration
+
+RB2B remains deliberately parked.
+
+### Milestone 2 — UX Operating Shell v1
+
+The current UX refresh is complete through Account Workspace Phase 3F:
+
+- global shell/design system
+- Accounts redesign
+- Needs Attention redesign
+- Account Workspace tabs
+- Intelligence redesign
+- evidence progressive disclosure
+- trust-state wording
+- sticky workspace tabs
+- Overview redesign
+
+Intelligence visual QA was positive.
+
+Global Home/Overview remains old-generation UX and is intentionally deferred.
+Reports and Settings remain old-generation UX and are deferred.
+
+## 5. Current product truth boundaries
+
+- Canonical account facts are confirmed/current account truth.
+- Client Radar is research intelligence, not automatically confirmed truth.
+- HubSpot CRM data is not behavioral Intent.
+- Recommendation, human decision, execution, and provider confirmation are separate concepts.
+- One canonical account is the unit of intelligence.
+
+## 6. Milestone 3 — One Account Truth
+
+This is the next active product milestone.
+
+The target architecture is provider-neutral:
+
+```text
+Provider adapter
+  → ProviderObservation
+  → shared normalization/taxonomy
+  → CandidateFact
+  → agreement/conflict resolution
+  → CanonicalFact
+  → evaluation / UI
 ```
 
-**Branch must be `main` in both valid states below — anything else is
-already a mismatch, stop immediately.**
+Current and future providers:
 
-**Valid state 1 — docs still uncommitted:** HEAD is still exactly
-`4a341126a59cd33337a36af9be8f3d6088fc9333`, and `git status --short` shows
-only the four documented changes (`ROADMAP.md` modified; `PROJECT_AUDIT.md`,
-`PROJECT_HANDOFF.md`, `NEXT_SESSION.md` untracked). The last command above
-will show no output (nothing committed since baseline yet) — that's expected
-here, not a check to apply in this state.
+- HubSpot
+- Client Radar
+- RB2B
+- Dealfront
+- Cognism
+- human/operator input
 
-**Valid state 2 — docs have been committed:** HEAD is a **descendant** of
-`4a341126a59cd33337a36af9be8f3d6088fc9333` (confirm with
-`git merge-base --is-ancestor 4a341126a59cd33337a36af9be8f3d6088fc9333 HEAD`
-— exit code `0` means yes), `git status --short` is fully clean, **and** the
-`git diff --name-only` output above lists **only** some subset of
-`ROADMAP.md`, `PROJECT_HANDOFF.md`, `PROJECT_AUDIT.md`, `NEXT_SESSION.md`.
-If that diff lists *any* other path — a schema file, a migration, anything
-under `artifacts/`, `lib/` source, `.github/workflows`, `package.json`/lock
-files, `Dockerfile`, `docker-compose.yml`, etc. — the application-code
-baseline this audit verified no longer holds as described. **STOP and
-report exactly which non-documentation paths changed**, rather than
-assuming the audit's findings still apply; those files were not covered by
-this audit and may have shifted the ground it stood on.
+Do not design the canonical layer specifically around HubSpot and Client
+Radar. Provider-specific payloads stay inside adapters; core resolution must
+operate on generic observations/candidates.
 
-Neither valid state requires HEAD to literally equal
-`4a341126a59cd33337a36af9be8f3d6088fc9333` — only that no application code
-changed since it.
+## 7. One Account Truth audit findings
 
-Also verify the environment still typechecks and unit-tests clean before
-starting:
+These findings come from the verified 2026-08-19 read-only architecture audit.
 
-```bash
-pnpm exec tsc --build
-cd artifacts/api-server && pnpm exec tsx --test src/services/accounts.test.ts src/routes/accounts.route.test.ts src/services/attentionItems.test.ts src/routes/attentionItems.route.test.ts
-```
+### HubSpot
 
----
+- The connector currently requests only `domain` and `name` (plus company ID).
+- It is used for canonical identity and aliases.
+- It does not currently ingest industry, country, employees, revenue, owner, lifecycle stage, or similar firmographics.
+- Field-level provenance does not yet exist.
 
-## Three distinct next steps — do not conflate them
+#### HubSpot Capability Audit (3A.5) — DONE, verified against live tenant, 2026-08-20
 
-This session covers **one** of these three. They are different in kind, not
-just in size, and are sequenced accordingly (full reasoning in
-`PROJECT_AUDIT.md` §R):
+Portal ID `6401175`. Verified directly against the production HubSpot tenant and the
+production Private App token — read-only checks only; no writes, no schema changes.
 
-- **A. Implementation (this session's objective, below):** wire the frontend
-  "Needs Attention" *membership* view to the already-built GTM V2 attention
-  read model. Safe to build now — no schema/backend change, no unresolved
-  product question blocks it.
-- **B. Verification (should happen in parallel, not before or after A —
-  see "Next verification step" below):** confirm whether any real
-  operational signal currently reaches GTM V2's ingestion endpoint at all
-  (`PROJECT_AUDIT.md` DISC-07). This is **not** an implementation task for
-  this or any coding session — it requires inspecting a running system.
-- **C. Product decision (should follow B, not precede it — see "Next
-  product decision" below):** decide what should feed Intent scoring
-  (`PROJECT_AUDIT.md` DISC-02). Do not scope this as an implementation unit
-  until a human has made this decision.
+**Website tracking:** HubSpot tracking for `https://www.druidai.com` is installed and
+was validated in the HubSpot UI (confirmed 2026-08-20).
 
----
+**Firmographic/company data — genuinely available, not currently ingested.** A live
+company record (`57634473634`) returned `industry` (`CAPITAL_MARKETS`), `country`
+(`United States`), `state` (`Colorado`), `numberofemployees` (`125`), `lifecyclestage`
+(`lead`), and create/last-modified timestamps. `annualrevenue`, `owner`, and `type` are
+available properties on the object but were null on this record. Current GTM code still
+requests only `name`/`domain` — this is a code/config gap, not a platform limit.
 
-## Immediate objective (A — implementation)
+**Identity/contact and CRM state — available, partially unproven.** Company-to-contact
+association works. The token can read contacts. Contact analytics summary properties
+(page-view/visit counts, first/last URL and timestamp) are API-readable — but the
+tested contact had 0 visits/page views and `source = OFFLINE`, so known-contact web
+activity itself remains unproven on a real record, not just unimplemented.
 
-**Wire the frontend "Needs Attention" view's *membership* to the already-built
-GTM V2 attention read model — read-only.**
+**Detailed web-event ingestion — verified NOT currently available.**
+`GET /events/v3/events?...e_visited_page...` returns HTTP 403, requiring
+`event-detail-read` or `web-analytics-api-access`. Neither scope is offered in the
+Private App scope picker for this account/app. **This must not block Milestone 3** — it
+is a verified platform/plan limitation, not an implementation gap.
 
-Replace `artifacts/druid-gtm/src/components/needs-attention-view.tsx`'s
-current data source (Sheet-backed rows matched to canonical accounts,
-filtered by whether the latest `account_decisions.routing_output` is
-`dismissed`/`mql`) with the canonical `attention_items`-derived read model
-already implemented in `artifacts/api-server/src/services/accounts.ts`
-(`listAccounts` with `needsAttention: true`, returning each account's
-`AccountAttentionSummary`).
+**Exact current Private App scopes:** `analytics.behavioral_events.send`,
+`behavioral_events.event_definitions.read_write`, `crm.objects.companies.read`,
+`crm.objects.contacts.read`, `crm.objects.deals.read`, `crm.objects.owners.read`,
+`oauth`. Note: the two `behavioral_events.*` scopes only allow *sending/managing*
+custom events — they do not grant read access to existing page-view/visit events.
 
-**The canonical invariant this unit must implement (this is the corrected
-core of this unit — read carefully):**
+**Product decision (2026-08-20):** HubSpot and RB2B are the current priority provider
+sources. HubSpot should be used for as much identity, CRM/firmographic context,
+known-contact analytics summary, and owner/deal context as the verified API access
+above actually permits. RB2B is the priority source for anonymous visitor/company
+website behavior once its existing activation is verified. **Cognism and Dealfront
+implementation are PARKED.** The architecture must stay provider-neutral so parked
+providers can be added later without a redesign.
 
-> Frontend code must never independently decide that an account no longer
-> needs attention. Membership in "Needs Attention" is determined solely by
-> canonical open `attention_items` rows, as returned by
-> `GET /internal/accounts?needsAttention=true`. After any operator action
-> (MQL, Dismiss, or anything else), refetch/re-evaluate canonical attention
-> state rather than removing the row from local state. An account
-> disappears from the view only when the backend reports no open attention
-> item remains for it — never because the frontend inferred that a decision
-> "should" have resolved its attention.
+**Semantic boundary (binding on 3B):** HubSpot CRM/firmographic data is not Intent. A
+single provider may produce more than one observation class — HubSpot alone spans
+identity, firmographic_fact, and crm_state. The provider-neutral contract must not
+collapse these into one generic value type.
 
----
+### Client Radar
 
-## Why this is next, and why its scope is narrower than it first looked
+- The result parser recognizes top-level `company`, `domain`, `country`, and `industry`.
+- Structured top-level `country` and `industry` are currently discarded during persistence.
+- The opaque account payload and evidence are retained.
+- Client Radar research does not write canonical account facts.
 
-- The read-model backend for this exists, is DB-trigger-enforced, and is
-  fully unit-tested — four PRs (`#38`-`#40`) already merged to `main`
-  building it. Right now it produces **zero user-visible effect**, because
-  nothing in the frontend calls it (`PROJECT_AUDIT.md` DISC-03).
-- It is frontend-only for the *membership/read* path: no schema change, no
-  migration, no new backend endpoint required for that part.
-- It directly continues `ROADMAP.md`'s own "Next Delivery Sequence #1"
-  (canonical operational workspace migration) — this is the frontend half of
-  work whose backend half is already done.
-- **Corrected in this pass (`PROJECT_AUDIT.md` DISC-08):** the original
-  version of this document told the implementer to "preserve the old
-  MQL/Dismiss local-state removal logic," which directly contradicts the
-  canonical invariant above. Verified in code: `accountDecisions.ts` (the
-  MQL/Dismiss write path) has zero references to `attention_items` — an
-  MQL/Dismiss decision does **not** resolve any attention item. If the old
-  local-state rule were kept, an account with an open, unrelated attention
-  item (e.g. `evaluation_stale`) that gets MQL'd would incorrectly
-  disappear from "Needs Attention" while the backend still considers it
-  open. That old rule must be **removed**, not adapted.
-- **Also corrected in this pass:** an operator-facing "resolve this
-  attention item" UI control is genuinely **out of scope for this unit**,
-  not merely deferred by choice — `POST /internal/attention-items/:id/resolve`
-  is gated by `requireServiceAuth` (shared-secret header), not `requireAuth`
-  (browser session), so the frontend **cannot** call it today. Building that
-  control would require a separate, later backend decision (a new
-  `requireAuth`-gated resolve route, or some other mechanism) that this unit
-  does not include.
-- It does **not** depend on step B (verifying the signal bridge) or step C
-  (the Intent product decision) — this unit displays whatever attention
-  items exist today, however they got created, and is equally correct
-  whether or not real signals are currently flowing.
+### Canonical account facts
 
----
+- Facts are currently manual-only.
+- Supported fields are `industry`, `country`, `region`, `employee range`, and `revenue range`.
+- Industry, country, employee range, and revenue range are free text.
+- Region is constrained to the existing region vocabulary.
+- Immutable fact history and a current pointer exist.
+- No provider candidate model exists.
+- No provider agreement/conflict model exists.
+- Source is persisted for manual facts but currently omitted from API/UI serialization.
 
-## Scope
+### ICP/evaluator
 
-- Replace `needs-attention-view.tsx`'s data-fetching/filtering logic with a
-  call to `GET /internal/accounts?needsAttention=true` (existing endpoint,
-  existing auth boundary — `requireAuth`, same as every other route this
-  page already calls).
-- Surface each account's `AccountAttentionSummary` (open attention-item
-  count, oldest open item's `createdAt`, distinct reason codes) somewhere in
-  the row/detail UI — the exact visual treatment is an implementation
-  choice, not specified by this document (see "Design reference" below).
-- **Remove** the old local-state rule that hides a row once its latest
-  decision is `mql`/`dismissed` (`needs-attention-view.tsx:210-230`ish) —
-  replace it with canonical-membership-only logic per the invariant above.
-  After any account-decision action completes, refetch the accounts list
-  (or otherwise re-derive from a fresh server response) rather than mutating
-  local state to remove the row.
-- Preserve Sample Mode gating (a genuinely separate, still-valid guardrail —
-  unrelated to the attention-lifecycle contradiction being fixed here).
-- Update or remove any test in `artifacts/druid-gtm/src` that currently
-  asserts against the old Sheet-backed filtering or the old MQL/Dismiss
-  local-state-removal behavior for this view.
+- There is no shared taxonomy for most company attributes.
+- Exact raw-string equality is used.
+- A real mismatch exists between values such as `emea` and `EMEA`.
+- The evaluator consumes current canonical/manual facts through immutable snapshots.
 
-## Out of scope
+## 8. Major architectural blockers
 
-- Any change to `lib/db/src/schema`, `lib/db/drizzle/*.sql`, or any
-  `artifacts/api-server/src/services/*` file — the read-model backend for
-  this unit is already complete and tested; do not modify it.
-- **Any "resolve this attention item" UI control** — not reachable from the
-  browser session today (see "Why this is next" above); do not add one, and
-  do not add a new backend route to enable one, as part of this unit.
-- Step B: runtime-verifying the operational signal bridge (DISC-07) — not an
-  implementation task at all, and not blocking this unit either way.
-- Step C: wiring signals/identity resolution into ICP evaluation (DISC-02) —
-  a separate, larger unit requiring a product decision first.
-- Any other operational queue from `ROADMAP.md`'s "Next Delivery Sequence #1"
-  list (MQL, Sales Review, Pipeline Assist, etc.) — those remain out of
-  scope until this unit is done.
-- Any change to the older Sheet-backed data path that other views (e.g.
-  "All Accounts") may still depend on — do not remove Sheet-reading code
-  that other, unrelated views still use.
+- No provider-neutral observation/candidate-fact model.
+- No shared taxonomy/normalization layer.
+- Exact-string ICP matching.
+- Client Radar structured firmographics are being dropped.
+- Fact provenance is incomplete through the API/UI.
+- No generic source agreement/conflict resolution.
+- HubSpot firmographics are not ingested yet.
 
-## Acceptance criteria
+## 9. Future-provider constraint
 
-- An account with at least one open `attention_items` row (any `source`,
-  any `reason_code`) appears in "Needs Attention" — **including** one whose
-  latest `account_decisions` row is `mql` or `dismissed`, as long as an open
-  attention item remains (this specific case is the regression test for the
-  DISC-08 correction).
-- After an operator records an MQL/Dismiss decision (or any other action),
-  the view reflects fresh canonical attention state (via refetch) rather
-  than locally removing the row — an account with a still-open, unrelated
-  attention item remains visible.
-- An account with only resolved attention items (or none at all) does not
-  appear in "Needs Attention."
-- No UI control in this view claims to "resolve" or "dismiss" an attention
-  item — only account-level decision actions (MQL/Dismiss) that already
-  exist elsewhere in the product are present.
-- Pagination, search, filters, loading/empty/error states on this view
-  continue to work against the new data source (mirror whatever the existing
-  "All Accounts" view — which already calls the same `accounts.ts` service —
-  already does correctly).
-- `pnpm exec tsc --build` and the relevant frontend test suite
-  (`artifacts/druid-gtm`'s `pnpm test`, filtered to files touched) pass.
-- No change to any file under `lib/db`, `lib/evaluator`, or
-  `artifacts/api-server/src/services`.
+Adding RB2B, Dealfront, or Cognism later must not require:
 
-## Relevant files/code paths
+- redesigning the canonical fact schema
+- copying Client Radar's research-run architecture
+- duplicating HubSpot-specific identity logic
+- adding provider-specific reconciliation branches to core canonical-truth logic
 
-- `artifacts/druid-gtm/src/components/needs-attention-view.tsx` — primary file to change
-- `artifacts/druid-gtm/src/pages/accounts.tsx` — the page that mounts it (view routing: `?view=attention` vs `?view=all`)
-- `artifacts/druid-gtm/src/lib/accounts-api.ts` — existing frontend API client for `GET /internal/accounts`; needs a `needsAttention` param added
-- `artifacts/api-server/src/services/accounts.ts:332-536` — `listAccounts`, the backend read model (do not modify — read to understand the exact response shape)
-- `artifacts/api-server/src/routes/accounts.ts` — the route exposing it
-- `artifacts/api-server/src/services/accountDecisions.ts` — read (do not modify) to confirm for yourself that it does not touch `attention_items`, before relying on that fact
-- `lib/db/src/schema/attentionItems.ts` — schema reference only, for understanding the `AccountAttentionSummary` shape (do not modify)
+Provider-specific payloads stay inside adapters. Core resolution operates on
+generic observations and candidates. Provider-specific research fields must
+not become canonical fact fields merely because one provider exposes them.
 
-## Design reference
+## 10. Recommended Milestone 3 sequence
 
-`design-system-extract.md` (repo root) documents DRUID's visual system
-(colors, typography, spacing, cards, badges, states) inferred from the
-`druid-calculator` app — the visual source of truth for DRUID product apps.
-Use it for styling the attention-summary UI this unit adds (badge colors for
-reason codes, card/row treatment, empty/loading states, etc.) so it stays
-visually consistent with the rest of the product. **It is visual/design
-guidance only — not an architecture or source-of-truth document.** Do not
-redesign unrelated screens, and do not introduce a new visual pattern where
-an existing one in `needs-attention-view.tsx` or its siblings already covers
-the case; reach for a new element from the design system only when the new
-attention-summary UI genuinely needs one that doesn't already exist in the app.
+### 3A — Deep architecture audit
 
-## Tests expected
+DONE. Findings are summarized above and were captured from the 2026-08-19
+read-only audit.
 
-- New/updated frontend tests asserting the "Needs Attention" view correctly reflects the `needsAttention`/`AccountAttentionSummary` response shape (mock the API response; don't require a live backend).
-- A test covering the DISC-08 regression case specifically: an account with an open attention item and a latest `mql`/`dismissed` decision still appears.
-- Do not add or modify any `artifacts/api-server` test — the backend is already fully tested for this read model.
-- Do not attempt to spin up Postgres or run any `.integration.test.ts` file as part of this unit.
+**3A.5 — Mandatory HubSpot Capability Audit is also DONE**, verified
+2026-08-20 against the live production HubSpot tenant (not just repo code).
+See §7 "HubSpot Capability Audit (3A.5)" above for full findings.
 
-## Guardrails
+### 3B — Provider-neutral observation contract
 
-- No production access, no deploy, no SSH.
-- No database migration — this unit requires none; if you find yourself wanting one, stop and re-read the scope above.
-- No secret values printed, echoed, or committed anywhere.
-- No auto-send / auto-MQL / auto-accept logic introduced anywhere near this change — this unit is read/filter/display only.
-- No new "resolve attention item" backend route or UI control — out of scope (see above).
-- Do not commit or push without explicit user approval, even after tests pass.
-- Do not modify `lib/evaluator`, `lib/evaluator-persistence`, or any Client Radar service file as part of this unit.
+**CURRENT WORK.** Implemented, tested, and typechecked 2026-08-20 — **not
+yet reviewed/approved for commit, not committed, not pushed, not
+deployed.** See §17 "Session checkpoint — 3B implementation" below for the
+full precise resume point (exact files, final contract shape, test
+results, git status, next exact action).
 
----
+Define provider-neutral concepts and invariants:
 
-## Next verification step (B — not an implementation task)
+- provider
+- sourceRecordId
+- canonical field
+- rawValue
+- normalizedValue
+- confidence
+- observedAt
+- importedAt
+- evidenceRefs
 
-**Runtime-verify whether any real operational signal currently reaches GTM
-V2's signal-ingestion API** (`PROJECT_AUDIT.md` DISC-07). This audit found no
-caller of `POST /internal/signals` anywhere in this repository and no
-provider-specific adapter code (RB2B, Dealfront, etc.) — meaning it is
-genuinely unknown whether the resolver, though internally correct, currently
-receives any real data. This requires access to a running system this audit
-was constrained not to touch (a live n8n instance's workflow definitions, or
-the `signals` table in a real database) and explicit approval before any of
-that is attempted. Suggested trace, once approved: pick one real signal
-source → confirm what it actually sends and where → confirm whether that
-payload is normalized into `NormalizedSignalV1` shape anywhere → confirm
-whether it is ever POSTed to `/internal/signals` → confirm a resulting
-`signals` row and `identity_resolution_events` row exist. Do not build a
-bridge before this trace is done — building toward an assumed-but-unverified
-integration risks solving the wrong problem.
+Do not implement provider auto-promotion yet.
 
-## Next product decision (C — not an implementation task)
+### 3C — Shared taxonomy and normalization
 
-**Decide what should feed Intent scoring** (`PROJECT_AUDIT.md` DISC-02).
-Evaluation input currently comes only from bare account identity plus
-manually-entered `account_facts`; the evaluator's `NormalizedEngagementV1Schema`
-and `intent` rule dimension are fully built but never populated. This is a
-product decision (what does "Intent" mean for this product — aggregated
-signal/engagement activity? something else?), not an engineering task, and
-should be made only after step B above establishes whether real signal data
-is even available to decide about.
+Establish one source of truth for:
 
----
+- industry
+- country
+- region
+- employee bands
+- revenue bands
 
-## After this unit
+Do not invent the business taxonomy without an explicit product decision.
 
-1. Runtime-verify DISC-07 (step B above) — can happen in parallel with, or immediately after, this unit; does not block it.
-2. Bring the DISC-02 product decision (step C above) to the user, informed by step B's result.
-3. Fix CI to run the Client Radar and ICP-profile test suites on every PR (DISC-05) — small, mechanical, can happen any time.
-4. Continue `ROADMAP.md`'s "Next Delivery Sequence #1" with the remaining operational queues (MQL, Sales Review, Pipeline Assist, Owner Alert, Retarget, Nurture, Suppressed).
+### 3D — Candidate fact persistence
 
----
+Persist generic multi-provider observations/candidates with provenance and
+idempotency.
 
-## Bootstrap prompt for Codex
+### 3E — First provider adapters
 
-```
-You're picking up implementation work on the DRUID GTM Mission Control
-repository (/Users/mihailupu/Projects/druid-gtm-control, branch main).
+HubSpot and Client Radar become the first adapters.
 
-Before writing any code, read these files in full, in this order:
-1. PROJECT_HANDOFF.md
-2. ROADMAP.md (especially "Current Verified State — 2026-08-18" near the
-   top, the "GTM V2" section, and "Roadmap Corrections / Reclassified Work"
-   near the end)
-3. PROJECT_AUDIT.md (especially DISC-07 and DISC-08)
-4. NEXT_SESSION.md (this file's sibling) for the specific unit
-5. design-system-extract.md for visual/styling reference only (not
-   architecture)
+- HubSpot can then request relevant firmographics.
+- Client Radar should preserve structured country/industry.
+- Both initially submit candidates rather than directly overwriting canonical facts.
 
-These were produced by a full read-only repository audit plus a follow-up
-correction pass, and are the current source of truth — do not assume
-anything from outside this repository. That said, treat them as a starting
-map, not gospel: inspect the actual current code yourself (schema, services,
-routes, frontend) for anything you're about to touch, since code may have
-moved since the audit. In particular, verify for yourself (don't just take
-the document's word) that accountDecisions.ts does not touch attention_items
-before relying on that fact.
+### 3F — Agreement/conflict and canonical selection
 
-Run the preflight commands in NEXT_SESSION.md first. Branch must be main.
-HEAD does NOT need to literally equal the commit NEXT_SESSION.md names as
-the audited application-code baseline — committing these four documentation
-files is expected to move HEAD past it. What matters is whether any
-application-code-bearing file (not one of the four docs) has changed since
-that baseline commit; NEXT_SESSION.md's "Preflight" section gives the exact
-git diff command and the two valid states to check against. If neither
-valid state matches — in particular, if that diff shows any changed path
-outside the four documentation files — STOP and report exactly which
-non-documentation paths changed instead of proceeding, since those weren't
-covered by the audit you're relying on.
+Add deterministic resolution, human override, provenance, and conflict state.
 
-Your task is ONLY the single implementation unit described in
-NEXT_SESSION.md under "Immediate objective (A)" / "Scope" / "Out of scope" /
-"Acceptance criteria." Do not attempt the "Next verification step" or "Next
-product decision" sections — those are explicitly not implementation tasks
-for this session, even if they look related or quick. Do not start on
-anything else in the roadmap either.
+### 3G — ICP/evaluator integration
 
-Pay close attention to the canonical invariant stated under "Immediate
-objective": membership in Needs Attention comes solely from canonical open
-attention_items, never from frontend-local judgment about whether a decision
-"should" have resolved something. Do not preserve the old MQL/Dismiss
-local-state hiding logic — remove it, per the acceptance criteria.
+ICP authoring and evaluation consume shared normalized values.
 
-Before writing any code: propose a short implementation plan (files you'll
-touch, in what order, and how you'll verify each acceptance criterion) and
-wait for approval.
+### 3H — Provenance/conflict UX
 
-Preserve every existing architectural invariant listed in
-PROJECT_HANDOFF.md's "Critical invariants / guardrails" section. Do not
-touch lib/db, lib/evaluator, lib/evaluator-persistence, or any
-artifacts/api-server/src/services file as part of this unit — the backend
-for this unit is already complete; this is a frontend-only change. Do not
-add any "resolve attention item" UI control or backend route — out of scope.
+Account Workspace clearly shows:
 
-Run `pnpm exec tsc --build` and the relevant frontend test suite before
-declaring the work done. Do not commit, push, deploy, migrate, or SSH
-anywhere without explicit approval, even after tests pass.
-```
+- canonical value
+- source(s)
+- agreement
+- conflict
+- human override
+- unresolved candidate values
 
----
+## 11. Later roadmap
 
-## Bootstrap prompt for fresh ChatGPT
+- Milestone 4 — Account Intelligence / Account Brain
+- Milestone 5 — Qualification + real Intent + multi-ICP
+- Milestone 6 — UX Operating Shell v2
+- Milestone 7 — GTM cockpit / validation / Home + Reports + Settings
+- Milestone 8 — Action + feedback loop
+- Milestone 9 — Production hardening
+
+Multi-ICP runtime comparison and AI Account Summary / Account Brain remain
+planned. Do not implement them during early One Account Truth work.
+
+## 12. Deferred / do not accidentally start
+
+- RB2B implementation
+- Dealfront implementation
+- Cognism implementation
+- Account Brain / AI summary
+- multi-ICP runtime comparison
+- new Intent model
+- People enrichment
+- Activity enrichment
+- recommendation engine
+- outbound execution/orchestration changes
+- n8n integration changes
+- Entra/auth redesign unless separately requested
+
+## 13. Known UX/product issues
+
+- Global Home/Overview is visually weak and needs a later dense GTM cockpit redesign.
+- Reports and Settings remain old generation.
+- Free-text canonical fact confirmation is not acceptable as final UX.
+- Do not merely replace free text with arbitrary dropdowns before shared taxonomy exists.
+- The Intelligence tab redesign is considered directionally successful.
+
+## 14. Next coding-agent task
+
+Do not start by expanding HubSpot.
+
+**Contextualized 2026-08-20, post-3A.5:** this means the common provider-neutral
+contract comes first — not that HubSpot lacks useful fields. 3A.5 verified HubSpot
+firmographics, CRM state, and contact analytics summary data are genuinely available
+against the live tenant (see §7). Consuming those verified fields is **3E** scope, to
+be done once the common contract lands — it is not future/unknown capability.
+
+The first implementation task is **Milestone 3B — provider-neutral
+observation contract**.
+
+Before editing:
+
+1. Inspect existing shared types and package boundaries.
+2. Choose the smallest reusable location for the generic observation contract.
+3. Avoid a schema migration unless it is required.
+4. Do not introduce provider-specific reconciliation logic.
+5. Preserve all current production behavior.
+
+If architecture is ambiguous, return an implementation plan before modifying
+files.
+
+## 15. Verification expectations
+
+- Run targeted tests for changed domain logic.
+- Run the full relevant frontend/backend regression suite before a meaningful checkpoint.
+- Run typecheck.
+- Run a production build where appropriate.
+- Run `git diff --check`.
+- Inspect changed paths for scope drift.
+- Do not repeat successful test runs without a reason.
+
+## 16. Canonical references
+
+- `ROADMAP.md`
+- `PROJECT_HANDOFF.md`
+- `PROJECT_AUDIT.md`
+- Any current One Account Truth audit documentation present in the repository.
+
+If the One Account Truth audit exists only in session output and not as a
+repository document, the findings above preserve the 2026-08-19 read-only
+architecture audit in this handoff.
+
+## 17. Session checkpoint — 3B implementation (2026-08-20, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then the rest of this file for full context.
+
+### Status
+
+- 3A — DONE (2026-08-19 audit).
+- 3A.5 — DONE (2026-08-20, verified against live HubSpot tenant — see §7).
+- **3B — Provider-neutral observation contract — CURRENT WORK.** Implemented,
+  tested, and typechecked. **Not reviewed/approved for commit. Not
+  committed. Not pushed. Not deployed. No migration run. No production
+  change of any kind.**
+
+### Product decision recorded (2026-08-20)
+
+- HubSpot and RB2B are the priority provider sources.
+- Cognism and Dealfront implementation remain PARKED.
+- HubSpot firmographic, CRM-state, and contact/identity capabilities are
+  verified available against the live tenant (see §7).
+- HubSpot detailed page-level web-event ingestion is verified **currently
+  unavailable** — `event-detail-read`/`web-analytics-api-access` are not
+  offered in this account's Private App scope picker. Confirmed
+  platform/plan limitation, not an implementation gap — must not block
+  Milestone 3.
+
+### Files changed for 3B (all currently uncommitted)
+
+New package:
+
+- `lib/observation/package.json`
+- `lib/observation/tsconfig.json`
+- `lib/observation/src/index.ts`
+- `lib/observation/src/types.ts` — the contract
+- `lib/observation/src/idempotency.ts` — `computeObservationIdentityKey()`
+- `lib/observation/src/types.test.ts`
+- `lib/observation/src/idempotency.test.ts`
+
+Modified:
+
+- `tsconfig.json` (root) — added `./lib/observation` project reference.
+- `pnpm-lock.yaml` — new workspace importer entry only (verified: no
+  unrelated dependency version drift).
+- `NEXT_SESSION.md` — this file (3A.5 findings, product decision, this
+  checkpoint).
+- `ROADMAP.md`, `PROJECT_HANDOFF.md`, `PROJECT_AUDIT.md` — a single
+  prominent stale-warning banner added to the top of each, pointing at
+  this file. Contents otherwise untouched — no wholesale rewrite was done.
+
+Untouched: all application code (HubSpot client/sync/identity, Client
+Radar client/services, DB schema/migrations, evaluator, frontend/UI, n8n
+routes), and the unrelated untracked root `n8n` file.
+
+### Final contract architecture implemented
+
+`ProviderObservationV1` — a Zod discriminated union on `observationClass`,
+package `@workspace/observation`, pure (no DB/network/other-lib
+dependency), sibling to `lib/identity`, deliberately not merged into it.
+
+Shared envelope (every branch):
 
 ```
-I'm coordinating implementation work (done by Codex/Claude Code, not you)
-on a repository called DRUID GTM Mission Control. Your role here is to help
-me coordinate that implementation, review what Codex/Claude Code produces,
-suggest concrete next commands, and work one action at a time with me — not
-to write large amounts of code yourself.
-
-I have three documents from a recent full repository audit (plus a
-follow-up correction pass) that are the current source of truth for this
-project's actual state: PROJECT_HANDOFF.md, ROADMAP.md, and
-PROJECT_AUDIT.md, plus a short operational NEXT_SESSION.md describing the
-single next implementation unit. I'll paste their contents (or relevant
-sections) as needed. Please rely on what I paste from these documents rather
-than any general assumptions about what a "GTM system" typically looks like,
-and don't try to recall or infer project history from anything other than
-what I give you in this conversation.
-
-The immediate implementation objective is: wire the frontend "Needs
-Attention" view's membership to an already-built backend read model,
-read-only (details in NEXT_SESSION.md). Two separate, non-implementation
-next steps exist alongside it and should not be conflated with it: a
-runtime verification of whether real signals reach the backend at all, and
-a product decision about what should feed Intent scoring — help me keep
-those three distinct as we go. Help me track progress against the
-implementation unit's acceptance criteria and think through any
-implementation decisions Codex surfaces.
+schemaVersion: "v1"
+provider: string                          // open string, not a closed enum
+sourceRecordId: string
+observedAt: ISO8601 (offset-aware) | null // nullable — see rationale below
+importedAt: ISO8601 (offset-aware)        // always required
+confidence: "low" | "medium" | "high" | null
+evidenceRefs: { type: string; ref: string }[]     // max 20
+providerMetadata: Record<string, unknown> | null  // only escape hatch for provider payload shape
 ```
+
+Discriminated classes (5, per explicit requirement — semantically
+separate, never one generic value type):
+
+- `identity` — `subjectType("account"|"person")`, `identityKey`,
+  `identityValue`. Never a canonical account fact.
+- `firmographic_fact` — `canonicalField` (required), `rawValue`,
+  `normalizedValue`.
+- `crm_state` — `canonicalField` (required), `rawValue`, `normalizedValue`.
+  Kept separate from `firmographic_fact` — CRM operational state and a
+  fact about the company are never reconciled as interchangeable evidence.
+- `behavioral_signal` — `eventType`, `rawValue`, `normalizedValue`. No
+  `canonicalField` key exists on this branch at all (not merely null).
+  Explicit sibling to `lib/identity`'s existing `NormalizedSignalV1` —
+  not a replacement, not touched.
+- `research_intelligence` — `findingType`, `rawValue`, `normalizedValue`.
+  No `canonicalField` key at all. `evidenceRefs` enforced non-empty via
+  `superRefine` (a finding with no evidence is rejected).
+
+Key design decisions from explicit review adjustments (not the original
+proposal):
+
+- Discriminated union with class-specific branches, not one loose
+  `rawValue`/`canonicalField` object gated only by `superRefine`.
+- `observedAt` nullable — 3A.5 verified HubSpot's company-property API
+  exposes no trustworthy field-level observation timestamp, only a
+  whole-record last-modified time. `importedAt` stays required.
+- `confidence` is a semantic level (`low`/`medium`/`high`/`null`), never a
+  fabricated numeric 0..1 score — no provider was verified to honestly
+  supply one. Provider-native numeric confidence, if any, stays in
+  `providerMetadata` until normalization is explicitly defined (3C+).
+- No taxonomy invented: `canonicalField`, `identityKey`, `eventType`,
+  `findingType` are all open (non-blank) strings, not closed enums — the
+  closed vocabulary is explicitly 3C's job.
+
+### Idempotency semantics (documented + tested, NOT persisted — that's 3D)
+
+`computeObservationIdentityKey(observation)` in
+`lib/observation/src/idempotency.ts`:
+
+```
+key = provider + observationClass + sourceRecordId + semanticKey
+```
+
+where `semanticKey` = `identityKey` (identity) / `canonicalField`
+(firmographic_fact, crm_state) / `eventType` (behavioral_signal) /
+`findingType` (research_intelligence).
+
+Rationale, verified against real data: one HubSpot company record (one
+`sourceRecordId`, e.g. `57634473634`) legitimately produces multiple
+observations — industry, country, employee count, lifecycle stage — so
+`(provider, sourceRecordId)` alone is not a safe identity. `importedAt` is
+deliberately excluded from the key: re-ingesting the same observation
+later is still "the same observation," not a new one. No DB uniqueness
+constraint exists yet — this is a pure function only, to be enforced (or
+translated into a DB constraint) in 3D.
+
+**Reviewed 2026-08-20 (post-implementation, pre-commit): `sourceRecordId`
+invariant for per-event classes.** For `behavioral_signal` (and equally
+`research_intelligence`), `eventType`/`findingType` alone does not
+distinguish two occurrences of the same kind from the same subject — two
+`page_view`s from one visitor both have `eventType: "page_view"`.
+`sourceRecordId` is what must distinguish them, so it **must identify the
+individual event/observation record, never merely the subject
+(account/person) it is about** — a HubSpot contact id used as
+`sourceRecordId` for a `page_view` observation would incorrectly collapse
+every page view from that contact into one identity key. This is now an
+explicit, documented invariant in `types.ts`'s `sourceRecordId` and
+`BehavioralSignalObservationV1Schema` comments, and is demonstrated by two
+new tests in `idempotency.test.ts` (correct per-event usage, and the
+misuse case, shown as a known limitation the contract cannot structurally
+prevent — the obligation is on the adapter, per 3E). No schema shape
+changed; this was a documentation/test gap, not a contract defect.
+
+### Tests / typecheck results (all executed live, 2026-08-20)
+
+- `pnpm --filter @workspace/observation test` — **22/22 pass** (5
+  idempotency-key tests, 17 contract-shape tests).
+- `pnpm exec tsc --build` (full workspace) — clean, zero errors.
+- `git diff --check` — clean, no whitespace errors.
+- Full workspace `pnpm run build` was **not** re-run this checkpoint (no
+  application code changed, only a new isolated pure package) — recommend
+  running it once more as a pre-commit sanity check.
+
+### Still waiting for final verification/review
+
+- **User review/approval of the 3B contract shape and package placement**
+  — not yet explicitly approved for commit as of this checkpoint.
+- Decision on whether to commit 3B now or continue refining first.
+- `pnpm run build` (full workspace build, not just typecheck) — recommended
+  before any commit, per §15 verification expectations.
+- 3C (shared taxonomy) requires an explicit product decision before any
+  taxonomy values are invented — not started, not to be started implicitly.
+
+### Current git status (2026-08-20, this checkpoint)
+
+```
+ M NEXT_SESSION.md
+ M PROJECT_AUDIT.md
+ M PROJECT_HANDOFF.md
+ M ROADMAP.md
+ M pnpm-lock.yaml
+ M tsconfig.json
+?? lib/observation/
+?? n8n
+```
+
+`n8n` is the pre-existing, unrelated untracked root file — not created or
+touched by this work, and must not be touched by any future session.
+
+**Explicit statement: nothing in this checkpoint (3A.5 or 3B) has been
+committed, pushed, deployed, migrated, or changed in production. Every
+change described in this section exists only in the local working tree.**
+
+### Next exact action for the new session
+
+1. Get explicit user approval on the 3B contract (`lib/observation`) as
+   implemented — do not assume approval from this checkpoint alone.
+2. If approved: run `pnpm run build` once more as a pre-commit sanity
+   check, then commit only 3B plus the documentation changes described
+   above (do not fold in unrelated future work). Do not push without
+   separate explicit approval.
+3. If changes are requested: apply them inside `lib/observation` only —
+   still contract-only, still no persistence, no provider changes, no
+   evaluator/UI/n8n changes, per the same constraints this slice was built
+   under.
+4. Only after 3B is committed: **3C — shared taxonomy and normalization**
+   is next per the Milestone 3 sequence (§10), and requires an explicit
+   product decision on taxonomy values before any implementation starts.
+
+## 18. New-session startup instruction
+
+> Read this file first. Then inspect the referenced canonical docs and current
+> git state. Do not assume historical notes are still true if the repository
+> contradicts them. Do not start implementation until you can state the
+> current milestone, next slice, hard boundaries, and files likely involved.

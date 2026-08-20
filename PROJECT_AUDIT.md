@@ -1,5 +1,10 @@
 # PROJECT_AUDIT.md — DRUID GTM Mission Control
 
+> **⚠️ STALE — superseded by `NEXT_SESSION.md`, verified 2026-08-20.** This
+> audit's HEAD (`4a34112`) is at least 14 commits behind `main`. Do not treat
+> this as current execution truth — see `NEXT_SESSION.md`. Retained for
+> historical/audit-trail value only.
+
 **Audit date:** 2026-08-18
 **Repository:** `/Users/mihailupu/Projects/druid-gtm-control` (local clone of `github.com/MLupu88/druid-gtm-control`)
 **Branch audited:** `main`

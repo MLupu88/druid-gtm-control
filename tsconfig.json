@@ -13,6 +13,9 @@
       "path": "./lib/identity"
     },
     {
+      "path": "./lib/observation"
+    },
+    {
       "path": "./lib/evaluator-persistence"
     },
     {
