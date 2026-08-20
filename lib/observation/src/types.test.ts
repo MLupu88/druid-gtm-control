@@ -130,9 +130,92 @@ test("research_intelligence requires at least one evidenceRef", () => {
   assert.throws(() => ProviderObservationV1Schema.parse(input));
 });
 
-test("firmographic_fact requires a non-blank canonicalField", () => {
+test("firmographic_fact requires a canonicalField", () => {
   const input = { ...firmographicFact(), canonicalField: "" };
   assert.throws(() => ProviderObservationV1Schema.parse(input));
+});
+
+test("firmographic_fact canonicalField is closed to FirmographicCanonicalFieldV1 — an unrecognized field name is rejected", () => {
+  const input = { ...firmographicFact(), canonicalField: "company.foundedYear" };
+  assert.throws(() => ProviderObservationV1Schema.parse(input));
+});
+
+test("firmographic_fact canonicalField rejects company.domain/company.name — those are identity, not a firmographic fact", () => {
+  assert.throws(() =>
+    ProviderObservationV1Schema.parse({ ...firmographicFact(), canonicalField: "company.domain" }),
+  );
+  assert.throws(() =>
+    ProviderObservationV1Schema.parse({ ...firmographicFact(), canonicalField: "company.name" }),
+  );
+});
+
+test("crm_state canonicalField is closed to CrmCanonicalFieldV1 — an unrecognized field name is rejected", () => {
+  const input = { ...crmState(), canonicalField: "crm.dealStage" };
+  assert.throws(() => ProviderObservationV1Schema.parse(input));
+});
+
+test("crm_state canonicalField rejects the retired provider-prefixed name crm.hubspotOwner — the approved vocabulary uses crm.owner instead", () => {
+  const input = { ...crmState(), canonicalField: "crm.hubspotOwner" };
+  assert.throws(() => ProviderObservationV1Schema.parse(input));
+});
+
+test("crm_state canonicalField rejects a provider record id — that belongs to the identity class instead", () => {
+  const input = { ...crmState(), canonicalField: "crm.contactId" };
+  assert.throws(() => ProviderObservationV1Schema.parse(input));
+});
+
+test("every CrmCanonicalFieldV1 value parses successfully", () => {
+  const fields = [
+    "crm.owner",
+    "crm.lifecycleStage",
+    "crm.openOpportunity",
+    "crm.existingCustomer",
+    "crm.competitorFlag",
+    "crm.partnerFlag",
+  ] as const;
+  for (const canonicalField of fields) {
+    const parsed = ProviderObservationV1Schema.parse({ ...crmState(), canonicalField });
+    assert.equal(parsed.observationClass === "crm_state" && parsed.canonicalField, canonicalField);
+  }
+});
+
+test("identityKey is closed to IdentityKeyV1 — an unrecognized identity key is rejected", () => {
+  const input = { ...identityObservation(), identityKey: "email" };
+  assert.throws(() => ProviderObservationV1Schema.parse(input));
+});
+
+test("identityKey \"domain\" is valid only when subjectType is \"account\"", () => {
+  assert.throws(() =>
+    ProviderObservationV1Schema.parse({
+      ...identityObservation(),
+      subjectType: "person",
+      identityKey: "domain",
+      identityValue: "acme.com",
+    }),
+  );
+  const parsed = ProviderObservationV1Schema.parse({
+    ...identityObservation(),
+    subjectType: "account",
+    identityKey: "domain",
+  });
+  assert.equal(parsed.observationClass, "identity");
+});
+
+test("identityKey \"external_id\" is valid for either subjectType", () => {
+  const forAccount = ProviderObservationV1Schema.parse({
+    ...identityObservation(),
+    subjectType: "account",
+    identityKey: "external_id",
+    identityValue: "57634473634",
+  });
+  const forPerson = ProviderObservationV1Schema.parse({
+    ...identityObservation(),
+    subjectType: "person",
+    identityKey: "external_id",
+    identityValue: "contact-42",
+  });
+  assert.equal(forAccount.observationClass, "identity");
+  assert.equal(forPerson.observationClass, "identity");
 });
 
 test("firmographic_fact cannot carry a behavioral field (eventType) — branches don't share unrelated keys", () => {

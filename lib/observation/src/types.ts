@@ -16,12 +16,27 @@
 // canonicalField, and a research_intelligence observation literally cannot
 // carry one, because the branches don't share that key.
 //
-// No business taxonomy is defined here — no industry values, no region
-// codes, no closed list of canonical field names, no confidence
-// normalization rules. That is Milestone 3C's job. Wherever this package
-// needs "the name of a canonical field" or "the name of an event type," it
-// accepts any non-blank string; validating it against a closed vocabulary
-// is 3C/3D's concern, not this contract's.
+// Milestone 3C (V1, this revision) closes two of the four open
+// vocabularies 3B deliberately left as free strings: identityKey and
+// canonicalField (split per branch into FirmographicCanonicalFieldV1 and
+// CrmCanonicalFieldV1) now have a fixed, closed set of values, grounded
+// only in data this repo has already verified in production or against
+// the live HubSpot tenant (see NEXT_SESSION.md's 3A.5/3C sections) — no
+// value here was invented on the assumption a provider might support it
+// later.
+//
+// behavioral_signal's eventType and research_intelligence's findingType
+// both remain OPEN strings on purpose: no verified real-world data exists
+// for either. HubSpot's page-level event API is confirmed 403-blocked
+// (3A.5 — the required
+// event-detail-read/web-analytics-api-access scopes are not offered),
+// RB2B has no implementation, and Client Radar's actual result contract
+// has no finding-category field at all. Closing either now would mean
+// guessing values from test fixtures, which this milestone explicitly
+// does not do. Region/industry/employee-band value taxonomies (what a
+// valid company.region *value* looks like, as opposed to the field name)
+// remain out of scope here too — that stays lib/db's ACCOUNT_FACT_FIELDS/
+// ACCOUNT_FACT_REGION_VALUES territory, reused as-is, not redefined.
 
 import { z } from "zod/v4";
 
@@ -80,6 +95,68 @@ export const ObservationClassV1 = z.enum([
   "research_intelligence",
 ]);
 export type ObservationClassV1 = z.infer<typeof ObservationClassV1>;
+
+// ---------------------------------------------------------------------
+// Milestone 3C V1 — closed vocabularies
+//
+// Each value below is either (a) already a live, verified identifier/field
+// name elsewhere in this repo (account_aliases.aliasType,
+// lib/db's ACCOUNT_FACT_FIELDS, lib/evaluator's field allowlists), or
+// (b) directly confirmed against the live HubSpot tenant during the 3A.5
+// capability audit. None is provider-prefixed: `provider` is already a
+// separate envelope field, so baking a provider name into a value here
+// (as the evaluator's existing crm.hubspotOwner does) would be redundant
+// and would defeat the point of a provider-neutral contract — see
+// NEXT_SESSION.md's 3C section for the full rationale and the specific
+// values deferred rather than closed.
+// ---------------------------------------------------------------------
+
+// The KIND of identifier an `identity` observation asserts. Deliberately
+// does NOT include a per-provider record-id key (e.g. "hubspot_company_id"):
+// a provider's own record id is represented by the provider-neutral
+// "external_id" value below, with which provider it came from already
+// carried by the envelope's own `provider` field — see
+// IdentityObservationV1Schema's subjectType-vs-identityKey validation
+// below for the one cross-field rule this vocabulary carries.
+export const IdentityKeyV1 = z.enum(["domain", "external_id"]);
+export type IdentityKeyV1 = z.infer<typeof IdentityKeyV1>;
+
+// firmographic_fact's canonicalField vocabulary — exactly lib/db's
+// ACCOUNT_FACT_FIELDS (accountFacts.ts), the existing closed set of
+// manually-confirmable company fit fields, reused rather than redefined.
+// company.domain/company.name are deliberately excluded here, matching
+// accountFacts.ts's own documented reasoning: those are account identity
+// (the `identity` observation class), never a firmographic fact.
+export const FirmographicCanonicalFieldV1 = z.enum([
+  "company.industry",
+  "company.country",
+  "company.region",
+  "company.employeeRange",
+  "company.revenueRange",
+]);
+export type FirmographicCanonicalFieldV1 = z.infer<
+  typeof FirmographicCanonicalFieldV1
+>;
+
+// crm_state's canonicalField vocabulary. Four of these six mirror
+// lib/evaluator's existing NormalizedCrmV1Schema/field-allowlist fields
+// (renamed from crm.hubspotOwner to crm.owner — see the header comment on
+// provider-prefixing; this milestone does not modify the evaluator
+// itself, only this package's own vocabulary). crm.lifecycleStage is new:
+// it has no evaluator consumer yet, but was read with a real non-null
+// value ("lead") from the live HubSpot tenant during 3A.5 — included on
+// "already verified" grounds. Provider record ids (a HubSpot contact/
+// company id) are deliberately NOT represented here — those are identity
+// assertions (IdentityKeyV1's "external_id"), not CRM state.
+export const CrmCanonicalFieldV1 = z.enum([
+  "crm.owner",
+  "crm.lifecycleStage",
+  "crm.openOpportunity",
+  "crm.existingCustomer",
+  "crm.competitorFlag",
+  "crm.partnerFlag",
+]);
+export type CrmCanonicalFieldV1 = z.infer<typeof CrmCanonicalFieldV1>;
 
 // A semantic, provider-neutral confidence LEVEL — never a fabricated
 // numeric score. Not every provider can honestly produce a calibrated
@@ -182,28 +259,20 @@ export const IdentityObservationV1Schema = ProviderObservationEnvelopeV1.extend(
   {
     observationClass: z.literal("identity"),
     subjectType: z.enum(["account", "person"]),
-    // The KIND of identifier being asserted, e.g. "domain", "email",
-    // "hubspot_company_id", "linkedin_url". An open string, not a closed
-    // enum — the closed identifier vocabulary is 3C's job, same rationale
-    // as canonicalField below.
-    identityKey: NonBlankString,
+    identityKey: IdentityKeyV1,
     identityValue: NonBlankLongString,
   },
 ).strict();
 export type IdentityObservationV1 = z.infer<typeof IdentityObservationV1Schema>;
 
 // A firmographic company fact — "this provider read this company property
-// as this value." canonicalField is required and non-blank: a
-// firmographic_fact observation with no target field is meaningless. The
-// field-NAME vocabulary itself (the closed list a value like
-// "company.industry" is drawn from) is intentionally not defined here —
-// see lib/db's ACCOUNT_FACT_FIELDS for today's canonical-fact vocabulary
-// and NEXT_SESSION.md's 3C for where this contract's own vocabulary gets
-// formalized.
+// as this value." canonicalField is required and drawn from
+// FirmographicCanonicalFieldV1 above — a firmographic_fact observation
+// with no target field, or one outside that closed set, is rejected.
 export const FirmographicFactObservationV1Schema =
   ProviderObservationEnvelopeV1.extend({
     observationClass: z.literal("firmographic_fact"),
-    canonicalField: NonBlankString,
+    canonicalField: FirmographicCanonicalFieldV1,
     rawValue: JsonValueV1Schema,
     normalizedValue: JsonValueV1Schema.nullable(),
   }).strict();
@@ -221,7 +290,7 @@ export type FirmographicFactObservationV1 = z.infer<
 export const CrmStateObservationV1Schema = ProviderObservationEnvelopeV1.extend(
   {
     observationClass: z.literal("crm_state"),
-    canonicalField: NonBlankString,
+    canonicalField: CrmCanonicalFieldV1,
     rawValue: JsonValueV1Schema,
     normalizedValue: JsonValueV1Schema.nullable(),
   },
@@ -247,8 +316,12 @@ export type CrmStateObservationV1 = z.infer<
 export const BehavioralSignalObservationV1Schema =
   ProviderObservationEnvelopeV1.extend({
     observationClass: z.literal("behavioral_signal"),
-    // e.g. "page_view", "form_submit", "email_open", "known_contact_visit".
-    // Open string for the same reason identityKey/canonicalField are.
+    // Deliberately left OPEN in Milestone 3C V1 — unlike identityKey/
+    // canonicalField above, no verified real-world eventType data exists
+    // to close this against (HubSpot's page-event API is 403-blocked per
+    // 3A.5; RB2B has no implementation). Do not treat any string seen in
+    // this package's own tests as a taxonomy decision — those are
+    // illustrative fixtures only. See NEXT_SESSION.md's 3C section.
     eventType: NonBlankString,
     rawValue: JsonValueV1Schema,
     normalizedValue: JsonValueV1Schema.nullable(),
@@ -266,9 +339,11 @@ export type BehavioralSignalObservationV1 = z.infer<
 export const ResearchIntelligenceObservationV1Schema =
   ProviderObservationEnvelopeV1.extend({
     observationClass: z.literal("research_intelligence"),
-    // What kind of finding this is, e.g. "company_summary",
-    // "competitor_mention", "hiring_signal" — open string, not a closed
-    // enum, same rationale as eventType/identityKey/canonicalField.
+    // Deliberately left OPEN in Milestone 3C V1, for the same reason as
+    // eventType above: Client Radar's actual result contract
+    // (clientRadarClient.ts) has no finding-category field at all today,
+    // so there is nothing verified to close this vocabulary against. See
+    // NEXT_SESSION.md's 3C section.
     findingType: NonBlankString,
     rawValue: JsonValueV1Schema,
     normalizedValue: JsonValueV1Schema.nullable(),
@@ -303,6 +378,25 @@ export const ProviderObservationV1Schema = z
         path: ["evidenceRefs"],
         message:
           "research_intelligence observations require at least one evidenceRef",
+      });
+    }
+
+    // "domain" is an account-level identifier — a person is never
+    // identified by a domain. "external_id" stays valid for either
+    // subjectType, provider-neutrally: a provider's own record id may
+    // equally be a company id or a contact id, and which one it is is not
+    // this contract's concern (see IdentityKeyV1's own comment — that
+    // distinction deliberately does not exist as separate canonicalField/
+    // identityKey values).
+    if (
+      val.observationClass === "identity" &&
+      val.identityKey === "domain" &&
+      val.subjectType !== "account"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["identityKey"],
+        message: 'identityKey "domain" is only valid when subjectType is "account"',
       });
     }
   });

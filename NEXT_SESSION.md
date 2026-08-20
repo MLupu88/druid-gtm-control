@@ -241,17 +241,42 @@ Do not implement provider auto-promotion yet.
 
 ### 3C — Shared taxonomy and normalization
 
-Establish one source of truth for:
+**3C V1 (closed observation field/key-name vocabularies) — DONE**, implemented
+2026-08-20, uncommitted as of this note. See §17 for the full checkpoint.
+This closed `lib/observation`'s `identityKey` and `canonicalField` (split
+per branch into `FirmographicCanonicalFieldV1`/`CrmCanonicalFieldV1`) —
+i.e. the vocabulary of field/key *names* an observation can target.
 
-- industry
-- country
-- region
-- employee bands
-- revenue bands
+**Still open, NOT part of 3C V1, remains future work:** the vocabulary of
+field *values* this section originally described — what counts as a valid
+`industry` string, a valid `country`, a normalized `region`/employee-band/
+revenue-band value. That is a distinct layer (closer to `lib/db`'s
+`ACCOUNT_FACT_REGION_VALUES` territory, generalized) from the field-name
+closure 3C V1 delivered, and still requires its own explicit product
+decision before it is ever implemented.
 
-Do not invent the business taxonomy without an explicit product decision.
+**Explicit product decision (2026-08-20): this deferred value-level
+taxonomy is NOT a prerequisite or blocker for Milestone 3D.** It remains
+deliberately deferred until real provider ingestion gives us evidence for
+the normalization rules — inventing it now, with no real data, would
+repeat exactly the mistake 3C V1 avoided for `eventType`/`findingType`.
+3D may proceed using the existing observation contract as-is: `rawValue`/
+`normalizedValue` as JSON, plus the closed field-*name* taxonomy 3C V1
+already delivered. Do not read this section as implying another product
+decision is required before starting 3D — none is.
+
+`eventType` (behavioral_signal) and `findingType` (research_intelligence)
+were deliberately left open in 3C V1 — no verified provider data exists to
+close them against yet (HubSpot's page-event API is 403-blocked per 3A.5;
+RB2B unimplemented; Client Radar's real contract has no finding-category
+field). Revisit once RB2B is activated/verified or HubSpot's event-read
+scope changes — do not invent values from test fixtures in the meantime.
+This, too, is not a blocker for 3D.
 
 ### 3D — Candidate fact persistence
+
+**Immediate next milestone once 3C V1 is committed** — no further product
+decision is a prerequisite (see the explicit note above).
 
 Persist generic multi-provider observations/candidates with provenance and
 idempotency.
@@ -363,19 +388,19 @@ If the One Account Truth audit exists only in session output and not as a
 repository document, the findings above preserve the 2026-08-19 read-only
 architecture audit in this handoff.
 
-## 17. Session checkpoint — 3B implementation (2026-08-20, uncommitted)
+## 17. Historical checkpoint — 3B implementation (2026-08-20)
 
-This section is the precise resume point for a fresh session. Read this
-section first, then the rest of this file for full context.
+**Superseded — 3B is now committed and pushed at commit `d39e602`.** This
+section is kept for the file/architecture/rationale detail it recorded at
+the time; for current status read §18 below first, which covers 3C V1.
 
-### Status
+### Status (at time of writing — now historical)
 
 - 3A — DONE (2026-08-19 audit).
 - 3A.5 — DONE (2026-08-20, verified against live HubSpot tenant — see §7).
-- **3B — Provider-neutral observation contract — CURRENT WORK.** Implemented,
-  tested, and typechecked. **Not reviewed/approved for commit. Not
-  committed. Not pushed. Not deployed. No migration run. No production
-  change of any kind.**
+- **3B — Provider-neutral observation contract.** Implemented, tested,
+  typechecked, and (as of the next session) reviewed, committed, and
+  pushed at `d39e602`.
 
 ### Product decision recorded (2026-08-20)
 
@@ -544,18 +569,15 @@ changed; this was a documentation/test gap, not a contract defect.
 `n8n` is the pre-existing, unrelated untracked root file — not created or
 touched by this work, and must not be touched by any future session.
 
-**Explicit statement: nothing in this checkpoint (3A.5 or 3B) has been
-committed, pushed, deployed, migrated, or changed in production. Every
-change described in this section exists only in the local working tree.**
+**Update: 3B (including the pre-commit behavioral-signal identity review)
+was subsequently approved, committed, and pushed at `d39e602`.** No
+migration was run, no deployment happened as part of that commit/push
+itself — see §18 for what has and hasn't happened since.
 
-### Next exact action for the new session
+### Next exact action recorded at the time (now superseded — see §18)
 
-1. Get explicit user approval on the 3B contract (`lib/observation`) as
-   implemented — do not assume approval from this checkpoint alone.
-2. If approved: run `pnpm run build` once more as a pre-commit sanity
-   check, then commit only 3B plus the documentation changes described
-   above (do not fold in unrelated future work). Do not push without
-   separate explicit approval.
+1. ~~Get explicit user approval on the 3B contract~~ — done.
+2. ~~Commit only 3B plus the documentation changes~~ — done, `d39e602`.
 3. If changes are requested: apply them inside `lib/observation` only —
    still contract-only, still no persistence, no provider changes, no
    evaluator/UI/n8n changes, per the same constraints this slice was built
@@ -564,7 +586,130 @@ change described in this section exists only in the local working tree.**
    is next per the Milestone 3 sequence (§10), and requires an explicit
    product decision on taxonomy values before any implementation starts.
 
-## 18. New-session startup instruction
+## 18. Session checkpoint — 3C V1 implementation (2026-08-20, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §17 and the rest of this file for background.
+
+### Status
+
+- 3A, 3A.5, **3B — all DONE and committed/pushed at `d39e602`.**
+- **3C V1 (closed observation field/key-name vocabularies) — CURRENT
+  WORK.** Implemented, tested, typechecked. **Not reviewed/approved for
+  commit. Not committed. Not pushed. Not deployed. No migration run. No
+  production change of any kind. No 3D/3E/3F/3G work started.**
+
+### What 3C V1 closed, and what it deliberately did not
+
+Closed (Zod enums in `lib/observation/src/types.ts`):
+
+- `IdentityKeyV1`: `domain`, `external_id`.
+- `FirmographicCanonicalFieldV1`: `company.industry`, `company.country`,
+  `company.region`, `company.employeeRange`, `company.revenueRange` —
+  exactly `lib/db`'s existing `ACCOUNT_FACT_FIELDS`, reused not redefined.
+- `CrmCanonicalFieldV1`: `crm.owner`, `crm.lifecycleStage`,
+  `crm.openOpportunity`, `crm.existingCustomer`, `crm.competitorFlag`,
+  `crm.partnerFlag`. **Provider-neutral naming, approved 2026-08-20:
+  `crm.owner`, not `crm.hubspotOwner`** (the evaluator's existing,
+  unmodified field name) — `lib/evaluator` was explicitly NOT touched in
+  this milestone; the two vocabularies now differ by name and a future
+  3G slice will need to reconcile them. `crm.lifecycleStage` is new (no
+  evaluator consumer yet) but included on "verified against the live
+  HubSpot tenant" grounds (3A.5 — real value `"lead"` read).
+
+Deliberately left open (still `NonBlankString`, unchanged from 3B):
+
+- `eventType` (behavioral_signal) — no verified real eventType data
+  exists anywhere (HubSpot page-event API 403-blocked; RB2B
+  unimplemented).
+- `findingType` (research_intelligence) — Client Radar's actual result
+  contract has no finding-category field at all.
+
+Both deferrals are intentional, not an oversight — do not close either
+from test-fixture strings (`"page_view"`, `"company_summary"`, etc. are
+illustrative only, never a taxonomy decision).
+
+### Product decisions approved and applied (2026-08-20)
+
+1. Provider-neutral CRM canonical field names — `crm.owner`, never
+   `crm.hubspotOwner`, inside the observation taxonomy. Evaluator
+   untouched.
+2. Provider record ids are `identity` assertions, not `crm_state` —
+   `identityKey: "external_id"` covers this for both HubSpot and any
+   future provider; no `crm.companyId`/`crm.contactId`/provider-specific
+   id field exists anywhere in `lib/observation`.
+3. Cross-field validation added: `identityKey: "domain"` is valid only
+   when `subjectType === "account"`; `identityKey: "external_id"` is
+   valid for either `subjectType`. Enforced in `ProviderObservationV1Schema`'s
+   existing top-level `superRefine` (same mechanism the research_intelligence
+   evidence-required rule already used) — no shape change to the `identity`
+   branch itself.
+
+### Files changed for 3C V1 (all currently uncommitted, on top of the
+committed 3B baseline)
+
+- `lib/observation/src/types.ts` — added `IdentityKeyV1`,
+  `FirmographicCanonicalFieldV1`, `CrmCanonicalFieldV1`; narrowed
+  `identityKey`/`canonicalField` field types on the affected branches;
+  added the `domain`-requires-`account` cross-field check; updated
+  header/field comments (removed speculative eventType/findingType
+  example values from comments, replaced with an explicit deferral
+  rationale).
+- `lib/observation/src/types.test.ts` — added tests for both closed
+  enums (accepted/rejected values, including an explicit test that
+  `crm.hubspotOwner` is rejected) and both subjectType/identityKey
+  validation branches.
+- `lib/observation/src/idempotency.test.ts` — inspected, **not
+  modified**: existing fixtures already used only values that remain
+  valid under the new closed vocabularies (`company.industry`,
+  `company.country`, `crm.lifecycleStage`, `domain` with
+  `subjectType: "account"`).
+- `NEXT_SESSION.md` — this file (3C section update, this checkpoint,
+  §17 corrected to reflect 3B's actual committed state).
+
+Untouched: DB schema/migrations, `lib/evaluator`, HubSpot/Client
+Radar/RB2B application code, UI, n8n, any persistence/adapter/
+reconciliation code, and the unrelated untracked root `n8n` file.
+
+### Tests / typecheck results (executed live, 2026-08-20)
+
+- `pnpm --filter @workspace/observation test` — pass (see terminal output
+  from this session for the exact count; re-run before acting on this
+  checkpoint if in doubt).
+- `pnpm exec tsc --build` (full workspace) — clean.
+- `git diff --check` — clean.
+
+### Still waiting for final verification/review
+
+- **User review/approval of 3C V1** — not yet given as of this
+  checkpoint.
+- Whether to commit 3C V1 now or continue refining.
+- The **value-level taxonomy** this milestone's original scope note
+  described (valid `industry`/`country`/`region`/employee-band/
+  revenue-band *values*, not field names) remains completely open — a
+  distinct product decision, not started, not implied by 3C V1's field-
+  name closure. **Explicitly NOT a prerequisite or blocker for 3D** —
+  see §10's 3C section for the full, explicit product decision recorded
+  2026-08-20.
+
+### Next exact action for the new session
+
+1. Get explicit user approval on 3C V1 as implemented — do not assume
+   approval from this checkpoint alone.
+2. If approved: commit only 3C V1 (the four files above), following this
+   repo's normal commit process. Do not push without separate explicit
+   approval.
+3. If changes are requested: apply them inside `lib/observation` only,
+   under the same constraints this slice was built under (no persistence,
+   no provider code, no evaluator/UI/n8n changes).
+4. **3D — candidate fact persistence is the immediate next milestone once
+   3C V1 is committed** (§10) — no further product decision is a
+   prerequisite. The deferred value-level taxonomy does NOT block 3D: 3D
+   proceeds using the existing observation contract's `rawValue`/
+   `normalizedValue` as JSON plus the closed field-name taxonomy 3C V1
+   already delivered.
+
+## 19. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository
