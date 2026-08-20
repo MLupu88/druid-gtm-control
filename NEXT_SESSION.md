@@ -299,10 +299,15 @@ provider, not deferred; see §20):
     3E.2a. There has never been an RB2B execution — this is not "inspect
     an existing one."
 - **3E.3 — HubSpot → `identity`/`firmographic_fact`/`crm_state` adapter —
-  IMPLEMENTED, reviewed, corrected.** Uncommitted. See §22 for the full
-  checkpoint (mappings, known gaps, review corrections).
-- **3E.4 — Client Radar → `research_intelligence` adapter — NOT STARTED.**
-- **3F — NOT STARTED.**
+  DONE.** Committed and pushed at `f435071` ("feat: add HubSpot observation
+  adapter"). See §22 for the full checkpoint (mappings, known gaps, review
+  corrections).
+- **3E.4 — Client Radar → `research_intelligence` adapter — DONE locally,
+  verified, uncommitted/unpushed.** See §24 for the full checkpoint
+  (topology, mapping, sourceRecordId strategy, test results).
+- **3F — NOT STARTED.** Ready to begin once 3E.4 is committed — no longer
+  blocked on 3E.2b (RB2B fan-out remains independently pending; it does
+  not gate 3E.3/3E.4/3F).
 
 ### 3F — Agreement/conflict and canonical selection
 
@@ -1112,11 +1117,12 @@ section first, then §20/§21 and the rest of this file for background.
 
 ### Status
 
-- 3D, 3E.1, 3E.2a — DONE, committed/pushed. 3E.2b — pending (see §20/§21).
+- 3D, 3E.1, 3E.2a — DONE, committed/pushed. 3E.2b — pending (see §20/§21),
+  and does not block 3E.3/3E.4/3F.
 - **3E.3 — HubSpot → `identity`/`firmographic_fact`/`crm_state` adapter —
-  IMPLEMENTED, reviewed, corrected. Uncommitted. Not pushed. Not deployed.
-  No migration. No production change of any kind.**
-- 3E.4 (Client Radar), 3F — NOT STARTED.
+  DONE.** Committed and pushed at `f435071`.
+- **3E.4 (Client Radar) — DONE locally, verified, uncommitted/unpushed —
+  see §23.** 3F — NOT STARTED.
 
 ### Mappings supported
 
@@ -1202,13 +1208,149 @@ test:hubspot:unit` before treating this checkpoint as verified.**
 
 ### Next exact action for the next session
 
-1. Run `pnpm --filter @workspace/api-server run test:hubspot:unit` (and
-   the integration suite, DB permitting) to confirm the `existingCustomer`
-   correction. 2. Get explicit approval to commit 3E.3. 3. **3E.4 — Client
-   Radar → `research_intelligence` adapter** is next per the Milestone 3
-   sequence (§10) — not started, not designed.
+Superseded — 3E.3 is now committed/pushed at `f435071`, and 3E.4 is done
+locally and verified (see §23). Next action is getting approval to commit
+3E.4, then starting 3F.
 
-## 23. New-session startup instruction
+## 23. Session checkpoint — Milestone 3E.4 implementation (2026-08-20, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §22 for the HubSpot precedent this mirrors.
+
+### Status
+
+- 3D, 3E.1, 3E.2a, 3E.3 — DONE, committed/pushed. 3E.2b — pending (see
+  §20/§21), does not block 3E.4/3F.
+- **3E.4 — Client Radar → `research_intelligence` adapter — DONE locally,
+  reviewed, corrected, verified. Uncommitted. Not pushed. Not deployed.
+  No migration. No production change of any kind.**
+- 3F — NOT STARTED. Next milestone: agreement/conflict resolution +
+  canonical selection.
+
+### Actual Client Radar topology found
+
+`ClientRadarResultAccount` (`lib/clientRadarClient.ts`) returns
+`company`/`domain`/`country`/`industry`, an opaque `account` payload, a
+nullable `clientRadarAccountId`, and `evidence: { items, total }` where
+each `ClientRadarEvidenceItem` is `{ id, source_type, title, url, content,
+created_at }` — `id` and `created_at` are real, stable, provider-issued
+per-item values (the strongest sourceRecordId/observedAt grounding of any
+provider adapter built this session). All completion paths converge on
+`persistCompletedClientRadarResult()` in
+`services/clientRadarResearchRuns.ts`, which already ran a single
+`db.transaction()` doing the run status/payload UPDATE plus the Client
+Radar account-alias link (or conflict attention item). No parallel
+integration was created — this milestone wires directly into that
+existing convergence point.
+
+### Mapping implemented
+
+One `research_intelligence` observation **per evidence item** (not per
+account-level result) — evidence items have real per-item ids, unlike the
+account-level summary fields, which remain out of scope (still
+firmographic_fact-shaped, not touched this milestone).
+
+- `provider`: always `"client_radar"`.
+- `sourceRecordId`: `evidenceItem.id` directly — Client Radar's own
+  stable id, never a Mission Control account id.
+- `findingType`: `evidenceItem.source_type?.trim() || "evidence_item"`.
+  Open string, no invented business taxonomy — `source_type` is
+  genuinely nullable in Client Radar's own client-level type
+  (`nullableString` in `parseEvidenceItem`), so the neutral
+  `"evidence_item"` fallback is a structural placeholder only, required
+  because `ResearchIntelligenceObservationV1.findingType` is a non-blank
+  string. Reviewed explicitly for collision safety: the DB's occurrence
+  uniqueness constraint is `(provider, observation_class,
+  source_record_id, semantic_key, imported_at)`, and `semantic_key` for
+  `research_intelligence` is `findingType` — but since `sourceRecordId`
+  is already the unique per-item id, two items sharing the
+  `"evidence_item"` fallback never collide. The alternative (skipping
+  mapping when `source_type` is absent) would silently discard genuine
+  evidence findings just because Client Radar didn't categorize them —
+  worse than the neutral fallback, not safer.
+- `observedAt`: tolerant re-parse of `evidenceItem.created_at` via
+  `new Date(...).toISOString()`, `null` if unparseable — never fabricated
+  as current time. Same pattern as RB2B's "Seen At" handling.
+- `importedAt`: caller-supplied `now.toISOString()` — the exact same
+  `now: Date` boundary `persistCompletedClientRadarResult` already
+  receives for its own DB timestamp columns, reused (never a second,
+  separately generated timestamp) and shared across every observation
+  from one completion attempt.
+- `evidenceRefs`: always includes `{type: "client_radar_evidence_item",
+  ref: evidenceItem.id}`; adds `{type: "client_radar_evidence_url", ref:
+  evidenceItem.url}` only when Client Radar actually supplied a URL — no
+  URL is ever invented.
+- `rawValue`: the complete original evidence item, unmodified.
+- `confidence`/`normalizedValue`: always `null` — Client Radar does not
+  supply either.
+- `providerMetadata`: `{clientRadarAccountId, company, domain}` — unlike
+  HubSpot's `null`, this is populated because Client Radar's `rawValue`
+  is just the lone evidence item and doesn't self-describe which company
+  it's about.
+
+### Alias-resolution independence (pre-resolution evidence rule)
+
+Observation candidates are built and persisted **before**
+`db.transaction()` is entered — not after. This means: an alias conflict
+(a different account already strongly owns the Client Radar account id)
+still leaves the observation persisted, since it happens before that
+step is reached; and a genuine thrown alias-resolution error (a real
+programming/DB error, not the expected conflict outcome) does not undo or
+retroactively gate the observation write already attempted. These are two
+separate, sequential writes, not one atomic operation — if the later
+transaction throws, already-recorded observations are not rolled back.
+The existing research-run/alias transaction's own behavior (status/payload
+update, alias link, conflict attention item, rollback on genuine error) is
+otherwise unchanged. A narrow optional `RecordObservationFn` DI seam
+(defaulting to real `recordObservation({db, observation})`) was added
+specifically so this could be unit-tested without a real DB — mirrors
+`hubSpotCompanySync.ts`'s identical pattern; the one existing production
+caller (`syncClientRadarResearchResult`) requires no change.
+
+### Files changed
+
+New: `services/clientRadarObservationMapping.ts` (pure mapping),
+`clientRadarObservationMapping.test.ts`,
+`clientRadarObservationMapping.integration.test.ts`.
+
+Modified: `services/clientRadarResearchRuns.ts` (`RecordObservationFn`
+type + DI seam, observations recorded before the transaction, corrected
+`importedAt`/comment), `clientRadarResearchRuns.test.ts` (fake observation
+recorder injected at all 8 call sites, new/enhanced assertions),
+`clientRadarResearchRuns.integration.test.ts` (new conflict-path
+observation-persistence test), `package.json`
+(`test:client-radar`/`test:client-radar:unit` extended,
+`test:observations`/`test:observations:unit` extended).
+
+No DB schema/migration changes — reuses 3D's `observations` table and
+`recordObservation()` unmodified. No new provider-specific table. No
+account/person resolution, canonical truth, scoring, intent, evaluator, or
+UI changes. RB2B, HubSpot, and the root `n8n` file untouched.
+
+### Known gaps / unsupported (explicit, not silently dropped)
+
+- Account-level summary fields (`company`, `domain`, `industry`,
+  `country`) remain unmapped to any observation this milestone — still a
+  documented open item, candidate `firmographic_fact` scope for a future
+  slice, not 3E.4.
+- `evidenceItem.content`/`title` are preserved only inside `rawValue`, not
+  surfaced as separate structured fields — no normalization attempted.
+
+### Test results
+
+Verified externally (regular Terminal, not run by the coding agent this
+pass): Client Radar unit tests 51/51 pass, Client Radar/Postgres focused
+integration tests 6/6 pass, integration exit status 0, `api-server`
+typecheck clean before the final verification pass.
+
+### Next exact action for the next session
+
+Get explicit approval to commit 3E.4, then begin 3F (agreement/conflict
+resolution + canonical selection) — the first milestone that will need to
+read across multiple providers' observations for the same account/person
+and select a canonical value.
+
+## 24. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository

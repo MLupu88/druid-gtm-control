@@ -33,6 +33,12 @@ import {
 } from "../lib/clientRadarClient";
 import { linkClientRadarAccountAlias } from "./clientRadarAccountAlias";
 import { createAttentionItem } from "./attentionItems";
+import { mapClientRadarEvidenceItemsToObservations } from "./clientRadarObservationMapping.js";
+import {
+  recordObservation,
+  type RecordObservationResult,
+} from "./observations.js";
+import type { ProviderObservationV1 } from "@workspace/observation";
 
 type Db = NodePgDatabase<typeof schema>;
 // Extracts the exact transaction-handle type db.transaction()'s callback
@@ -550,18 +556,47 @@ export async function syncClientRadarResearchResult(
   return persistCompletedClientRadarResult(db, researchRunId, now, result);
 }
 
+export type RecordObservationFn = (
+  observation: ProviderObservationV1,
+) => Promise<RecordObservationResult>;
+
 /**
  * Local completion work only — the outbound HTTP fetch that produced
  * `result` must already have happened before this is called (mirrors
  * this file's own startClientRadarResearch/submitAndPersist convention:
  * a non-rollback-able side effect must run before, never inside, a
- * transaction that could still roll back afterward). Persists
- * accountPayload/evidencePayload and links the Client Radar account-id
- * alias (or raises its conflict attention item) atomically in one
- * db.transaction() — extracted from ../services/clientRadarResearchRuns.ts's
- * syncClientRadarResearchResult specifically so this local-only logic is
- * directly testable without mocking the HTTP layer (see
- * ./clientRadarResearchRuns.test.ts). An unexpected error from
+ * transaction that could still roll back afterward).
+ *
+ * Milestone 3E.4 — research_intelligence observations for `result`'s
+ * evidence items are recorded FIRST, before the research-run/alias
+ * transaction below even starts. This is deliberate: observations are
+ * pre-resolution evidence (Milestone 3D) and must not be gated on
+ * account-alias resolution succeeding. These are two separate,
+ * sequential writes, not one atomic operation — this function does not
+ * claim otherwise. If the transaction below then throws (a genuine
+ * unexpected/programming error, not the normal "conflict" outcome), the
+ * observations recorded just above it may already exist even though the
+ * run's own status/payload update and alias link roll back — that is
+ * intentional pre-resolution-evidence behavior, the same ordering
+ * Milestone 3E.3 already established for HubSpot, not a bug to fix here.
+ *
+ * importedAt reuses the exact same `now` boundary the caller already
+ * assigned for this completion/import attempt (never a separately
+ * generated timestamp), so every observation from one import attempt
+ * shares exactly one importedAt, per Milestone 3D's own invariant.
+ *
+ * recordObservationFn defaults to the real recordObservation() bound to
+ * `db`, injectable for unit tests that must not touch a database (see
+ * ./clientRadarResearchRuns.test.ts) — mirrors
+ * ../services/hubSpotCompanySync.ts's identical DI seam. Production
+ * callers pass nothing and get the real behavior unchanged.
+ *
+ * Persists accountPayload/evidencePayload and links the Client Radar
+ * account-id alias (or raises its conflict attention item) atomically in
+ * one db.transaction() — extracted from
+ * ../services/clientRadarResearchRuns.ts's syncClientRadarResearchResult
+ * specifically so this local-only logic is directly testable without
+ * mocking the HTTP layer. An unexpected error from
  * linkClientRadarAccountAlias or createAttentionItem (a real
  * programming/DB error, not the expected conflict outcome) propagates out
  * of this callback and rolls back the payload update too — the run is
@@ -573,8 +608,26 @@ export async function persistCompletedClientRadarResult(
   researchRunId: string,
   now: Date,
   result: ClientRadarResultAccount,
+  recordObservationFn: RecordObservationFn = (observation) =>
+    recordObservation({ db, observation }),
 ): Promise<ClientRadarResearchRun> {
-  return await db.transaction(async (tx) => {
+  // Pre-resolution evidence — recorded before account-alias resolution
+  // below can gate it. See this function's own doc comment.
+  const importedAt = now.toISOString();
+  const evidenceObservations = mapClientRadarEvidenceItemsToObservations({
+    evidenceItems: result.evidence.items,
+    context: {
+      clientRadarAccountId: result.clientRadarAccountId,
+      company: result.company,
+      domain: result.domain,
+    },
+    importedAt,
+  });
+  for (const observation of evidenceObservations) {
+    await recordObservationFn(observation);
+  }
+
+  return db.transaction(async (tx) => {
     const [updated] = await tx
       .update(clientRadarResearchRunsTable)
       .set({

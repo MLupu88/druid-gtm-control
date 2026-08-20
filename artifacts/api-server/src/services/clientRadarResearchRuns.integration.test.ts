@@ -42,6 +42,7 @@ import pg from "pg";
 import * as schema from "@workspace/db/schema";
 import type { ClientRadarResultAccount } from "../lib/clientRadarClient.js";
 import { persistCompletedClientRadarResult } from "./clientRadarResearchRuns.js";
+import { linkClientRadarAccountAlias } from "./clientRadarAccountAlias.js";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const skip = !DATABASE_URL;
@@ -203,5 +204,73 @@ test(
       .where(eq(schema.accountAliases.accountId, accountId))
       .limit(1);
     assert.equal(anyAlias, undefined);
+  },
+);
+
+// ---------------------------------------------------------------------
+// 3. Milestone 3E.4 — observations persist regardless of account-alias
+//    outcome. A genuine CONFLICT (a different account already strongly
+//    owns this Client Radar account id) still completes the run and
+//    still records the research_intelligence observation(s) — identity
+//    resolution never gates observation persistence.
+// ---------------------------------------------------------------------
+
+test(
+  "observations are recorded even when the Client Radar account alias conflicts with a different existing account",
+  { skip },
+  async () => {
+    const clientRadarAccountId = crypto.randomUUID();
+
+    // Account A already strongly owns clientRadarAccountId.
+    const accountA = await makeAccount();
+    const priorLink = await linkClientRadarAccountAlias({
+      db: db!,
+      accountId: accountA,
+      clientRadarAccountId,
+    });
+    assert.equal(priorLink.outcome, "linked");
+
+    // Account B's research run completes with the SAME Client Radar
+    // account id — a genuine conflict, not a throw.
+    const accountB = await makeAccount();
+    const researchRunId = await makeRunningResearchRun(accountB);
+    const evidenceItemId = `ev_${crypto.randomUUID()}`;
+    const result = completedResult({
+      clientRadarAccountId,
+      account: { id: clientRadarAccountId, account_key: "conflicting-account" },
+      evidence: {
+        items: [
+          {
+            id: evidenceItemId,
+            source_type: "web",
+            title: "Conflict-path evidence",
+            url: null,
+            content: null,
+            created_at: new Date().toISOString(),
+          },
+        ],
+        total: 1,
+      },
+    });
+
+    const returned = await persistCompletedClientRadarResult(db!, researchRunId, new Date(), result);
+
+    // The run still completes despite the conflict (existing guarantee).
+    assert.equal(returned.status, "completed");
+
+    // The observation was still recorded — persistence did not depend on
+    // the alias link succeeding.
+    const [observationRow] = await db!
+      .select()
+      .from(schema.observations)
+      .where(
+        and(
+          eq(schema.observations.provider, "client_radar"),
+          eq(schema.observations.sourceRecordId, evidenceItemId),
+        ),
+      )
+      .limit(1);
+    assert.ok(observationRow);
+    assert.equal(observationRow?.observationClass, "research_intelligence");
   },
 );

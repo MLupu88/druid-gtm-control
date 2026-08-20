@@ -21,8 +21,12 @@ import test from "node:test";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "@workspace/db/schema";
 import { accountFacts, accountFactCurrent } from "@workspace/db/schema";
+import type { ProviderObservationV1 } from "@workspace/observation";
 import type { ClientRadarResultAccount } from "../lib/clientRadarClient.js";
-import { persistCompletedClientRadarResult } from "./clientRadarResearchRuns.js";
+import {
+  persistCompletedClientRadarResult,
+  type RecordObservationFn,
+} from "./clientRadarResearchRuns.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -169,6 +173,57 @@ function makeFakeDb(queue: unknown[]): { db: Db; calls: RecordedCall[] } {
 }
 
 // ---------------------------------------------------------------------
+// Fake observation recorder — never touches a database. Records every
+// candidate it was asked to persist in memory and always reports
+// "created", mirroring ../services/hubSpotCompanySync.test.ts's identical
+// DI pattern. persistCompletedClientRadarResult's recordObservationFn
+// param defaults to the real recordObservation() bound to a real db, so
+// every call in this file must inject this fake explicitly or it would
+// hit that real default against the fake query-chain db above (which
+// cannot serve it).
+// ---------------------------------------------------------------------
+
+function fakeRecordObservationFn(): {
+  fn: RecordObservationFn;
+  recorded: ProviderObservationV1[];
+} {
+  const recorded: ProviderObservationV1[] = [];
+  const fn: RecordObservationFn = async (observation) => {
+    recorded.push(observation);
+    return {
+      outcome: "created",
+      observation: {
+        id: `synthetic-observation-${recorded.length}`,
+        provider: observation.provider,
+        sourceRecordId: observation.sourceRecordId,
+        observationClass: observation.observationClass,
+        semanticKey:
+          observation.observationClass === "identity"
+            ? observation.identityKey
+            : observation.observationClass === "behavioral_signal"
+              ? observation.eventType
+              : observation.observationClass === "research_intelligence"
+                ? observation.findingType
+                : observation.canonicalField,
+        identitySubjectType:
+          observation.observationClass === "identity" ? observation.subjectType : null,
+        identityValue:
+          observation.observationClass === "identity" ? observation.identityValue : null,
+        rawValue: observation.observationClass === "identity" ? null : observation.rawValue,
+        normalizedValue:
+          observation.observationClass === "identity" ? null : observation.normalizedValue,
+        observedAt: observation.observedAt === null ? null : new Date(observation.observedAt),
+        importedAt: new Date(observation.importedAt),
+        confidence: observation.confidence,
+        evidenceRefs: observation.evidenceRefs as unknown[],
+        providerMetadata: observation.providerMetadata,
+      },
+    } as const;
+  };
+  return { fn, recorded };
+}
+
+// ---------------------------------------------------------------------
 // Happy path: payload + alias persist atomically.
 // ---------------------------------------------------------------------
 
@@ -178,8 +233,15 @@ test("completion persists accountPayload/evidencePayload and links the Client Ra
   // (2) INSERT account_aliases .. ON CONFLICT DO NOTHING .. RETURNING
   // (linked — no re-read select follows).
   const { db, calls } = makeFakeDb([[updatedRow], [{ id: "alias_1" }]]);
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
 
-  const result = await persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult());
+  const result = await persistCompletedClientRadarResult(
+    db,
+    RESEARCH_RUN_ID,
+    NOW,
+    completedResult(),
+    recordObservationFn,
+  );
 
   assert.equal(result.status, "completed");
   assert.deepEqual(result.accountPayload, { id: CLIENT_RADAR_ACCOUNT_ID, account_key: "acme-corp" });
@@ -188,6 +250,49 @@ test("completion persists accountPayload/evidencePayload and links the Client Ra
   // No conflict occurred, so no attention item insert should have
   // followed the alias insert.
   assert.equal(calls.filter((c) => c.method === "select").length, 0);
+
+  // Milestone 3E.4: normal completion records one research_intelligence
+  // observation per evidence item, sourced from Client Radar's own
+  // evidence-item id (never the Mission Control accountId), all sharing
+  // exactly the caller-supplied `now` boundary as importedAt.
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.provider, "client_radar");
+  assert.equal(recorded[0]?.observationClass, "research_intelligence");
+  assert.equal(recorded[0]?.sourceRecordId, "ev_1");
+  assert.notEqual(recorded[0]?.sourceRecordId, ACCOUNT_ID);
+  assert.equal(recorded[0]?.importedAt, NOW.toISOString());
+});
+
+test("multiple evidence items from one completion each become a separately addressable observation sharing exactly one importedAt", async () => {
+  const updatedRow = researchRunRow();
+  const { db } = makeFakeDb([[updatedRow], [{ id: "alias_1" }]]);
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
+
+  await persistCompletedClientRadarResult(
+    db,
+    RESEARCH_RUN_ID,
+    NOW,
+    completedResult({
+      evidence: {
+        items: [
+          { id: "ev_1", source_type: "web", title: null, url: null, content: null, created_at: NOW.toISOString() },
+          { id: "ev_2", source_type: "news_article", title: null, url: null, content: null, created_at: NOW.toISOString() },
+        ],
+        total: 2,
+      },
+    }),
+    recordObservationFn,
+  );
+
+  assert.equal(recorded.length, 2);
+  const sourceRecordIds = recorded.map((o) => o.sourceRecordId);
+  assert.deepEqual(new Set(sourceRecordIds), new Set(["ev_1", "ev_2"]));
+  // Every observation from this one call shares exactly the same
+  // importedAt boundary — never a separately generated timestamp.
+  for (const observation of recorded) {
+    assert.equal(observation.importedAt, NOW.toISOString());
+    assert.notEqual(observation.sourceRecordId, ACCOUNT_ID);
+  }
 });
 
 test("repeated completion for the same GTM account + same Client Radar id does not attempt a duplicate insert path beyond the standard insert-first attempt", async () => {
@@ -195,8 +300,15 @@ test("repeated completion for the same GTM account + same Client Radar id does n
   // Second call: the alias insert reports zero rows (already exists),
   // the re-read finds it belongs to the SAME account -> already_linked.
   const { db, calls } = makeFakeDb([[updatedRow], [], [{ accountId: ACCOUNT_ID, aliasType: "client_radar_account_id" }]]);
+  const { fn: recordObservationFn } = fakeRecordObservationFn();
 
-  const result = await persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult());
+  const result = await persistCompletedClientRadarResult(
+    db,
+    RESEARCH_RUN_ID,
+    NOW,
+    completedResult(),
+    recordObservationFn,
+  );
 
   assert.equal(result.status, "completed");
   // The alias write path was attempted (insert), found already present
@@ -223,8 +335,15 @@ test("conflict persists the completed research payload, creates no alias, and cr
     [{ id: ACCOUNT_ID }],
     [attentionItemRow()],
   ]);
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
 
-  const result = await persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult());
+  const result = await persistCompletedClientRadarResult(
+    db,
+    RESEARCH_RUN_ID,
+    NOW,
+    completedResult(),
+    recordObservationFn,
+  );
 
   // The research payload is persisted regardless of the identity
   // conflict — research succeeded, only identity linkage is withheld.
@@ -236,6 +355,12 @@ test("conflict persists the completed research payload, creates no alias, and cr
   // attempt, and the attention item. No second alias insert (no remap
   // retry) and no accountFacts insert of any kind.
   assert.equal(insertCalls.length, 2);
+
+  // Milestone 3E.4: the alias conflict withholds identity linkage only —
+  // the research_intelligence evidence observation was still recorded,
+  // since it happens before this alias-resolution step is even reached.
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.sourceRecordId, "ev_1");
 });
 
 test("conflict never creates an alias for the wrong (requesting) GTM account", async () => {
@@ -247,8 +372,9 @@ test("conflict never creates an alias for the wrong (requesting) GTM account", a
     [{ id: ACCOUNT_ID }],
     [attentionItemRow()],
   ]);
+  const { fn: recordObservationFn } = fakeRecordObservationFn();
 
-  await persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult());
+  await persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult(), recordObservationFn);
 
   // The alias insert's .values(...) call is the first insert's values
   // argument — assert it targeted ACCOUNT_ID (the requesting account),
@@ -278,21 +404,35 @@ test("an unexpected alias-step failure propagates out (rolls back the whole loca
       throw new Error("simulated unexpected database error");
     },
   ]);
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
 
   await assert.rejects(
-    () => persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult()),
+    () => persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult(), recordObservationFn),
     /simulated unexpected database error/,
   );
+
+  // Milestone 3E.4: observation recording happens BEFORE the run/alias
+  // transaction is even entered, so a thrown failure inside that later
+  // transaction does not undo (and was never gated by) the observation
+  // write already attempted above.
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.provider, "client_radar");
 });
 
 test("the fail-closed error from linkClientRadarAccountAlias (conflict reported but re-read finds nothing) also propagates and rolls back", async () => {
   const updatedRow = researchRunRow();
   const { db } = makeFakeDb([[updatedRow], [], []]);
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
 
   await assert.rejects(
-    () => persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult()),
+    () =>
+      persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult(), recordObservationFn),
     /insert conflicted .* but no existing strong alias was found/,
   );
+
+  // Same pre-resolution-evidence guarantee as the prior test: the
+  // observation write already happened before this later failure.
+  assert.equal(recorded.length, 1);
 });
 
 // ---------------------------------------------------------------------
@@ -308,8 +448,9 @@ test("no accountFacts table is touched by research completion, linked or conflic
     [{ id: ACCOUNT_ID }],
     [attentionItemRow()],
   ]);
+  const { fn: recordObservationFn } = fakeRecordObservationFn();
 
-  await persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult());
+  await persistCompletedClientRadarResult(db, RESEARCH_RUN_ID, NOW, completedResult(), recordObservationFn);
 
   // Identity-check every insert()/update() table argument against the
   // real accountFacts/accountFactCurrent table objects — this function
@@ -328,14 +469,22 @@ test("no accountFacts table is touched by research completion, linked or conflic
 test("a completed result with no Client Radar account (account: null) persists the payload and attempts no alias link", async () => {
   const updatedRow = researchRunRow({ accountPayload: null });
   const { db, calls } = makeFakeDb([[updatedRow]]);
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
 
   const result = await persistCompletedClientRadarResult(
     db,
     RESEARCH_RUN_ID,
     NOW,
     completedResult({ account: null, clientRadarAccountId: null }),
+    recordObservationFn,
   );
 
   assert.equal(result.status, "completed");
   assert.equal(calls.filter((c) => c.method === "insert").length, 0);
+
+  // Milestone 3E.4: no Client Radar account to link is not the same as
+  // no evidence to record — the run's evidence items still produce
+  // research_intelligence observations even when account is null.
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.provider, "client_radar");
 });
