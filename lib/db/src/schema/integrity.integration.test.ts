@@ -224,6 +224,31 @@ async function makeSignal(
   return signal;
 }
 
+async function makeObservation(
+  overrides: Partial<typeof schema.observations.$inferInsert> = {},
+) {
+  const [observation] = await db!
+    .insert(schema.observations)
+    .values({
+      provider: "hubspot",
+      sourceRecordId: "57634473634",
+      observationClass: "firmographic_fact",
+      semanticKey: "company.industry",
+      identitySubjectType: null,
+      identityValue: null,
+      rawValue: "CAPITAL_MARKETS",
+      normalizedValue: null,
+      observedAt: null,
+      importedAt: new Date(),
+      confidence: null,
+      evidenceRefs: [],
+      providerMetadata: null,
+      ...overrides,
+    })
+    .returning();
+  return observation;
+}
+
 async function makePerson(
   overrides: Partial<typeof schema.people.$inferInsert> = {},
 ) {
@@ -2487,6 +2512,358 @@ test(
       .where(eq(schema.attentionItems.accountId, account.id));
     assert.equal(history.length, 2);
     assert.ok(history.every((row) => row.status === "resolved"));
+  },
+);
+
+// -----------------------------------------------------------------------
+// observations (Milestone 3D)
+// -----------------------------------------------------------------------
+
+test("observations accepts a minimal row for all 5 observation classes", { skip }, async () => {
+  const importedAt = new Date();
+
+  const firmographic = await makeObservation({
+    observationClass: "firmographic_fact",
+    semanticKey: "company.industry",
+    rawValue: "CAPITAL_MARKETS",
+    importedAt,
+  });
+  assert.equal(firmographic.observationClass, "firmographic_fact");
+
+  const crm = await makeObservation({
+    sourceRecordId: crypto.randomUUID(),
+    observationClass: "crm_state",
+    semanticKey: "crm.lifecycleStage",
+    rawValue: "lead",
+    importedAt,
+  });
+  assert.equal(crm.observationClass, "crm_state");
+
+  const behavioral = await makeObservation({
+    provider: "rb2b",
+    sourceRecordId: crypto.randomUUID(),
+    observationClass: "behavioral_signal",
+    semanticKey: "page_view",
+    rawValue: { pageUrl: "https://druidai.com/pricing" },
+    importedAt,
+  });
+  assert.equal(behavioral.observationClass, "behavioral_signal");
+
+  const research = await makeObservation({
+    provider: "client_radar",
+    sourceRecordId: crypto.randomUUID(),
+    observationClass: "research_intelligence",
+    semanticKey: "company_summary",
+    rawValue: { summary: "Acme is expanding into EMEA." },
+    evidenceRefs: [{ type: "client_radar_evidence_item", ref: "ev-1" }],
+    importedAt,
+  });
+  assert.equal(research.observationClass, "research_intelligence");
+
+  const identity = await makeObservation({
+    sourceRecordId: crypto.randomUUID(),
+    observationClass: "identity",
+    semanticKey: "domain",
+    identitySubjectType: "account",
+    identityValue: "acme.com",
+    rawValue: null,
+    importedAt,
+  });
+  assert.equal(identity.observationClass, "identity");
+  assert.equal(identity.identityValue, "acme.com");
+});
+
+test(
+  "observations.identity_subject_type only accepts account/person",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeObservation({
+        observationClass: "identity",
+        semanticKey: "domain",
+        identitySubjectType: "company" as any,
+        identityValue: "acme.com",
+        rawValue: null,
+      }),
+      { constraint: "observations_identity_subject_type_allowed" },
+    );
+  },
+);
+
+test("identity rows require a non-blank identity_value", { skip }, async () => {
+  await assertDbRejects(
+    makeObservation({
+      observationClass: "identity",
+      semanticKey: "domain",
+      identitySubjectType: "account",
+      identityValue: null,
+      rawValue: null,
+    }),
+    { constraint: "observations_identity_payload_shape" },
+  );
+  await assertDbRejects(
+    makeObservation({
+      observationClass: "identity",
+      semanticKey: "domain",
+      identitySubjectType: "account",
+      identityValue: "   ",
+      rawValue: null,
+    }),
+    { constraint: "observations_identity_payload_shape" },
+  );
+});
+
+test(
+  "identity rows reject a non-null raw_value/normalized_value",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeObservation({
+        observationClass: "identity",
+        semanticKey: "domain",
+        identitySubjectType: "account",
+        identityValue: "acme.com",
+        rawValue: "not allowed here",
+      }),
+      { constraint: "observations_identity_payload_shape" },
+    );
+    await assertDbRejects(
+      makeObservation({
+        observationClass: "identity",
+        semanticKey: "domain",
+        identitySubjectType: "account",
+        identityValue: "acme.com",
+        rawValue: null,
+        normalizedValue: "not allowed here",
+      }),
+      { constraint: "observations_identity_payload_shape" },
+    );
+  },
+);
+
+test(
+  "non-identity rows reject identity_subject_type/identity_value",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeObservation({ identitySubjectType: "account" as any }),
+      { constraint: "observations_identity_payload_shape" },
+    );
+    await assertDbRejects(makeObservation({ identityValue: "acme.com" }), {
+      constraint: "observations_identity_payload_shape",
+    });
+  },
+);
+
+test("non-identity rows require a non-null raw_value", { skip }, async () => {
+  await assertDbRejects(makeObservation({ rawValue: null }), {
+    constraint: "observations_identity_payload_shape",
+  });
+});
+
+test(
+  "raw_value legitimately holds the JSON literal null (distinct from the column being SQL NULL) — a firmographic_fact provider may report a property exists but has no value",
+  { skip },
+  async () => {
+    const [row] = await db!
+      .insert(schema.observations)
+      .values({
+        provider: "hubspot",
+        sourceRecordId: crypto.randomUUID(),
+        observationClass: "firmographic_fact",
+        semanticKey: "company.revenueRange",
+        rawValue: sql`'null'::jsonb`,
+        normalizedValue: null,
+        observedAt: null,
+        importedAt: new Date(),
+        confidence: null,
+        evidenceRefs: [],
+        providerMetadata: null,
+      })
+      .returning();
+    assert.equal(row.rawValue, null); // node-postgres deserializes jsonb `null` to JS null
+    // Prove it's a real stored JSON value, not an absent column, by
+    // reading it back with a raw jsonb_typeof query.
+    const typedResult = await db!.execute<{ jsonb_typeof: string }>(
+      sql`SELECT jsonb_typeof(raw_value) FROM observations WHERE id = ${row.id}`,
+    );
+    assert.equal(typedResult.rows[0]?.jsonb_typeof, "null");
+  },
+);
+
+test(
+  "semantic_key is scoped per observation_class — an identity key is rejected under crm_state",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeObservation({
+        observationClass: "crm_state",
+        semanticKey: "domain",
+      }),
+      { constraint: "observations_semantic_key_allowed_for_class" },
+    );
+  },
+);
+
+test(
+  "semantic_key is scoped per observation_class — a firmographic field is rejected under identity",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeObservation({
+        observationClass: "identity",
+        semanticKey: "company.industry",
+        identitySubjectType: "account",
+        identityValue: "acme.com",
+        rawValue: null,
+      }),
+      { constraint: "observations_semantic_key_allowed_for_class" },
+    );
+  },
+);
+
+test(
+  "semantic_key is scoped per observation_class — a crm_state field is rejected under firmographic_fact",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeObservation({
+        observationClass: "firmographic_fact",
+        semanticKey: "crm.owner",
+      }),
+      { constraint: "observations_semantic_key_allowed_for_class" },
+    );
+  },
+);
+
+test(
+  "behavioral_signal.semantic_key (eventType) stays open — any non-blank value is accepted",
+  { skip },
+  async () => {
+    const row = await makeObservation({
+      provider: "rb2b",
+      sourceRecordId: crypto.randomUUID(),
+      observationClass: "behavioral_signal",
+      semanticKey: "some_never_before_seen_event_type",
+      rawValue: {},
+    });
+    assert.equal(row.semanticKey, "some_never_before_seen_event_type");
+  },
+);
+
+test(
+  "research_intelligence.semantic_key (findingType) stays open — any non-blank value is accepted",
+  { skip },
+  async () => {
+    const row = await makeObservation({
+      provider: "client_radar",
+      sourceRecordId: crypto.randomUUID(),
+      observationClass: "research_intelligence",
+      semanticKey: "some_never_before_seen_finding_type",
+      rawValue: {},
+    });
+    assert.equal(row.semanticKey, "some_never_before_seen_finding_type");
+  },
+);
+
+test("observations.evidence_refs must be a JSON array", { skip }, async () => {
+  await assertDbRejects(
+    makeObservation({ evidenceRefs: { not: "an array" } as any }),
+    { constraint: "observations_evidence_refs_is_array" },
+  );
+});
+
+test(
+  "observations.provider_metadata must be NULL or a JSON object",
+  { skip },
+  async () => {
+    await assertDbRejects(
+      makeObservation({ providerMetadata: ["not", "an", "object"] as any }),
+      { constraint: "observations_provider_metadata_is_object" },
+    );
+  },
+);
+
+test(
+  "the occurrence-uniqueness index fires on an exact (provider, class, sourceRecordId, semanticKey, importedAt) repeat",
+  { skip },
+  async () => {
+    const importedAt = new Date();
+    const sourceRecordId = crypto.randomUUID();
+    await makeObservation({ sourceRecordId, importedAt });
+    await assertDbRejects(
+      makeObservation({ sourceRecordId, importedAt, rawValue: "a different value entirely" }),
+      { constraint: "observations_occurrence_uq" },
+    );
+  },
+);
+
+test(
+  "the same semantic identity with a LATER importedAt inserts as a new row, same value",
+  { skip },
+  async () => {
+    const sourceRecordId = crypto.randomUUID();
+    const first = await makeObservation({ sourceRecordId, importedAt: new Date(Date.now() - 1000) });
+    const second = await makeObservation({ sourceRecordId, importedAt: new Date() });
+    assert.notEqual(first.id, second.id);
+    assert.equal(first.rawValue, second.rawValue);
+  },
+);
+
+test(
+  "the same semantic identity with a LATER importedAt inserts as a new row, changed value",
+  { skip },
+  async () => {
+    const sourceRecordId = crypto.randomUUID();
+    const first = await makeObservation({
+      sourceRecordId,
+      importedAt: new Date(Date.now() - 1000),
+      rawValue: "CAPITAL_MARKETS",
+    });
+    const second = await makeObservation({
+      sourceRecordId,
+      importedAt: new Date(),
+      rawValue: "TECHNOLOGY",
+    });
+    assert.notEqual(first.id, second.id);
+    assert.notEqual(first.rawValue, second.rawValue);
+  },
+);
+
+test("observations rejects UPDATE and DELETE", { skip }, async () => {
+  const observation = await makeObservation();
+  await assertDbRejects(
+    db!
+      .update(schema.observations)
+      .set({ rawValue: "changed" })
+      .where(eq(schema.observations.id, observation.id)),
+    { code: "P0001", messageIncludes: "observations" },
+  );
+  await assertDbRejects(
+    db!.delete(schema.observations).where(eq(schema.observations.id, observation.id)),
+    { code: "P0001", messageIncludes: "observations" },
+  );
+});
+
+test(
+  "observations.confidence accepts low/medium/high/NULL and is a distinct Postgres type from identity_confidence",
+  { skip },
+  async () => {
+    for (const confidence of ["low", "medium", "high", null] as const) {
+      const row = await makeObservation({
+        sourceRecordId: crypto.randomUUID(),
+        confidence,
+      });
+      assert.equal(row.confidence, confidence);
+    }
+
+    const typeInfoResult = await db!.execute<{ udt_name: string }>(
+      sql`
+        SELECT udt_name FROM information_schema.columns
+        WHERE table_name = 'observations' AND column_name = 'confidence'
+      `,
+    );
+    assert.equal(typeInfoResult.rows[0]?.udt_name, "observation_confidence");
   },
 );
 

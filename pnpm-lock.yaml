@@ -184,6 +184,9 @@ importers:
       '@workspace/identity':
         specifier: workspace:*
         version: link:../../lib/identity
+      '@workspace/observation':
+        specifier: workspace:*
+        version: link:../../lib/observation
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7

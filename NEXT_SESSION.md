@@ -273,17 +273,15 @@ field). Revisit once RB2B is activated/verified or HubSpot's event-read
 scope changes — do not invent values from test fixtures in the meantime.
 This, too, is not a blocker for 3D.
 
-### 3D — Candidate fact persistence
+### 3D — Candidate Observation / Fact Persistence
 
-**Immediate next milestone once 3C V1 is committed** — no further product
-decision is a prerequisite (see the explicit note above).
-
-Persist generic multi-provider observations/candidates with provenance and
-idempotency.
+**DONE.** Approved as implementation-complete 2026-08-20. See §19 for the
+full checkpoint (final architecture, migrations, test results, exact git
+status). Not yet committed/pushed as of this note.
 
 ### 3E — First provider adapters
 
-HubSpot and Client Radar become the first adapters.
+**NEXT.** HubSpot and Client Radar become the first adapters.
 
 - HubSpot can then request relevant firmographics.
 - Client Radar should preserve structured country/industry.
@@ -709,7 +707,127 @@ reconciliation code, and the unrelated untracked root `n8n` file.
    `normalizedValue` as JSON plus the closed field-name taxonomy 3C V1
    already delivered.
 
-## 19. New-session startup instruction
+## 19. Session checkpoint — 3D V1 implementation (2026-08-20, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §17/§18 and the rest of this file for background.
+
+### Status
+
+- 3A, 3A.5, 3B, 3C V1 — all DONE. 3B is committed/pushed at `d39e602`; 3C
+  V1 is committed/pushed at `5188107`.
+- **3D — Candidate Observation / Fact Persistence — DONE.** Approved as
+  implementation-complete 2026-08-20. **Not committed. Not pushed. Not
+  deployed. No migration applied to production. No production change of
+  any kind.**
+- **3E — First provider adapters — NEXT.** Not started, not designed.
+
+### Final architecture
+
+`observations` — one immutable, append-only occurrence log:
+
+- **No `account_id`/`person_id` binding in 3D.** Subject association is
+  wholly deferred to 3F, via a separate resolution/link mechanism
+  following the repo's existing `signals` → `identity_resolution_events`
+  precedent — never a mutation of the observation row.
+- **`imported_at` is caller-supplied, with no DB default.** Assigned once
+  at the ingestion boundary by the caller and preserved unchanged across
+  retries of the same ingestion attempt — the DB column carries no
+  `defaultNow()`.
+- **Occurrence uniqueness:** `UNIQUE (provider, observation_class,
+  source_record_id, semantic_key, imported_at)`. Semantic identity alone
+  (`computeObservationIdentityKey` — provider + observationClass +
+  sourceRecordId + semanticKey) is deliberately NOT globally unique in
+  this table; a new `imported_at` always creates a new occurrence row,
+  whether the observed value changed or not.
+- **`identity_value` is stored explicitly** in its own column — never
+  smuggled inside `raw_value` as a fake JSON-string container. Identity
+  rows carry `identity_subject_type`/`identity_value` and neither
+  `raw_value` nor `normalized_value`; every other class carries
+  `raw_value` (required) and neither identity column — enforced by one
+  combined iff-CHECK.
+- **`observation_confidence` is a new, distinct Postgres enum** — never
+  reuses `identity_confidence` (that type's own comment scopes it to
+  "confidence in a resolved identity," a different concept from
+  confidence in an observed value).
+- **`semantic_key` CHECKs are branch-specific, never one combined list**
+  — an identity key can never validate under `crm_state` or vice versa;
+  each closed class (`identity`, `firmographic_fact`, `crm_state`) gets
+  its own scoped `IN (...)` clause.
+- **`behavioral_signal`/`research_intelligence` semantic keys remain
+  open** — no CHECK constrains `eventType`/`findingType`, matching 3C's
+  deliberate deferral (no verified provider data exists to close them
+  against yet).
+- **`recordObservation()` outcomes: `created` / `duplicate` / `conflict`**
+  — insert-first, catch `23505` on the occurrence constraint, re-read,
+  classify by full structural comparison of every non-key column.
+  `conflict` (same tuple, different content) is surfaced, never silently
+  overwritten.
+- **The shared `getObservationSemanticKey` helper is used** —
+  `lib/observation/src/idempotency.ts`'s formerly-private `semanticKeyOf`
+  was exported under this name and is called directly from
+  `toInsertObservation()`; no semantic-key switch logic is duplicated in
+  the API service, and `computeObservationIdentityKey` itself now calls
+  the same exported function.
+- Immutable by trigger: `observations_immutable` reuses the existing
+  `reject_update_delete()` function — no new PL/pgSQL.
+
+### Migrations
+
+- `lib/db/drizzle/0012_add_observations.sql` — generated baseline (table,
+  `observation_class`/`observation_confidence` enums, CHECKs, indexes).
+- `lib/db/drizzle/0013_observations_immutability.sql` — hand-authored,
+  reuses `reject_update_delete()`.
+- Verified against a disposable local Postgres 16 container (`docker run
+  postgres:16`, migrated via `pnpm --filter @workspace/db run migrate`,
+  then stopped and removed). **Never applied to production.**
+
+### Test results (executed live, 2026-08-20)
+
+- `@workspace/observation`: **34/34 pass.**
+- `@workspace/api-server` `test:observations` (unit + integration,
+  `recordObservation()`'s created/duplicate/conflict paths, real DB):
+  **14/14 pass.**
+- All `observations`-related tests in `lib/db`'s full suite (17
+  integration + 6 structural + the shared-helper test): **all pass.**
+- `lib/db`'s full suite otherwise: **154/158 pass. The 4 failures are
+  pre-existing, in `attention_items`** (a `resolved_at >= created_at`
+  CHECK, timing-sensitive against this specific fresh container's
+  clock/latency) — a table this milestone never touched. Not caused by
+  3D (migrations 0012/0013 are strictly after `attention_items`' own
+  0011 and touch nothing it depends on). **Explicitly not fixed here** —
+  out of scope, flagged for a future session.
+- `pnpm exec tsc --build` (full workspace libs): clean.
+  `@workspace/api-server` typecheck: clean.
+- `git diff --check`: clean.
+
+### Files changed for 3D (all currently uncommitted)
+
+New: `lib/db/src/schema/observations.ts`, `lib/db/drizzle/0012_add_observations.sql`,
+`lib/db/drizzle/0013_observations_immutability.sql`,
+`lib/db/drizzle/meta/{0012,0013}_snapshot.json`,
+`artifacts/api-server/src/services/observations.ts`,
+`observations.test.ts`, `observations.integration.test.ts`.
+
+Modified: `lib/db/src/schema/enums.ts`, `index.ts`, `schema.test.ts`,
+`integrity.integration.test.ts`, `lib/db/drizzle/meta/_journal.json`,
+`lib/observation/src/idempotency.ts` (+`.test.ts`),
+`artifacts/api-server/package.json`, `pnpm-lock.yaml`.
+
+Untouched: DB migrations/schema for any other table, `lib/evaluator`,
+HubSpot/Client Radar/RB2B application code, UI, n8n routes, and the
+unrelated untracked root `n8n` file.
+
+### Next exact action for the new session
+
+1. Get explicit user approval to commit 3D as implemented.
+2. If approved: commit only the 3D files above plus this checkpoint. Do
+   not push without separate explicit approval.
+3. **3E — First provider adapters is next** per the Milestone 3 sequence
+   (§10) — not started, not designed. Do not begin 3E design or
+   implementation until explicitly requested in a new session.
+
+## 20. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository

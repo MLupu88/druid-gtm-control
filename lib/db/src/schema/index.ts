@@ -25,3 +25,6 @@ export * from "./identityResolutionEvents";
 
 // GTM V2 Stage 3, Unit 1 — Attention Model foundation.
 export * from "./attentionItems";
+
+// Milestone 3D — provider-neutral candidate observation persistence.
+export * from "./observations";

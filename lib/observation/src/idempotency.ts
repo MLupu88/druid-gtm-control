@@ -35,10 +35,18 @@
 
 import type { ProviderObservationV1 } from "./types.js";
 
-// The part of the identity that varies by observationClass. Not exported
-// beyond this module — callers should only ever need the combined key
-// below, not this component in isolation.
-function semanticKeyOf(observation: ProviderObservationV1): string {
+// The part of the identity that varies by observationClass. Exported
+// (Milestone 3D) as getObservationSemanticKey below — persistence needs
+// this exact component as its own physical column (see lib/db's
+// observations.semantic_key), not just as one ingredient folded into the
+// opaque joined string computeObservationIdentityKey returns. Callers
+// that only need to compare two observations for identity should still
+// prefer computeObservationIdentityKey; this exists specifically so 3D
+// never has to re-derive or parse/split that opaque string to recover
+// this value.
+export function getObservationSemanticKey(
+  observation: ProviderObservationV1,
+): string {
   switch (observation.observationClass) {
     case "identity":
       return observation.identityKey;
@@ -64,6 +72,6 @@ export function computeObservationIdentityKey(
     observation.provider,
     observation.observationClass,
     observation.sourceRecordId,
-    semanticKeyOf(observation),
+    getObservationSemanticKey(observation),
   ].join("␟"); // U+241F SYMBOL FOR UNIT SEPARATOR — unlikely to collide with real field content
 }

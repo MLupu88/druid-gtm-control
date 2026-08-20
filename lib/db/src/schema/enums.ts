@@ -194,3 +194,37 @@ export const attentionItemStatus = pgEnum("attention_item_status", [
   "open",
   "resolved",
 ]);
+
+// Milestone 3D — provider-neutral observation persistence.
+//
+// observations.observation_class
+// Closed by Milestone 3B/3C design (lib/observation's ObservationClassV1)
+// — unlike observations.provider, which stays open text (see
+// observations.ts), adding a new observation class is a deliberate
+// contract change, not a per-provider extension, so a real Postgres enum
+// is appropriate here the same way it is for every other closed,
+// small, product-owned vocabulary in this file.
+export const observationClass = pgEnum("observation_class", [
+  "identity",
+  "firmographic_fact",
+  "crm_state",
+  "behavioral_signal",
+  "research_intelligence",
+]);
+
+// observations.confidence
+// Deliberately a NEW, separate enum — not identity_confidence above.
+// identity_confidence's own comment scopes it explicitly to "how
+// confident the evaluator is in the resolved identity," consumed only by
+// account_evaluations/identity_resolution_events; observations.confidence
+// means something different for 4 of 5 observation classes (confidence in
+// a firmographic fact, a CRM state read, a behavioral event, a research
+// finding — none of which is identity-resolution confidence). The value
+// set happens to coincide (low/medium/high, mirroring
+// lib/observation's ConfidenceLevelV1) but that alone is not a reason to
+// couple two semantically distinct vocabularies to one Postgres type.
+export const observationConfidence = pgEnum("observation_confidence", [
+  "low",
+  "medium",
+  "high",
+]);

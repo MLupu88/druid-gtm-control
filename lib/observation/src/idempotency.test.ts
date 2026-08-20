@@ -5,11 +5,16 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { computeObservationIdentityKey } from "./idempotency.js";
+import {
+  computeObservationIdentityKey,
+  getObservationSemanticKey,
+} from "./idempotency.js";
 import type {
   FirmographicFactObservationV1,
   CrmStateObservationV1,
   BehavioralSignalObservationV1,
+  IdentityObservationV1,
+  ResearchIntelligenceObservationV1,
 } from "./types.js";
 
 function hubspotCompanyIndustry(): FirmographicFactObservationV1 {
@@ -28,6 +33,41 @@ function hubspotCompanyIndustry(): FirmographicFactObservationV1 {
     providerMetadata: null,
   };
 }
+
+test("getObservationSemanticKey returns the right per-class component (Milestone 3D persistence needs this as its own column)", () => {
+  const identity: IdentityObservationV1 = {
+    schemaVersion: "v1",
+    provider: "hubspot",
+    sourceRecordId: "57634473634",
+    observationClass: "identity",
+    subjectType: "account",
+    identityKey: "domain",
+    identityValue: "acme.com",
+    observedAt: null,
+    importedAt: "2026-08-20T10:00:00Z",
+    confidence: null,
+    evidenceRefs: [],
+    providerMetadata: null,
+  };
+  const research: ResearchIntelligenceObservationV1 = {
+    schemaVersion: "v1",
+    provider: "client_radar",
+    sourceRecordId: "run-1",
+    observationClass: "research_intelligence",
+    findingType: "company_summary",
+    rawValue: { summary: "..." },
+    normalizedValue: null,
+    observedAt: null,
+    importedAt: "2026-08-20T10:00:00Z",
+    confidence: null,
+    evidenceRefs: [{ type: "client_radar_evidence_item", ref: "ev-1" }],
+    providerMetadata: null,
+  };
+
+  assert.equal(getObservationSemanticKey(identity), "domain");
+  assert.equal(getObservationSemanticKey(hubspotCompanyIndustry()), "company.industry");
+  assert.equal(getObservationSemanticKey(research), "company_summary");
+});
 
 test("two firmographic observations from the SAME HubSpot company record but different fields get different identity keys", () => {
   const industry = hubspotCompanyIndustry();

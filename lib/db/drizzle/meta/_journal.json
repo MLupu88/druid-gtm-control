@@ -85,6 +85,20 @@
       "when": 1785950032480,
       "tag": "0011_attention_items_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787222941756,
+      "tag": "0012_add_observations",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787223326272,
+      "tag": "0013_observations_immutability",
+      "breakpoints": true
     }
   ]
 }

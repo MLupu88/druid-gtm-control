@@ -38,8 +38,10 @@ import {
   insertIcpProfileSchema,
   insertIcpProfileVersionSchema,
   insertIdentityResolutionEventSchema,
+  insertObservationSchema,
   insertPersonSchema,
   insertSignalSchema,
+  observations,
   people,
   signals,
 } from "./index.js";
@@ -654,4 +656,88 @@ test("attentionItems insert schema rejects a non-object context, defaults to {} 
     createdBy: "operator@example.com",
   });
   assert.deepEqual(parsed.context, {});
+});
+
+// ---------------------------------------------------------------------
+// Milestone 3D — observations
+// ---------------------------------------------------------------------
+
+test("observations exports the expected columns — no accountId/personId", () => {
+  assert.deepEqual(columnNames(observations), [
+    "confidence",
+    "evidenceRefs",
+    "id",
+    "identitySubjectType",
+    "identityValue",
+    "importedAt",
+    "normalizedValue",
+    "observationClass",
+    "observedAt",
+    "provider",
+    "providerMetadata",
+    "rawValue",
+    "semanticKey",
+    "sourceRecordId",
+  ]);
+});
+
+function minimalFirmographicObservation() {
+  return {
+    provider: "hubspot",
+    sourceRecordId: "57634473634",
+    observationClass: "firmographic_fact" as const,
+    semanticKey: "company.industry",
+    identitySubjectType: null,
+    identityValue: null,
+    rawValue: "CAPITAL_MARKETS",
+    normalizedValue: null,
+    observedAt: null,
+    importedAt: new Date("2026-08-20T10:00:00Z"),
+    confidence: null,
+    evidenceRefs: [],
+    providerMetadata: null,
+  };
+}
+
+test("observations insert schema requires importedAt — unlike every other server-timestamped table, it is NOT server-generated/omitted", () => {
+  assert.equal("importedAt" in insertObservationSchema.shape, true);
+  const { importedAt, ...withoutImportedAt } = minimalFirmographicObservation();
+  assert.throws(() => insertObservationSchema.parse(withoutImportedAt));
+});
+
+test("observations insert schema accepts a minimal firmographic_fact-shaped row", () => {
+  const parsed = insertObservationSchema.parse(minimalFirmographicObservation());
+  assert.equal(parsed.observationClass, "firmographic_fact");
+  assert.equal(parsed.semanticKey, "company.industry");
+});
+
+test("observations insert schema accepts a minimal identity-shaped row", () => {
+  const parsed = insertObservationSchema.parse({
+    ...minimalFirmographicObservation(),
+    observationClass: "identity" as const,
+    semanticKey: "domain",
+    identitySubjectType: "account",
+    identityValue: "acme.com",
+    rawValue: null,
+  });
+  assert.equal(parsed.observationClass, "identity");
+  assert.equal(parsed.identityValue, "acme.com");
+});
+
+test("observations insert schema requires evidenceRefs to be an array", () => {
+  assert.throws(() =>
+    insertObservationSchema.parse({
+      ...minimalFirmographicObservation(),
+      evidenceRefs: { not: "an array" },
+    }),
+  );
+});
+
+test("observations insert schema rejects a non-object providerMetadata", () => {
+  assert.throws(() =>
+    insertObservationSchema.parse({
+      ...minimalFirmographicObservation(),
+      providerMetadata: ["not", "an", "object"],
+    }),
+  );
 });
