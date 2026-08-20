@@ -286,9 +286,10 @@ provider, not deferred; see §20):
 - **3E.1 — RB2B live-path verification + contract capture — DONE.**
 - **3E.2 — RB2B → `behavioral_signal` adapter — split into two parts (see §21):**
   - **3E.2a — Mission Control RB2B observation ingestion endpoint —
-    IMPLEMENTED AND TESTED**, uncommitted. `POST /internal/rb2b/signals`
-    accepts a caller-supplied `source_record_id`/`ingestion_attempt_at`
-    and never derives either.
+    DONE.** Committed and pushed at `1794e8b` ("feat: add RB2B observation
+    ingestion bridge"). `POST /internal/rb2b/signals` accepts a
+    caller-supplied `source_record_id`/`ingestion_attempt_at` and never
+    derives either.
   - **3E.2b — n8n RB2B fan-out wiring — NOT STARTED, pending** until
     either (1) the actual RB2B payload contract is obtained from RB2B
     configuration/documentation, including a defensible native or stable
@@ -973,7 +974,7 @@ never been an RB2B execution — do not treat this as inspecting an
 existing one. Do not finalize `sourceRecordId`/`provider_observed_at`
 semantics or begin 3E.2b implementation until one of these is done.
 
-## 21. Session checkpoint — Milestone 3E.2a implementation (2026-08-20, uncommitted)
+## 21. Session checkpoint — Milestone 3E.2a implementation (2026-08-20, committed/pushed)
 
 This section is the precise resume point for a fresh session. Read this
 section first, then §20 and the rest of this file for background.
@@ -983,11 +984,14 @@ section first, then §20 and the rest of this file for background.
 - 3D, 3E.1 — DONE (3D committed/pushed at `b3a26ea`).
 - **3E.2 split into 3E.2a and 3E.2b, per explicit correction 2026-08-20:**
   - **3E.2a — Mission Control RB2B observation ingestion endpoint —
-    IMPLEMENTED AND TESTED. Not committed. Not pushed. Not deployed. No
-    migration. No production change of any kind.**
-  - **3E.2b — n8n RB2B fan-out wiring — remains pending** until the
-    actual RB2B payload contract, or a first real delivery, establishes a
-    defensible `source_record_id` strategy. Not started. n8n untouched.
+    DONE.** Committed and pushed at `1794e8b` ("feat: add RB2B observation
+    ingestion bridge"); local `main` == `origin/main`. Tests previously
+    passed 29/29; workspace and `api-server` typechecks clean. No
+    deployment. No production migration. No production change of any
+    kind.
+  - **3E.2b — n8n RB2B fan-out wiring — PENDING.** Not started. n8n
+    untouched — the unrelated root `n8n` file remains untracked. See the
+    dedicated subsection below for the two valid paths forward.
 - 3E.3, 3E.4, 3F — NOT STARTED.
 
 ### What 3E.2a is, and what it deliberately is not
@@ -1004,6 +1008,22 @@ ahead of 3E.2b, without needing to solve the still-open
 `source_record_id`/`importedAt` derivation question at all — that
 question now belongs entirely to whatever calls this endpoint (3E.2b),
 not to Mission Control.
+
+### 3E.2b — n8n RB2B fan-out wiring — PENDING (payload contract or first real delivery)
+
+Not started. n8n untouched. Two valid paths forward — either is
+sufficient on its own:
+
+1. Obtain the actual RB2B payload contract/configuration/documentation,
+   including a defensible native or stable event/visit identifier and
+   event-time field; or
+2. Use the first real RB2B delivery to establish the
+   `source_record_id`/`provider_observed_at` semantics directly.
+
+There has never been an RB2B execution, so this is not a matter of
+inspecting an existing one. Do not begin n8n fan-out wiring, and do not
+finalize `source_record_id`/`provider_observed_at` semantics, until one
+of the two paths above is complete.
 
 ### Endpoint contract
 
@@ -1070,7 +1090,8 @@ Radar application code, UI, and the unrelated untracked root `n8n` file.
 
 ### Next exact action for the next session
 
-1. Get explicit approval to commit 3E.2a as implemented.
+1. ~~Get explicit approval to commit 3E.2a as implemented.~~ Done —
+   committed and pushed at `1794e8b`.
 2. **3E.2b remains pending** — do not begin n8n fan-out wiring until
    either (1) the actual RB2B payload contract is obtained from RB2B
    configuration/documentation (addressing §20's three unresolved runtime
