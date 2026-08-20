@@ -275,17 +275,31 @@ This, too, is not a blocker for 3D.
 
 ### 3D — Candidate Observation / Fact Persistence
 
-**DONE.** Approved as implementation-complete 2026-08-20. See §19 for the
-full checkpoint (final architecture, migrations, test results, exact git
-status). Not yet committed/pushed as of this note.
+**DONE.** Committed and pushed at `b3a26ea`. See §19 for the full
+checkpoint (final architecture, migrations, test results).
 
 ### 3E — First provider adapters
 
-**NEXT.** HubSpot and Client Radar become the first adapters.
+Revised sequence (corrected 2026-08-20 — RB2B is an active, required
+provider, not deferred; see §20):
 
-- HubSpot can then request relevant firmographics.
-- Client Radar should preserve structured country/industry.
-- Both initially submit candidates rather than directly overwriting canonical facts.
+- **3E.1 — RB2B live-path verification + contract capture — DONE.**
+- **3E.2 — RB2B → `behavioral_signal` adapter — split into two parts (see §21):**
+  - **3E.2a — Mission Control RB2B observation ingestion endpoint —
+    IMPLEMENTED AND TESTED**, uncommitted. `POST /internal/rb2b/signals`
+    accepts a caller-supplied `source_record_id`/`ingestion_attempt_at`
+    and never derives either.
+  - **3E.2b — n8n RB2B fan-out wiring — NOT STARTED, pending** until
+    either (1) the actual RB2B payload contract is obtained from RB2B
+    configuration/documentation, including a defensible native or stable
+    event/visit identifier and event-time field, or (2) the first real
+    RB2B delivery provides enough evidence to establish the
+    `source_record_id`/`provider_observed_at` strategy for whatever calls
+    3E.2a. There has never been an RB2B execution — this is not "inspect
+    an existing one."
+- **3E.3 — HubSpot → `firmographic_fact`/`crm_state` adapter — NOT STARTED.**
+- **3E.4 — Client Radar → `research_intelligence` adapter — NOT STARTED.**
+- **3F — NOT STARTED.**
 
 ### 3F — Agreement/conflict and canonical selection
 
@@ -827,7 +841,248 @@ unrelated untracked root `n8n` file.
    (§10) — not started, not designed. Do not begin 3E design or
    implementation until explicitly requested in a new session.
 
-## 20. New-session startup instruction
+## 20. Session checkpoint — Milestone 3E.1/3E.2 (2026-08-20, design-only)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §19 and the rest of this file for background.
+
+### Status
+
+- 3D — DONE, committed/pushed at `b3a26ea`.
+- **3E.1 — RB2B live-path verification + contract capture — DONE.**
+- **3E.2 — RB2B → `behavioral_signal` adapter — DESIGN COMPLETE; split
+  into 3E.2a/3E.2b, see §21.** 3E.2b remains pending until either (1) the
+  actual RB2B payload contract is obtained from RB2B
+  configuration/documentation, including a defensible native or stable
+  event/visit identifier and event-time field, or (2) the first real
+  RB2B delivery provides enough evidence to establish the
+  `source_record_id`/`provider_observed_at` strategy. There has never
+  been an RB2B execution to inspect.
+- 3E.3 (HubSpot), 3E.4 (Client Radar) — NOT STARTED.
+- 3F — NOT STARTED.
+
+### Correction to the Milestone 3 provider priority (2026-08-20)
+
+RB2B is an **active, required** provider for this product's behavioral
+signal / Intent path — not deferred. Only Cognism and Dealfront remain
+parked. The 3E sequence is revised accordingly: 3E.1 (RB2B verification)
+and 3E.2 (RB2B adapter) now come before 3E.3 (HubSpot) and 3E.4 (Client
+Radar), reversing the earlier HubSpot-first assumption recorded upstream
+in this file.
+
+### 3E.1 — verified live topology
+
+```
+RB2B -> n8n "RB2B Capture" (rb2b-capture) -> "Map RB2B Payload"
+     -> POST /webhook/icp-signal-intake -> ICP 01 Normalize Signal
+     -> existing legacy GTM pipeline
+```
+
+**Live n8n UI confirms the relevant workflows are active.** Any exported
+workflow JSON or repo-recorded `active: false` metadata is a stale
+snapshot and must not be treated as current — live runtime state is
+authoritative over it.
+
+**No repository evidence exists for a native RB2B event/visit id, a
+confirmed timestamp provenance, or the fan-out node's retry
+configuration** — see the three unresolved runtime questions below.
+
+### 3E.2 — target architecture (design complete)
+
+```
+RB2B -> RB2B Capture -> ICP 01 Normalize Signal
+           -> existing legacy GTM path (UNTOUCHED)
+           -> ADDITIVE fan-out -> Mission Control observation ingestion
+                -> observations table, observationClass = behavioral_signal
+```
+
+- Existing legacy GTM processing **must remain unaffected** if Mission
+  Control ingestion fails — an n8n-side wiring requirement (parallel
+  branch, not serial; continue-on-fail), not something this repo can
+  implement or verify without touching n8n.
+- **One `behavioral_signal` observation per RB2B visit** in the minimal
+  3E.2 slice — no separate `identity`/`firmographic_fact` split (no
+  current consumer for either; `contact_email` isn't even in 3C's closed
+  `IdentityKeyV1` vocabulary). Full context (`company_domain`,
+  `contact_email`, `linkedin`, `page_visited`, `signal_detail`, etc.)
+  lives in `rawValue`.
+- **Observation persistence remains pre-resolution.** Identity resolution
+  (unresolved, missing, or conflicting) must never gate whether an
+  observation is recorded — this corrects an earlier draft of the
+  HubSpot 3E design that wrongly gated observation writes behind
+  successful identity bootstrap.
+- Reuses the existing 3D `observations` table and `recordObservation()`
+  unmodified — **no schema migration expected for 3E.2.**
+- Proposed endpoint: `POST /internal/rb2b/signals` — a dedicated,
+  RB2B-specific bridge (not a generic multi-provider endpoint yet — that
+  stays deferred until a second provider needs it), reusing the existing
+  `requireServiceAuth` internal-service-auth convention exactly as
+  `/internal/signals` does.
+
+### Three unresolved runtime questions (the actual blocker)
+
+1. Does the raw RB2B webhook payload contain a stable native
+   event/visit/activity id that the current mapper discards during
+   normalization?
+2. Is the incoming `timestamp` the provider's real event time, or is it
+   generated locally by n8n at normalization time?
+3. What are the actual retry semantics of the future Mission Control
+   fan-out node (does it retry at all, how many times, what backoff), and
+   can one ingestion attempt preserve a stable `importedAt`/attempt
+   identity across those retries?
+
+None of these is answerable from static repository inspection. There has
+never been an RB2B execution, so this is not a matter of inspecting an
+existing one — answering them requires either (1) the actual RB2B payload
+contract from RB2B configuration/documentation, or (2) the first real
+RB2B delivery providing enough evidence to answer them directly.
+
+### Explicitly NOT approved — two rejected heuristics
+
+Two candidate mechanisms for deriving `importedAt` were proposed and
+**explicitly rejected** during this design pass — do not implement
+either:
+
+- **"Reuse the earliest existing row's `importedAt`"** for any repeat
+  sighting of the same `sourceRecordId` — rejected because it cannot
+  distinguish a retry of the same delivery from the same provider event
+  being intentionally imported again later; it would wrongly collapse
+  the latter into a duplicate.
+- **"Time-bounded prior-row lookup"** (reuse `importedAt` only if a prior
+  row exists within a short recent window) — also rejected. It is a
+  heuristic guess at a safe window size with no verified basis, and still
+  cannot reliably distinguish retry vs. later reimport vs. two genuine
+  events/imports occurring close together in time.
+
+**Preferred direction, still unfinalized:** `importedAt` should be
+assigned once at the ingestion-attempt boundary and preserved across
+retries of that same attempt — not reconstructed after the fact from
+`observations` table history. The exact mechanism must follow verified
+n8n retry/execution behavior (question 3 above), not be guessed at.
+
+### Next exact action for the next session
+
+Establish the RB2B `sourceRecordId`/`provider_observed_at` strategy for
+3E.2b via one of: (1) obtaining the actual RB2B payload contract from RB2B
+configuration/documentation, including a defensible native or stable
+event/visit identifier and event-time field, including the **Webhook -
+RB2B Push** node's real input shape and the retry behavior/configuration
+for the future additive HTTP fan-out node; or (2) the first real RB2B
+delivery providing enough evidence to establish it directly. There has
+never been an RB2B execution — do not treat this as inspecting an
+existing one. Do not finalize `sourceRecordId`/`provider_observed_at`
+semantics or begin 3E.2b implementation until one of these is done.
+
+## 21. Session checkpoint — Milestone 3E.2a implementation (2026-08-20, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §20 and the rest of this file for background.
+
+### Status
+
+- 3D, 3E.1 — DONE (3D committed/pushed at `b3a26ea`).
+- **3E.2 split into 3E.2a and 3E.2b, per explicit correction 2026-08-20:**
+  - **3E.2a — Mission Control RB2B observation ingestion endpoint —
+    IMPLEMENTED AND TESTED. Not committed. Not pushed. Not deployed. No
+    migration. No production change of any kind.**
+  - **3E.2b — n8n RB2B fan-out wiring — remains pending** until the
+    actual RB2B payload contract, or a first real delivery, establishes a
+    defensible `source_record_id` strategy. Not started. n8n untouched.
+- 3E.3, 3E.4, 3F — NOT STARTED.
+
+### What 3E.2a is, and what it deliberately is not
+
+`POST /internal/rb2b/signals` — a repository-side contract only. It does
+**not** derive `source_record_id` or `importedAt`; both are required,
+caller-supplied fields (`source_record_id`, `ingestion_attempt_at`),
+passed through exactly as received. This is the corrected design: the
+earlier raw-body-fingerprint derivation strategy considered during the
+3E.2 design pass is **not implemented and not approved** — see §20's
+"Explicitly NOT approved" section, which still stands unchanged. 3E.2a
+exists so the repository side of the contract can be built and tested
+ahead of 3E.2b, without needing to solve the still-open
+`source_record_id`/`importedAt` derivation question at all — that
+question now belongs entirely to whatever calls this endpoint (3E.2b),
+not to Mission Control.
+
+### Endpoint contract
+
+`POST /internal/rb2b/signals`, behind the existing `requireServiceAuth`
+middleware (reused, not duplicated — same shared-secret header convention
+as `/internal/signals`).
+
+Required: `source` (must equal `"rb2b"`), `signal_type`,
+`source_record_id`, `ingestion_attempt_at`.
+Optional: `provider_observed_at`, plus the normalized RB2B context fields
+already identified in the 3E.2 design (`company_domain`, `company_name`,
+`country`, `industry`, `contact_email`, `contact_name`, `contact_title`,
+`contact_phone`, `linkedin`, `page_visited`, `signal_detail`, `campaign`,
+`keyword`, `resolution_level`, `stream`) — plus any other field, via
+passthrough (not rejected as unrecognized), since no real RB2B payload
+has ever been received.
+
+Mapping (exact, per approval): `provider = "rb2b"`, `observationClass =
+"behavioral_signal"`, `eventType = signal_type`, `sourceRecordId =
+source_record_id` (unchanged), `observedAt = provider_observed_at ??
+null`, `importedAt = ingestion_attempt_at` (unchanged), `rawValue` = the
+complete validated inbound DTO, `normalizedValue = null`, `confidence =
+null`, `evidenceRefs = []`, `providerMetadata = null`.
+
+Reuses `ProviderObservationV1Schema`, `getObservationSemanticKey()` (via
+`recordObservation()`), and `recordObservation()` itself — all unmodified.
+No DB schema change; 3D's `observations` table and trigger are unchanged.
+
+### Files changed
+
+New: `artifacts/api-server/src/routes/rb2bSignalBridge.ts`,
+`artifacts/api-server/src/services/rb2bObservationMapping.ts`,
+`rb2bObservationMapping.test.ts`, `rb2bObservationMapping.integration.test.ts`.
+
+Modified: `artifacts/api-server/src/routes/index.ts` (mounts the new
+router behind `requireServiceAuth`, before any `requireAuth`-gated
+`/internal` prefix — same ordering discipline as every other
+service-to-service route), `artifacts/api-server/package.json`
+(`test:observations`/`test:observations:unit` extended to include the new
+files).
+
+Untouched: n8n, DB schema/migrations, `lib/evaluator`, HubSpot/Client
+Radar application code, UI, and the unrelated untracked root `n8n` file.
+
+### Test results (executed live, 2026-08-20)
+
+- Pure mapping/contract-validation unit tests: **18/18 pass** (no DB).
+- Full suite including integration (disposable local Postgres, migrated
+  through 3D's `0013`, torn down after): **29/29 pass** — covers valid
+  persistence; same `source_record_id` + same `ingestion_attempt_at` →
+  `duplicate`; same `source_record_id` + new `ingestion_attempt_at` → new
+  occurrence; different `source_record_id` → new occurrence; a signal
+  with no identity/company context at all → still persists (proves
+  identity resolution never gates persistence); malformed request,
+  `source != "rb2b"`, and invalid timestamps all rejected before any
+  write.
+- Full workspace libs typecheck (`pnpm exec tsc --build`): clean.
+  `@workspace/api-server` typecheck: clean. `git diff --check`: clean.
+- Scope note: route-level HTTP/auth wiring was **not** re-tested with a
+  duplicate test matrix — `requireServiceAuth` is reused unmodified and
+  already has its own tested behavior (`signals.route.test.ts`); this
+  slice's tests focus on what's actually new (the mapping and the
+  duplicate/occurrence semantics), per "focused tests only."
+
+### Next exact action for the next session
+
+1. Get explicit approval to commit 3E.2a as implemented.
+2. **3E.2b remains pending** — do not begin n8n fan-out wiring until
+   either (1) the actual RB2B payload contract is obtained from RB2B
+   configuration/documentation (addressing §20's three unresolved runtime
+   questions), including a defensible native or stable event/visit
+   identifier and event-time field, or (2) the first real RB2B delivery
+   provides enough evidence to establish the
+   `source_record_id`/`provider_observed_at` strategy for whatever calls
+   this endpoint. There has never been an RB2B execution — this is not a
+   matter of inspecting an existing one.
+3. Do not start 3E.3/3E.4/3F until 3E.2 (both parts) is complete.
+
+## 22. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository

@@ -16,6 +16,7 @@ import { createSignalResolutionRouter } from "./signalResolution";
 import { createAttentionItemsRouter } from "./attentionItems";
 import { createAttentionItemResolutionRouter } from "./attentionItemResolution";
 import { createHubSpotCompanySyncRouter } from "./hubSpotCompanySync";
+import { createRb2bSignalBridgeRouter } from "./rb2bSignalBridge";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireServiceAuth } from "../middlewares/requireServiceAuth";
 
@@ -70,6 +71,17 @@ router.use(
   "/internal/attention-items",
   requireServiceAuth,
   createAttentionItemResolutionRouter({ db }),
+);
+// Milestone 3E.2a — POST /internal/rb2b/signals. Same requireServiceAuth
+// boundary, a prefix no other router in this package uses, so no
+// ordering hazard with any other mount. The n8n-side fan-out that would
+// actually call this (3E.2b) is not implemented yet — this endpoint
+// exists so the repository-side contract can be built and tested ahead
+// of that wiring, per NEXT_SESSION.md's 3E.2 checkpoint.
+router.use(
+  "/internal/rb2b/signals",
+  requireServiceAuth,
+  createRb2bSignalBridgeRouter({ db }),
 );
 
 // Everything below this line requires a valid session.
