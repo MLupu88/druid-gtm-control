@@ -2,20 +2,88 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "@workspace/db/schema";
-import { syncHubSpotCompany } from "./hubSpotCompanySync.js";
+import type { ProviderObservationV1 } from "@workspace/observation";
+import { syncHubSpotCompany, type RecordObservationFn } from "./hubSpotCompanySync.js";
 import type { BootstrapHubSpotCompanyIdentityArgs } from "./hubSpotCompanyIdentity.js";
+import type { HubSpotCompany } from "../lib/hubSpotClient.js";
 
 type Db = NodePgDatabase<typeof schema>;
 const db = {} as Db;
 
+function minimalHubSpotCompany(
+  overrides: Partial<HubSpotCompany> = {},
+): HubSpotCompany {
+  return {
+    id: "12345",
+    domain: "example.com",
+    name: "Example",
+    industry: null,
+    country: null,
+    numberOfEmployees: null,
+    annualRevenue: null,
+    lifecycleStage: null,
+    hubspotOwnerId: null,
+    ...overrides,
+  };
+}
+
+// A fake that never touches a database — records every observation it was
+// asked to persist and always reports "created", mirroring the DI pattern
+// already used for fetchCompanyFn/bootstrapCompanyIdentityFn.
+function fakeRecordObservationFn(): {
+  fn: RecordObservationFn;
+  recorded: ProviderObservationV1[];
+} {
+  const recorded: ProviderObservationV1[] = [];
+  const fn: RecordObservationFn = async (observation) => {
+    recorded.push(observation);
+    return {
+      outcome: "created",
+      observation: {
+        id: `synthetic-${recorded.length}`,
+        provider: observation.provider,
+        sourceRecordId: observation.sourceRecordId,
+        observationClass: observation.observationClass,
+        semanticKey:
+          observation.observationClass === "identity"
+            ? observation.identityKey
+            : observation.observationClass === "behavioral_signal"
+              ? observation.eventType
+              : observation.observationClass === "research_intelligence"
+                ? observation.findingType
+                : observation.canonicalField,
+        identitySubjectType:
+          observation.observationClass === "identity" ? observation.subjectType : null,
+        identityValue:
+          observation.observationClass === "identity" ? observation.identityValue : null,
+        rawValue: observation.observationClass === "identity" ? null : observation.rawValue,
+        normalizedValue:
+          observation.observationClass === "identity" ? null : observation.normalizedValue,
+        observedAt: observation.observedAt === null ? null : new Date(observation.observedAt),
+        importedAt: new Date(observation.importedAt),
+        confidence: observation.confidence,
+        evidenceRefs: observation.evidenceRefs as unknown[],
+        providerMetadata: observation.providerMetadata,
+      },
+    } as const;
+  };
+  return { fn, recorded };
+}
+
 test("maps the fetched HubSpot id/domain/name exactly into the canonical bootstrap", async () => {
   const calls: BootstrapHubSpotCompanyIdentityArgs[] = [];
+  const { fn: recordObservationFn } = fakeRecordObservationFn();
   const result = await syncHubSpotCompany({
     db,
     companyId: "requested-id",
+    recordObservationFn,
     fetchCompanyFn: async (companyId) => {
       assert.equal(companyId, "requested-id");
-      return { id: "returned-id", domain: "HTTPS://WWW.Example.COM/about", name: "Example" };
+      return minimalHubSpotCompany({
+        id: "returned-id",
+        domain: "HTTPS://WWW.Example.COM/about",
+        name: "Example",
+      });
     },
     bootstrapCompanyIdentityFn: async (args) => {
       calls.push(args);
@@ -40,10 +108,12 @@ test("maps the fetched HubSpot id/domain/name exactly into the canonical bootstr
 });
 
 test("delegates null names and explicit canonical conflicts without guessing", async () => {
+  const { fn: recordObservationFn } = fakeRecordObservationFn();
   const result = await syncHubSpotCompany({
     db,
     companyId: "12345",
-    fetchCompanyFn: async () => ({ id: "12345", domain: "example.com", name: null }),
+    recordObservationFn,
+    fetchCompanyFn: async () => minimalHubSpotCompany({ name: null }),
     bootstrapCompanyIdentityFn: async (args) => {
       assert.equal(args.companyName, null);
       return {
@@ -63,16 +133,43 @@ test("delegates null names and explicit canonical conflicts without guessing", a
   assert.equal(result.outcome, "conflict");
 });
 
+test("observations are recorded even when identity bootstrap conflicts — persistence is not gated on resolution", async () => {
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
+  await syncHubSpotCompany({
+    db,
+    companyId: "12345",
+    recordObservationFn,
+    fetchCompanyFn: async () => minimalHubSpotCompany({ industry: "SOFTWARE" }),
+    bootstrapCompanyIdentityFn: async () => ({
+      outcome: "conflict",
+      code: "account_identifier_conflict",
+      source: "hubspot",
+      candidateMatches: [],
+    }),
+  });
+
+  // domain identity, external_id identity, and the industry fact all still
+  // got recorded despite the conflict.
+  assert.ok(recorded.length >= 3);
+  assert.ok(
+    recorded.some(
+      (o) => o.observationClass === "firmographic_fact" && o.canonicalField === "company.industry",
+    ),
+  );
+});
+
 test("repeated calls remain a thin idempotent delegation to the canonical bootstrap", async () => {
   let fetchCalls = 0;
   let bootstrapCalls = 0;
-  const run = () =>
-    syncHubSpotCompany({
+  const run = () => {
+    const { fn: recordObservationFn } = fakeRecordObservationFn();
+    return syncHubSpotCompany({
       db,
       companyId: "12345",
+      recordObservationFn,
       fetchCompanyFn: async () => {
         fetchCalls += 1;
-        return { id: "12345", domain: "example.com", name: "Example" };
+        return minimalHubSpotCompany();
       },
       bootstrapCompanyIdentityFn: async () => {
         bootstrapCalls += 1;
@@ -84,19 +181,26 @@ test("repeated calls remain a thin idempotent delegation to the canonical bootst
         };
       },
     });
+  };
 
-  assert.deepEqual(await run(), await run());
+  const [first, second] = [await run(), await run()];
+  assert.equal(first.outcome, second.outcome);
+  if (first.outcome !== "conflict" && second.outcome !== "conflict") {
+    assert.equal(first.accountId, second.accountId);
+  }
   assert.equal(fetchCalls, 2);
   assert.equal(bootstrapCalls, 2);
 });
 
-test("a fetch failure stops before canonical bootstrap", async () => {
+test("a fetch failure stops before canonical bootstrap and before any observation is recorded", async () => {
   let bootstrapCalls = 0;
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
   await assert.rejects(
     () =>
       syncHubSpotCompany({
         db,
         companyId: "12345",
+        recordObservationFn,
         fetchCompanyFn: async () => {
           throw new Error("fetch failed");
         },
@@ -108,4 +212,5 @@ test("a fetch failure stops before canonical bootstrap", async () => {
     /fetch failed/,
   );
   assert.equal(bootstrapCalls, 0);
+  assert.equal(recorded.length, 0);
 });

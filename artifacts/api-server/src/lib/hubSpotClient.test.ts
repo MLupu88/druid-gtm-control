@@ -55,12 +55,30 @@ test("fetches exactly one company from the versioned API with only domain,name a
 
   try {
     const result = await withAccessToken(token, () => fetchHubSpotCompanyById(" 12345 "));
-    assert.deepEqual(result, { id: "12345", domain: "Example.COM", name: "Example Inc" });
+    assert.deepEqual(result, {
+      id: "12345",
+      domain: "Example.COM",
+      name: "Example Inc",
+      industry: null,
+      country: null,
+      numberOfEmployees: null,
+      annualRevenue: null,
+      lifecycleStage: null,
+      hubspotOwnerId: null,
+    });
     assert.equal(
       requestedUrl?.pathname,
       "/crm/objects/2026-03/companies/12345",
     );
-    assert.deepEqual([...requestedUrl!.searchParams.entries()], [["properties", "domain,name"]]);
+    assert.deepEqual(
+      [...requestedUrl!.searchParams.entries()],
+      [
+        [
+          "properties",
+          "domain,name,industry,country,numberofemployees,annualrevenue,lifecyclestage,hubspot_owner_id",
+        ],
+      ],
+    );
     assert.equal(requestedInit?.method, "GET");
     assert.deepEqual(requestedInit?.headers, { Authorization: `Bearer ${token}` });
     assert.ok(requestedInit?.signal instanceof AbortSignal);
@@ -175,8 +193,76 @@ test("rejects missing or blank domains and converts a blank optional name to nul
         id: "12345",
         domain: "example.com",
         name: null,
+        industry: null,
+        country: null,
+        numberOfEmployees: null,
+        annualRevenue: null,
+        lifecycleStage: null,
+        hubspotOwnerId: null,
       });
     });
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("parses industry/country/employee/revenue/lifecycle/owner when present, converts blank strings to null", async () => {
+  const responses = [
+    companyResponse({
+      properties: {
+        domain: "example.com",
+        name: "Example",
+        industry: "CAPITAL_MARKETS",
+        country: "United States",
+        numberofemployees: "125",
+        annualrevenue: "50000000",
+        lifecyclestage: "lead",
+        hubspot_owner_id: "999",
+      },
+    }),
+    companyResponse({
+      properties: {
+        domain: "example.com",
+        name: "Example",
+        industry: "   ",
+        country: null,
+      },
+    }),
+  ];
+  mock.method(globalThis, "fetch", async () => responses.shift()!);
+  try {
+    await withAccessToken("test-token", async () => {
+      assert.deepEqual(await fetchHubSpotCompanyById("12345"), {
+        id: "12345",
+        domain: "example.com",
+        name: "Example",
+        industry: "CAPITAL_MARKETS",
+        country: "United States",
+        numberOfEmployees: "125",
+        annualRevenue: "50000000",
+        lifecycleStage: "lead",
+        hubspotOwnerId: "999",
+      });
+      const second = await fetchHubSpotCompanyById("12345");
+      assert.equal(second.industry, null);
+      assert.equal(second.country, null);
+      assert.equal(second.numberOfEmployees, null);
+    });
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("rejects a non-string value for any of the new optional properties", async () => {
+  mock.method(globalThis, "fetch", async () =>
+    companyResponse({
+      properties: { domain: "example.com", name: "Example", numberofemployees: 125 },
+    }),
+  );
+  try {
+    await withAccessToken("test-token", () =>
+      assert.rejects(() => fetchHubSpotCompanyById("12345"), HubSpotResponseError),
+    );
   } finally {
     mock.restoreAll();
   }

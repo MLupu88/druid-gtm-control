@@ -92,6 +92,7 @@ test("accepts exactly one trimmed companyId and returns the created canonical ac
       accountId: ACCOUNT_ID,
       source: "hubspot",
       attachedAliasTypes: ["domain", "external_id:hubspot"],
+      observations: [],
     };
   });
   await withServer(buildTestApp(syncFn), async (baseUrl) => {
@@ -102,6 +103,7 @@ test("accepts exactly one trimmed companyId and returns the created canonical ac
       source: "hubspot",
       accountId: ACCOUNT_ID,
       attachedAliasTypes: ["domain", "external_id:hubspot"],
+      observations: [],
     });
   });
   assert.equal(syncFn.mock.calls.length, 1);
@@ -113,6 +115,7 @@ test("returns the canonical account id for a matched company", async () => {
     accountId: ACCOUNT_ID,
     source: "hubspot",
     attachedAliasTypes: [],
+    observations: [],
   });
   await withServer(buildTestApp(syncFn), async (baseUrl) => {
     const response = await postSync(baseUrl, { companyId: "12345" });
@@ -153,6 +156,7 @@ test("returns an explicit canonical conflict without choosing an account", async
         matchedId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       },
     ],
+    observations: [],
   });
   await withServer(buildTestApp(syncFn), async (baseUrl) => {
     const response = await postSync(baseUrl, { companyId: "12345" });

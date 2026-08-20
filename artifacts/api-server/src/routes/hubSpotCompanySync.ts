@@ -80,6 +80,10 @@ export function createHubSpotCompanySyncRouter(
           code: result.code,
           source: result.source,
           candidateMatches: result.candidateMatches,
+          // Milestone 3E.3: observations are pre-resolution evidence and
+          // are recorded regardless of identity conflict — see
+          // ../services/hubSpotCompanySync.ts's module comment.
+          observations: result.observations,
         });
         return;
       }
@@ -93,6 +97,7 @@ export function createHubSpotCompanySyncRouter(
         source: result.source,
         accountId: result.accountId,
         attachedAliasTypes: result.attachedAliasTypes,
+        observations: result.observations,
       });
     } catch (err) {
       if (err instanceof HubSpotNotConfiguredError) {

@@ -298,7 +298,9 @@ provider, not deferred; see §20):
     `source_record_id`/`provider_observed_at` strategy for whatever calls
     3E.2a. There has never been an RB2B execution — this is not "inspect
     an existing one."
-- **3E.3 — HubSpot → `firmographic_fact`/`crm_state` adapter — NOT STARTED.**
+- **3E.3 — HubSpot → `identity`/`firmographic_fact`/`crm_state` adapter —
+  IMPLEMENTED, reviewed, corrected.** Uncommitted. See §22 for the full
+  checkpoint (mappings, known gaps, review corrections).
 - **3E.4 — Client Radar → `research_intelligence` adapter — NOT STARTED.**
 - **3F — NOT STARTED.**
 
@@ -1103,7 +1105,110 @@ Radar application code, UI, and the unrelated untracked root `n8n` file.
    matter of inspecting an existing one.
 3. Do not start 3E.3/3E.4/3F until 3E.2 (both parts) is complete.
 
-## 22. New-session startup instruction
+## 22. Session checkpoint — Milestone 3E.3 implementation (2026-08-20, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §20/§21 and the rest of this file for background.
+
+### Status
+
+- 3D, 3E.1, 3E.2a — DONE, committed/pushed. 3E.2b — pending (see §20/§21).
+- **3E.3 — HubSpot → `identity`/`firmographic_fact`/`crm_state` adapter —
+  IMPLEMENTED, reviewed, corrected. Uncommitted. Not pushed. Not deployed.
+  No migration. No production change of any kind.**
+- 3E.4 (Client Radar), 3F — NOT STARTED.
+
+### Mappings supported
+
+- `identity`: `domain`, `external_id` (both always emitted — HubSpot
+  company id/domain are guaranteed present by `fetchHubSpotCompanyById`'s
+  own contract).
+- `firmographic_fact`: `company.industry`, `company.country`,
+  `company.employeeRange` (raw `numberofemployees`), `company.revenueRange`
+  (raw `annualrevenue`) — each emitted only when the underlying HubSpot
+  property is present.
+- `crm_state`: `crm.owner` (raw `hubspot_owner_id`), `crm.lifecycleStage`
+  (raw `lifecyclestage` string, whenever present) — each emitted only when
+  present. `crm.existingCustomer` emitted **only** when
+  `lifecyclestage === "customer"` (`normalizedValue: true`); never emitted
+  as an explicit `false` for any other stage (corrected during review —
+  see below).
+
+### Known gaps (explicit, per 2026-08-20 review)
+
+- **`company.employeeRange`/`company.revenueRange` currently preserve raw
+  HubSpot `numberofemployees`/`annualrevenue` values**, not bands. Value
+  banding/normalization is intentionally deferred — reconciling this
+  against the manual/`account_facts` banded convention is a named open
+  item for 3F, where canonical reconciliation can define one
+  provider-neutral value taxonomy.
+- **HubSpot sync records observations before identity bootstrap.** This
+  is intentional — observations are pre-resolution evidence (Milestone
+  3D) and must not be gated on resolution succeeding. If identity
+  bootstrap later throws (rather than returning a normal `conflict`
+  result), observations may already have been durably persisted even
+  though the route then returns an error response. Persistence itself is
+  safe and immutable regardless; richer partial-success visibility in the
+  error response is deferred and must not be read as a 3E.3 architecture
+  change requirement.
+- **`crm.owner` contains the HubSpot owner ID, not a resolved owner
+  name** — this slice does not call HubSpot's Owners API.
+- **`crm.openOpportunity`, `crm.competitorFlag`, `crm.partnerFlag`, and
+  `company.region` remain unsupported/absent**, not guessed:
+  `openOpportunity` would require HubSpot's Deals API (a different object
+  type this client doesn't fetch); `competitorFlag`/`partnerFlag` have no
+  tenant-confirmed trustworthy HubSpot property; `company.region` has no
+  native HubSpot property at all (it's a derived EMEA/US/other banding
+  from country).
+
+### Review correction applied (2026-08-20)
+
+A final review (before this checkpoint) flagged that `crm.existingCustomer`
+originally emitted an explicit `false` for every non-"customer"
+lifecycle stage — asserting a broader "not a customer" claim the
+`lifecyclestage` field alone can't actually support (e.g. a churned
+customer or a tenant-specific post-customer stage would have wrongly read
+`false`). Corrected: `crm.existingCustomer` is now emitted **only** when
+`lifecyclestage === "customer"`, matching the same "absence over guessed
+negative" discipline already applied to `competitorFlag`/`partnerFlag`.
+`crm.lifecycleStage` itself continues to be emitted unconditionally
+whenever present, so no information is lost.
+
+### Files changed
+
+Modified: `artifacts/api-server/src/lib/hubSpotClient.ts` (expanded
+fetched properties), `hubSpotClient.test.ts`, `routes/hubSpotCompanySync.ts`
+(additive `observations` field in responses), `hubSpotCompanySync.route.test.ts`,
+`services/hubSpotCompanySync.ts` (records observations independently of
+identity bootstrap), `hubSpotCompanySync.test.ts`, `package.json`
+(`test:hubspot`/`test:hubspot:unit` scripts).
+
+New: `services/hubSpotObservationMapping.ts` (pure mapping),
+`hubSpotObservationMapping.test.ts`, `hubSpotObservationMapping.integration.test.ts`.
+
+No DB schema/migration changes — reuses 3D's `observations` table and
+`recordObservation()` unmodified. No evaluator/UI/n8n changes.
+
+### Test results
+
+Verified externally (not re-run as part of the review-correction pass):
+HubSpot unit tests 41/41 pass, `api-server` typecheck clean, HubSpot
+observation Postgres integration tests 3/3 pass — against the
+pre-correction code. The `crm.existingCustomer` fix changes behavior
+covered by `hubSpotObservationMapping.test.ts`'s lifecycle tests (now
+split into a "customer" test and a "lead" test proving `existingCustomer`
+is absent) — **re-run `pnpm --filter @workspace/api-server run
+test:hubspot:unit` before treating this checkpoint as verified.**
+
+### Next exact action for the next session
+
+1. Run `pnpm --filter @workspace/api-server run test:hubspot:unit` (and
+   the integration suite, DB permitting) to confirm the `existingCustomer`
+   correction. 2. Get explicit approval to commit 3E.3. 3. **3E.4 — Client
+   Radar → `research_intelligence` adapter** is next per the Milestone 3
+   sequence (§10) — not started, not designed.
+
+## 23. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository
