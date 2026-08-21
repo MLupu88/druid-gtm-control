@@ -10,8 +10,13 @@
 //
 // No current-pointer table (no resolved_fact_current) — see
 // resolvedFacts.ts's own header comment. getLatestResolvedFact below is
-// the narrow read helper the same file explicitly allows in its place;
-// nothing wires it into UI or the evaluator in this milestone (3G).
+// the narrow read helper the same file explicitly allows in its place.
+//
+// Milestone 3H: computeCanonicalResolution is the compute-only core
+// (candidate loading + pure policy, no persistence) both
+// resolveAccountCanonicalField (persists) and
+// ../services/accountTruth.ts's read-only "current truth" preview (never
+// persists, never inserts on a GET) share — one algorithm, two callers.
 //
 // Known, documented limitation: identity observations are queried
 // broadly (every `identity`/account-subject row in the table, not
@@ -34,7 +39,7 @@ import {
   type ResolvedFactCanonicalField,
 } from "@workspace/db/schema";
 import { FirmographicCanonicalFieldV1 } from "@workspace/observation";
-import type { FactCandidate } from "./factReconciliation.js";
+import type { FactCandidate, ReconciliationResult } from "./factReconciliation.js";
 import { reconcileFactCandidates } from "./factReconciliation.js";
 import {
   FACT_RECONCILIATION_POLICY_V1,
@@ -172,15 +177,20 @@ export interface ResolveAccountCanonicalFieldArgs {
 }
 
 /**
- * Computes and persists ONE new resolved_facts row for
- * (accountId, canonicalField) from the account's current manual fact (if
- * any) plus every provider observation bound to it. Never updates a
- * prior resolved_facts row — recomputation always appends a new one (see
- * resolvedFacts.ts's immutability trigger).
+ * The shared core both resolveAccountCanonicalField (below, persists) and
+ * Milestone 3H's read-only "current truth" preview (../services/
+ * accountTruth.ts, never persists) call — loads the exact same
+ * candidates (current manual fact + bound provider observations) and
+ * runs the exact same pure policy through factReconciliation.ts. No DB
+ * write happens here; this function's only side effect is reads. Callers
+ * that need a durable resolved_facts row still call
+ * resolveAccountCanonicalField, not this function directly — this exists
+ * so 3H never re-implements (or drifts from) 3F's own candidate-loading/
+ * binding/policy logic.
  */
-export async function resolveAccountCanonicalField(
+export async function computeCanonicalResolution(
   args: ResolveAccountCanonicalFieldArgs,
-): Promise<ResolvedFact> {
+): Promise<ReconciliationResult> {
   const { db, accountId, canonicalField } = args;
   const policy = args.policy ?? FACT_RECONCILIATION_POLICY_V1;
 
@@ -193,7 +203,22 @@ export async function resolveAccountCanonicalField(
     ? [...observationCandidates, manualCandidate]
     : observationCandidates;
 
-  const result = reconcileFactCandidates(candidates, policy);
+  return reconcileFactCandidates(candidates, policy);
+}
+
+/**
+ * Computes (via computeCanonicalResolution above) and persists ONE new
+ * resolved_facts row for (accountId, canonicalField). Never updates a
+ * prior resolved_facts row — recomputation always appends a new one (see
+ * resolvedFacts.ts's immutability trigger).
+ */
+export async function resolveAccountCanonicalField(
+  args: ResolveAccountCanonicalFieldArgs,
+): Promise<ResolvedFact> {
+  const { db, accountId, canonicalField } = args;
+  const policy = args.policy ?? FACT_RECONCILIATION_POLICY_V1;
+
+  const result = await computeCanonicalResolution({ db, accountId, canonicalField, policy });
 
   const [row] = await db
     .insert(resolvedFacts)

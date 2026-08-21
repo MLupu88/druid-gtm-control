@@ -221,7 +221,7 @@ See §7 "HubSpot Capability Audit (3A.5)" above for full findings.
 
 **CURRENT WORK.** Implemented, tested, and typechecked 2026-08-20 — **not
 yet reviewed/approved for commit, not committed, not pushed, not
-deployed.** See §17 "Session checkpoint — 3B implementation" below for the
+deployed.** See §18 "Session checkpoint — 3B implementation" below for the
 full precise resume point (exact files, final contract shape, test
 results, git status, next exact action).
 
@@ -242,7 +242,7 @@ Do not implement provider auto-promotion yet.
 ### 3C — Shared taxonomy and normalization
 
 **3C V1 (closed observation field/key-name vocabularies) — DONE**, implemented
-2026-08-20, uncommitted as of this note. See §17 for the full checkpoint.
+2026-08-20, uncommitted as of this note. See §18 for the full checkpoint.
 This closed `lib/observation`'s `identityKey` and `canonicalField` (split
 per branch into `FirmographicCanonicalFieldV1`/`CrmCanonicalFieldV1`) —
 i.e. the vocabulary of field/key *names* an observation can target.
@@ -275,16 +275,16 @@ This, too, is not a blocker for 3D.
 
 ### 3D — Candidate Observation / Fact Persistence
 
-**DONE.** Committed and pushed at `b3a26ea`. See §19 for the full
+**DONE.** Committed and pushed at `b3a26ea`. See §20 for the full
 checkpoint (final architecture, migrations, test results).
 
 ### 3E — First provider adapters
 
 Revised sequence (corrected 2026-08-20 — RB2B is an active, required
-provider, not deferred; see §20):
+provider, not deferred; see §21):
 
 - **3E.1 — RB2B live-path verification + contract capture — DONE.**
-- **3E.2 — RB2B → `behavioral_signal` adapter — split into two parts (see §21):**
+- **3E.2 — RB2B → `behavioral_signal` adapter — split into two parts (see §22):**
   - **3E.2a — Mission Control RB2B observation ingestion endpoint —
     DONE.** Committed and pushed at `1794e8b` ("feat: add RB2B observation
     ingestion bridge"). `POST /internal/rb2b/signals` accepts a
@@ -300,28 +300,37 @@ provider, not deferred; see §20):
     an existing one."
 - **3E.3 — HubSpot → `identity`/`firmographic_fact`/`crm_state` adapter —
   DONE.** Committed and pushed at `f435071` ("feat: add HubSpot observation
-  adapter"). See §22 for the full checkpoint (mappings, known gaps, review
+  adapter"). See §23 for the full checkpoint (mappings, known gaps, review
   corrections).
 - **3E.4 — Client Radar → `research_intelligence` adapter — DONE.**
   Committed at `b33a12e` ("feat: add Client Radar observation adapter").
 - **3F — Agreement/conflict resolution + canonical selection — DONE
   locally, verified, uncommitted/unpushed.** Unit 27/27, integration 5/5.
-  See §24 for the full checkpoint (architecture, subject binding, policy,
+  See §25 for the full checkpoint (architecture, subject binding, policy,
   persistence, tests).
 - **3G — ICP/evaluator integration on canonical truth — DONE locally,
   verified, uncommitted/unpushed.** Unit 33/33, integration 10/10.
-  See §25 for the full checkpoint (authoritative read path,
+  See §26 for the full checkpoint (authoritative read path,
   snapshot/evidence extension, backward compatibility, tests).
+- **3H — Provenance/conflict UX — DONE locally, verified,
+  uncommitted/unpushed.** Backend unit+route 38/38, backend integration
+  6/6, frontend presentation 17/17, typechecks clean. See §27 for the
+  full checkpoint. **This was the final slice of Milestone 3.**
+- **M3.5 — Live Data Activation & Reality Check — NEXT.** See §11 for the
+  full definition of done. Milestone 3 is not operationally complete
+  until M3.5 is done — all of 3A–3H exist in code only, verified against
+  synthetic/fixture data, never against real production HubSpot/RB2B
+  traffic.
 
 ### 3F — Agreement/conflict and canonical selection
 
-**DONE locally, verified, uncommitted/unpushed.** See §24 for the full
+**DONE locally, verified, uncommitted/unpushed.** See §25 for the full
 checkpoint. Deterministic resolution + provenance is done and tested;
 human override and conflict-state UI remain 3H (not started).
 
 ### 3G — ICP/evaluator integration
 
-**DONE locally, verified, uncommitted/unpushed.** See §25 for the full
+**DONE locally, verified, uncommitted/unpushed.** See §26 for the full
 checkpoint. `createCurrentAccountSnapshot` now sources company/crm
 evaluator input from Milestone 3F's canonical resolution (recomputed at
 the evaluation boundary) instead of reading account_fact_current
@@ -330,28 +339,116 @@ unchanged account_snapshots mechanism. Unit 33/33, integration 10/10.
 
 ### 3H — Provenance/conflict UX
 
-Account Workspace clearly shows:
+**DONE locally, verified, uncommitted/unpushed.** See §27 for the full
+checkpoint. Account Workspace's Overview tab now shows, per canonical
+field, via a new read-only `AccountTruthPanel`:
 
 - canonical value
-- source(s)
-- agreement
-- conflict
-- human override
-- unresolved candidate values
+- resolution status (Confirmed / Confirmed by multiple sources /
+  Conflict — resolved / Conflict — unresolved / Unresolved)
+- selected/supporting/conflicting evidence, resolved to human-readable
+  provenance, on demand (existing Accordion pattern)
+- rationale, policy version (behind a secondary technical-details
+  affordance)
 
-## 11. Later roadmap
+Human override of a conflict is NOT implemented in 3H (not requested;
+the manual account-facts panel remains the existing, unchanged
+override/correction mechanism, which already participates in 3F
+reconciliation as highest-authority evidence).
 
-- Milestone 4 — Account Intelligence / Account Brain
-- Milestone 5 — Qualification + real Intent + multi-ICP
-- Milestone 6 — UX Operating Shell v2
-- Milestone 7 — GTM cockpit / validation / Home + Reports + Settings
-- Milestone 8 — Action + feedback loop
-- Milestone 9 — Production hardening
+**This was Milestone 3's final planned slice — 3A through 3H are now all
+DONE in code, locally verified, uncommitted.** See §11 immediately below
+for what "operationally complete" actually requires before Milestone 3 as
+a whole can be considered finished.
+
+## 11. M3.5 — Live Data Activation & Reality Check (NEXT, before M4)
+
+**Do not mark Milestone 3 operationally complete merely because 3A–3H
+exist in code.** Every 3F/3G/3H test (unit, integration, frontend) ran
+against synthetic fixtures or a disposable local Postgres — none of it has
+ever been exercised against real production HubSpot or RB2B traffic. M3.5
+is that activation + verification pass. It sits between 3H and M4, is
+scoped to activation/verification only, and must not be blurred into M9
+(production hardening, which is broader/later).
+
+### HubSpot
+
+- Deploy the already-built M3 backend/migrations (0001–0015) needed for
+  canonical truth to production.
+- Configure/verify production HubSpot ingestion/sync is actually running.
+- Confirm real HubSpot companies and CRM facts (not fixtures) enter
+  Mission Control as observations.
+- Verify real records appear correctly in the production UI (Account
+  Workspace, including 3H's new truth panel).
+
+### RB2B
+
+- Finish the deferred 3E.2b n8n fan-out wiring (see §22) — the one
+  concrete blocker was always "no real RB2B payload/execution evidence
+  yet"; this is where that gets resolved.
+- Configure `GTM_SIGNAL_INGESTION_SECRET` in production.
+- Configure the dedicated n8n Header Auth credential for the RB2B →
+  Mission Control bridge.
+- Activate RB2B → n8n → Mission Control end to end.
+- Verify real RB2B events are actually stored as `behavioral_signal`
+  observations.
+- Verify real identified people/company activity can be traced into
+  Mission Control from a real RB2B event.
+
+### Reality check
+
+- Select real accounts already visible in HubSpot/RB2B (not synthetic
+  fixtures).
+- Prove identity/alias binding, firmographic/CRM facts, and behavioral
+  activity attach to the correct canonical account on real data.
+- Prove 3F canonical-truth reconciliation (agreement/conflict/unresolved,
+  policy authority) behaves correctly against real, possibly-messy
+  evidence — not just clean fixtures.
+- Physically verify this in the running Mission Control production UI —
+  not just "the tests pass."
+- Only once all of the above is verified does Milestone 3 become
+  **operationally complete**, not merely "code complete."
+
+### Subsequent UX requirement (recorded here, not yet started)
+
+During the later operating-interface redesign (M6, see below):
+
+- Move toward the already-approved dense ZoomInfo-style intelligence
+  workspace direction.
+- Expose live activity, people, CRM context, canonical truth, and
+  (later) Intent.
+- Remove "Sample data" / sample-workflow / demo-data labels, mentions,
+  and affordances throughout the app once real-data paths replace them.
+- Clean up old seed/demo residue where safe, rather than leaving
+  prototype language visible in the production experience.
+
+## 12. Later roadmap
+
+```
+3H Provenance + conflict UX (DONE)
+  ↓
+M3.5 Live Data Activation & Reality Check (NEXT)
+  ↓
+M3 OPERATIONALLY COMPLETE
+  ↓
+M4 Account Intelligence / Account Brain
+  ↓
+M5 Qualification + real Intent + multi-ICP
+  ↓
+M6 Operating UX redesign + People/Leads + sample-data cleanup
+  ↓
+M7 GTM cockpit / validation / Home + Reports + Settings
+  ↓
+M8 Action + feedback loop
+  ↓
+M9 Production hardening
+```
 
 Multi-ICP runtime comparison and AI Account Summary / Account Brain remain
-planned. Do not implement them during early One Account Truth work.
+planned for M4/M5. Do not implement them during M3.5 — M3.5 is activation
+and verification of what M3 already built, not new product surface.
 
-## 12. Deferred / do not accidentally start
+## 13. Deferred / do not accidentally start
 
 - RB2B implementation
 - Dealfront implementation
@@ -366,7 +463,7 @@ planned. Do not implement them during early One Account Truth work.
 - n8n integration changes
 - Entra/auth redesign unless separately requested
 
-## 13. Known UX/product issues
+## 14. Known UX/product issues
 
 - Global Home/Overview is visually weak and needs a later dense GTM cockpit redesign.
 - Reports and Settings remain old generation.
@@ -374,7 +471,7 @@ planned. Do not implement them during early One Account Truth work.
 - Do not merely replace free text with arbitrary dropdowns before shared taxonomy exists.
 - The Intelligence tab redesign is considered directionally successful.
 
-## 14. Next coding-agent task
+## 15. Next coding-agent task
 
 Do not start by expanding HubSpot.
 
@@ -398,7 +495,7 @@ Before editing:
 If architecture is ambiguous, return an implementation plan before modifying
 files.
 
-## 15. Verification expectations
+## 16. Verification expectations
 
 - Run targeted tests for changed domain logic.
 - Run the full relevant frontend/backend regression suite before a meaningful checkpoint.
@@ -408,7 +505,7 @@ files.
 - Inspect changed paths for scope drift.
 - Do not repeat successful test runs without a reason.
 
-## 16. Canonical references
+## 17. Canonical references
 
 - `ROADMAP.md`
 - `PROJECT_HANDOFF.md`
@@ -419,11 +516,11 @@ If the One Account Truth audit exists only in session output and not as a
 repository document, the findings above preserve the 2026-08-19 read-only
 architecture audit in this handoff.
 
-## 17. Historical checkpoint — 3B implementation (2026-08-20)
+## 18. Historical checkpoint — 3B implementation (2026-08-20)
 
 **Superseded — 3B is now committed and pushed at commit `d39e602`.** This
 section is kept for the file/architecture/rationale detail it recorded at
-the time; for current status read §18 below first, which covers 3C V1.
+the time; for current status read §19 below first, which covers 3C V1.
 
 ### Status (at time of writing — now historical)
 
@@ -603,9 +700,9 @@ touched by this work, and must not be touched by any future session.
 **Update: 3B (including the pre-commit behavioral-signal identity review)
 was subsequently approved, committed, and pushed at `d39e602`.** No
 migration was run, no deployment happened as part of that commit/push
-itself — see §18 for what has and hasn't happened since.
+itself — see §19 for what has and hasn't happened since.
 
-### Next exact action recorded at the time (now superseded — see §18)
+### Next exact action recorded at the time (now superseded — see §19)
 
 1. ~~Get explicit user approval on the 3B contract~~ — done.
 2. ~~Commit only 3B plus the documentation changes~~ — done, `d39e602`.
@@ -617,10 +714,10 @@ itself — see §18 for what has and hasn't happened since.
    is next per the Milestone 3 sequence (§10), and requires an explicit
    product decision on taxonomy values before any implementation starts.
 
-## 18. Session checkpoint — 3C V1 implementation (2026-08-20, uncommitted)
+## 19. Session checkpoint — 3C V1 implementation (2026-08-20, uncommitted)
 
 This section is the precise resume point for a fresh session. Read this
-section first, then §17 and the rest of this file for background.
+section first, then §18 and the rest of this file for background.
 
 ### Status
 
@@ -696,7 +793,7 @@ committed 3B baseline)
   `company.country`, `crm.lifecycleStage`, `domain` with
   `subjectType: "account"`).
 - `NEXT_SESSION.md` — this file (3C section update, this checkpoint,
-  §17 corrected to reflect 3B's actual committed state).
+  §18 corrected to reflect 3B's actual committed state).
 
 Untouched: DB schema/migrations, `lib/evaluator`, HubSpot/Client
 Radar/RB2B application code, UI, n8n, any persistence/adapter/
@@ -740,10 +837,10 @@ reconciliation code, and the unrelated untracked root `n8n` file.
    `normalizedValue` as JSON plus the closed field-name taxonomy 3C V1
    already delivered.
 
-## 19. Session checkpoint — 3D V1 implementation (2026-08-20, uncommitted)
+## 20. Session checkpoint — 3D V1 implementation (2026-08-20, uncommitted)
 
 This section is the precise resume point for a fresh session. Read this
-section first, then §17/§18 and the rest of this file for background.
+section first, then §18/§19 and the rest of this file for background.
 
 ### Status
 
@@ -860,17 +957,17 @@ unrelated untracked root `n8n` file.
    (§10) — not started, not designed. Do not begin 3E design or
    implementation until explicitly requested in a new session.
 
-## 20. Session checkpoint — Milestone 3E.1/3E.2 (2026-08-20, design-only)
+## 21. Session checkpoint — Milestone 3E.1/3E.2 (2026-08-20, design-only)
 
 This section is the precise resume point for a fresh session. Read this
-section first, then §19 and the rest of this file for background.
+section first, then §20 and the rest of this file for background.
 
 ### Status
 
 - 3D — DONE, committed/pushed at `b3a26ea`.
 - **3E.1 — RB2B live-path verification + contract capture — DONE.**
 - **3E.2 — RB2B → `behavioral_signal` adapter — DESIGN COMPLETE; split
-  into 3E.2a/3E.2b, see §21.** 3E.2b remains pending until either (1) the
+  into 3E.2a/3E.2b, see §22.** 3E.2b remains pending until either (1) the
   actual RB2B payload contract is obtained from RB2B
   configuration/documentation, including a defensible native or stable
   event/visit identifier and event-time field, or (2) the first real
@@ -992,10 +1089,10 @@ never been an RB2B execution — do not treat this as inspecting an
 existing one. Do not finalize `sourceRecordId`/`provider_observed_at`
 semantics or begin 3E.2b implementation until one of these is done.
 
-## 21. Session checkpoint — Milestone 3E.2a implementation (2026-08-20, committed/pushed)
+## 22. Session checkpoint — Milestone 3E.2a implementation (2026-08-20, committed/pushed)
 
 This section is the precise resume point for a fresh session. Read this
-section first, then §20 and the rest of this file for background.
+section first, then §21 and the rest of this file for background.
 
 ### Status
 
@@ -1019,7 +1116,7 @@ section first, then §20 and the rest of this file for background.
 caller-supplied fields (`source_record_id`, `ingestion_attempt_at`),
 passed through exactly as received. This is the corrected design: the
 earlier raw-body-fingerprint derivation strategy considered during the
-3E.2 design pass is **not implemented and not approved** — see §20's
+3E.2 design pass is **not implemented and not approved** — see §21's
 "Explicitly NOT approved" section, which still stands unchanged. 3E.2a
 exists so the repository side of the contract can be built and tested
 ahead of 3E.2b, without needing to solve the still-open
@@ -1112,7 +1209,7 @@ Radar application code, UI, and the unrelated untracked root `n8n` file.
    committed and pushed at `1794e8b`.
 2. **3E.2b remains pending** — do not begin n8n fan-out wiring until
    either (1) the actual RB2B payload contract is obtained from RB2B
-   configuration/documentation (addressing §20's three unresolved runtime
+   configuration/documentation (addressing §21's three unresolved runtime
    questions), including a defensible native or stable event/visit
    identifier and event-time field, or (2) the first real RB2B delivery
    provides enough evidence to establish the
@@ -1121,19 +1218,19 @@ Radar application code, UI, and the unrelated untracked root `n8n` file.
    matter of inspecting an existing one.
 3. Do not start 3E.3/3E.4/3F until 3E.2 (both parts) is complete.
 
-## 22. Session checkpoint — Milestone 3E.3 implementation (2026-08-20, uncommitted)
+## 23. Session checkpoint — Milestone 3E.3 implementation (2026-08-20, uncommitted)
 
 This section is the precise resume point for a fresh session. Read this
-section first, then §20/§21 and the rest of this file for background.
+section first, then §21/§22 and the rest of this file for background.
 
 ### Status
 
-- 3D, 3E.1, 3E.2a — DONE, committed/pushed. 3E.2b — pending (see §20/§21),
+- 3D, 3E.1, 3E.2a — DONE, committed/pushed. 3E.2b — pending (see §21/§22),
   and does not block 3E.3/3E.4/3F.
 - **3E.3 — HubSpot → `identity`/`firmographic_fact`/`crm_state` adapter —
   DONE.** Committed and pushed at `f435071`.
 - **3E.4 (Client Radar) — DONE locally, verified, uncommitted/unpushed —
-  see §23.** 3F — NOT STARTED.
+  see §24.** 3F — NOT STARTED.
 
 ### Mappings supported
 
@@ -1220,18 +1317,18 @@ test:hubspot:unit` before treating this checkpoint as verified.**
 ### Next exact action for the next session
 
 Superseded — 3E.3 is now committed/pushed at `f435071`, and 3E.4 is done
-locally and verified (see §23). Next action is getting approval to commit
+locally and verified (see §24). Next action is getting approval to commit
 3E.4, then starting 3F.
 
-## 23. Session checkpoint — Milestone 3E.4 implementation (2026-08-20, uncommitted)
+## 24. Session checkpoint — Milestone 3E.4 implementation (2026-08-20, uncommitted)
 
 This section is the precise resume point for a fresh session. Read this
-section first, then §22 for the HubSpot precedent this mirrors.
+section first, then §23 for the HubSpot precedent this mirrors.
 
 ### Status
 
 - 3D, 3E.1, 3E.2a, 3E.3 — DONE, committed/pushed. 3E.2b — pending (see
-  §20/§21), does not block 3E.4/3F.
+  §21/§22), does not block 3E.4/3F.
 - **3E.4 — Client Radar → `research_intelligence` adapter — DONE locally,
   reviewed, corrected, verified. Uncommitted. Not pushed. Not deployed.
   No migration. No production change of any kind.**
@@ -1361,7 +1458,7 @@ resolution + canonical selection) — the first milestone that will need to
 read across multiple providers' observations for the same account/person
 and select a canonical value.
 
-## 24. Session checkpoint — Milestone 3F implementation (2026-08-21, uncommitted)
+## 25. Session checkpoint — Milestone 3F implementation (2026-08-21, uncommitted)
 
 This section is the precise resume point for a fresh session. Read this
 section first.
@@ -1585,14 +1682,14 @@ Verified externally in regular Terminal (not by the coding agent):
    activation) remains an independently deferred, separate item — does
    not block 3G.
 
-## 25. Session checkpoint — Milestone 3G implementation (2026-08-21, uncommitted)
+## 26. Session checkpoint — Milestone 3G implementation (2026-08-21, uncommitted)
 
 This section is the precise resume point for a fresh session. Read this
-section first, then §24 for the 3F precedent this integrates with.
+section first, then §25 for the 3F precedent this integrates with.
 
 ### Status
 
-- 3A–3F — DONE, verified. 3F unit 27/27, integration 5/5 (see §24).
+- 3A–3F — DONE, verified. 3F unit 27/27, integration 5/5 (see §25).
 - **3G — ICP/evaluator integration on canonical truth — DONE locally,
   verified, uncommitted, unpushed, not migrated to production, not
   deployed.** Unit 33/33 pass (`canonicalFactEvaluatorInput.test.ts` +
@@ -1652,7 +1749,7 @@ questions:
 5. `unresolved` -> same null/false/"unknown" handling.
 6. Manual-only field, no provider observations -> 3F's own resolver
    already returns `single_source` from the manual candidate alone
-   (manual facts are first-class 3F candidates, per §24) — no special
+   (manual facts are first-class 3F candidates, per §25) — no special
    case needed here at all.
 7. Staleness after a manual-fact change or new observation -> solved by
    recomputation itself: the very next `createCurrentAccountSnapshot`
@@ -1794,7 +1891,191 @@ assert exclusion semantics directly; suite then passed 10/10.
    3E.2b (n8n RB2B fan-out / production activation) remains an
    independently deferred, separate item — does not block 3H.
 
-## 26. New-session startup instruction
+## 27. Session checkpoint — Milestone 3H implementation (2026-08-22, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §26 for the 3G precedent this integrates with, and
+§11 for what M3.5 (the immediate next milestone) requires.
+
+### Status
+
+- 3A–3G — DONE, verified (3G unit 33/33, integration 10/10; see §26).
+- **3H — Provenance/conflict UX — DONE locally, verified,
+  uncommitted/unpushed, not migrated to production, not deployed.**
+  Backend unit+route **38/38 pass**. Backend integration, after the
+  field-set correction below: **7/7 pass**. Frontend presentation, after
+  the `sortFieldsForDisplay` expectation fix below: **20/20 pass**. Full
+  workspace `api-server` typecheck clean; `druid-gtm` frontend typecheck
+  clean. **Fully verified locally.**
+- **Milestone 3 code-complete as of 3H — NOT operationally complete.**
+  See §11 (M3.5 — Live Data Activation & Reality Check) for exactly what
+  remains before Milestone 3 can be called done in practice, not just in
+  code. 3E.2b (n8n RB2B fan-out) is explicitly absorbed into M3.5, not a
+  separate deferred item anymore.
+
+### Architecture implemented
+
+```
+GET /internal/accounts/:accountId/truth
+  -> accountTruth.ts: getAccountCanonicalTruth(db, accountId)
+       -> factResolutionRun.ts: computeCanonicalResolution()  [same 3F algorithm, no DB write]
+       -> evidence lookup (batched observations/account_facts reads)
+       -> AccountTruthFieldDTO[] (display-ready provenance)
+  -> AccountTruthPanel (React) -> account-truth-presentation.ts (pure: labels/status/formatting)
+```
+
+**Backend**: `factResolutionRun.ts` was refactored (pure extraction, no
+behavior change) to split `computeCanonicalResolution` (candidate
+loading + policy, no persistence) out of `resolveAccountCanonicalField`
+(same as before, now calls the extracted function then persists). 3H's
+new `accountTruth.ts` calls `computeCanonicalResolution` directly — same
+algorithm as 3F/3G, zero duplication, zero DB writes on a GET. New route
+`GET /internal/accounts/:accountId/truth` added to the existing
+`accounts.ts` router (no new router file). Field set: see "Field-set
+correction" below — this is `RESOLVED_FACT_CANONICAL_FIELDS` (11 fields),
+not the evaluator's own narrower list.
+
+**Frontend**: new `AccountTruthPanel` (read-only) placed in the Overview
+tab, above the existing `AccountFactsPanel` (manual editing, untouched)
+and `LatestEvaluationPanel`. Each canonical field is a compact Accordion
+row (label · value · status Badge), matching
+`account-icp-preview-panel.tsx`'s already-established Accordion +
+`TechnicalDetails` pattern exactly — no new visual pattern introduced,
+no Sheet/Drawer needed. All status copy, value formatting, and evidence
+labeling logic lives in `account-truth-presentation.ts` (pure, tested,
+no DOM) — mirrors `account-facts-presentation.ts`'s existing split
+precisely.
+
+### Field-set correction (post-review)
+
+Final review caught a real semantic defect in the first implementation:
+`accountTruth.ts` originally reused `canonicalFactEvaluatorInput.ts`'s
+`EVALUATOR_CANONICAL_FIELDS` (10 fields) as the Account Truth field set.
+That's wrong — EVALUATOR_CANONICAL_FIELDS answers "what does the ICP
+evaluator currently read," and excludes `crm.lifecycleStage` only because
+3G has no evaluator input slot for it. 3H is not an evaluator view; it is
+the current canonical scalar truth Milestone 3F actually produces.
+
+**Fixed**: `accountTruth.ts` (backend) and `account-truth-api.ts`/
+`account-truth-presentation.ts` (frontend) now use
+`RESOLVED_FACT_CANONICAL_FIELDS` (`lib/db/src/schema/resolvedFacts.ts`,
+11 fields, reused verbatim — not redefined) as the Account Truth field
+set, including `crm.lifecycleStage` → labeled "Lifecycle stage" in the
+UI, positioned in display order immediately after "Owner." 3G's own
+`EVALUATOR_CANONICAL_FIELDS` was **not modified** and remains exactly 10
+fields — the evaluator still has no `crm.lifecycleStage` input slot, and
+that is correct and unchanged; 3H simply no longer inherits that
+evaluator-specific narrowing for its own, different purpose.
+
+Backend integration re-verified after the fix: **7/7 pass** (the new
+11th case: `crm.lifecycleStage` resolving `single_source` from a bound
+HubSpot `crm_state` observation). A follow-up review then caught one
+stale frontend test expectation (`sortFieldsForDisplay`'s deterministic-
+order assertion still listed only 10 fields, omitting
+`crm.lifecycleStage` after "crm.owner") — fixed in
+`account-truth-presentation.test.ts` only; no production code touched by
+that second fix. Frontend suite reverified after that fix: **20/20
+pass**.
+
+### Status mapping (product copy, never raw enum values)
+
+- `single_source` → "Confirmed"
+- `agreement` → "Confirmed by multiple sources"
+- `conflict` + `canonicalValue != null` → "Conflict — resolved"
+- `conflict` + `canonicalValue == null` → "Conflict — unresolved"
+- `unresolved` → "Unresolved"
+- `canonicalValue == null` always renders as "—" (existing missing-value
+  convention), never a guessed value.
+- A conflict is NEVER hidden merely because a canonical winner exists —
+  "Conflict — resolved" still visibly says "Conflict."
+
+### Provenance detail (on demand, per field)
+
+Rationale, then Selected / Supporting / Conflicting evidence groups, each
+entry resolved to a human-readable line:
+- Observation evidence: provider display name (small lookup table,
+  display-name casing only, no behavioral branching), value, observed
+  timestamp when present. importedAt deliberately omitted from the
+  primary UI (judged not useful there — ingestion timing, not truth)
+  though still present in the underlying DTO.
+- Manual evidence: "Manual confirmation", value, recordedBy, observed
+  timestamp.
+- Unknown/unresolvable evidence reference: "Evidence unavailable" — never
+  a crash, never fabricated content.
+- `policyVersion`/`computedAt` are tucked behind the existing
+  `TechnicalDetails` collapsed-by-default affordance — never prominent
+  product copy.
+
+### Manual fact edit → truth refresh
+
+`account-facts-panel.tsx`'s mutation `onSuccess` now invalidates BOTH
+`accountFactsQueryKey(accountId)` (existing) AND
+`accountTruthQueryKey(accountId)` (new) via `Promise.all` — a
+confirm/correct never leaves the truth panel showing stale status. No
+background jobs/event bus introduced.
+
+### Failure behavior
+
+`AccountTruthPanel`'s own query failure renders a compact
+`InlineNotice` (existing component) with a Retry button, inside the
+panel only — it never replaces the rest of the account detail page.
+`AccountFactsPanel`, `LatestEvaluationPanel`, and every other tab remain
+fully functional if the truth request fails. No fallback provenance is
+ever fabricated from legacy/manual data when the read fails.
+
+### Files changed
+
+Modified: `factResolutionRun.ts` (pure extraction — see above),
+`routes/accounts.ts` + `accounts.route.test.ts` (new `/truth` route +
+deps + tests), `account-facts-panel.tsx` (one additional
+`invalidateQueries` call), `pages/account-detail.tsx` (mounts
+`AccountTruthPanel`).
+
+New: `services/accountTruth.ts` + `.test.ts` + `.integration.test.ts`,
+`lib/account-truth-api.ts`, `lib/account-truth-presentation.ts` +
+`.test.ts`, `components/account-truth-panel.tsx`.
+
+Untouched: `lib/evaluator`, `factReconciliation.ts`/
+`factResolutionPolicy.ts`/`observationSubjectBinding.ts` (3F itself, no
+redesign), all DB schema/migrations, `account-facts-presentation.ts`/
+editing behavior, Accounts list page, `account-detail-sheet.tsx`,
+RB2B/Client Radar adapters, `n8n`.
+
+### Known non-blocking documentation issues (flagged, not fixed per
+instruction to avoid changes absent a real semantic defect)
+
+- `canonicalFactEvaluatorInput.ts` still has a stale "9 canonical
+  fields" comment (actual count is 10, already correctly asserted by its
+  own passing test) — carried over from 3G, not touched by 3H. (The
+  earlier leftover self-correction sentence in `accountTruth.ts`'s own
+  header was superseded when that header was rewritten for the field-set
+  correction above.)
+
+### Test results — FULLY VERIFIED
+
+Verified externally in regular Terminal:
+- Backend unit + route (`accountTruth.test.ts` + `accounts.route.test.ts`):
+  **38/38 pass**.
+- Backend integration (`accountTruth.integration.test.ts`, disposable
+  migrated Postgres), after the 11-field correction: **7/7 pass**.
+- Frontend presentation (`account-truth-presentation.test.ts`), after the
+  `sortFieldsForDisplay` expectation fix: **20/20 pass**.
+- `api-server` typecheck: clean. `druid-gtm` typecheck: clean.
+
+All 11 `RESOLVED_FACT_CANONICAL_FIELDS` (including `crm.lifecycleStage`)
+are covered by 3H's Account Truth UX. 3G's `EVALUATOR_CANONICAL_FIELDS`
+intentionally remains exactly 10 fields (no evaluator input slot for
+`crm.lifecycleStage`) — unchanged, correct, not a discrepancy. Production
+untouched: no migration applied, nothing deployed, nothing committed.
+
+### Next exact action for the next session
+
+1. Get explicit approval to commit 3H (and, if desired, the whole 3A–3H
+   arc together).
+2. Begin M3.5 — Live Data Activation & Reality Check (see §11) — NOT
+   started. This is the actual next milestone; do not jump to M4 first.
+
+## 28. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository

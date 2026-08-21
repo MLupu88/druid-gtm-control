@@ -15,6 +15,7 @@ import { DecisionHistory } from "@/components/decision-history";
 import { ClientRadarResearchPanel } from "@/components/client-radar-research-panel";
 import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
 import { AccountFactsPanel } from "@/components/account-facts-panel";
+import { AccountTruthPanel } from "@/components/account-truth-panel";
 import { EvaluationRunsList } from "@/components/evaluation-runs-list";
 import { InlineNotice } from "@/components/inline-notice";
 import { PageHeader, PageLayout } from "@/components/page-layout";
@@ -124,6 +125,7 @@ function AccountDetailContent({
 
         <TabsContent value="overview" className="space-y-4">
           <AccountSnapshot account={account} evaluation={latestProduction} />
+          <AccountTruthPanel accountId={account.id} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
             <AccountFactsPanel accountId={account.id} />
             <LatestEvaluationPanel evaluation={latestProduction} />

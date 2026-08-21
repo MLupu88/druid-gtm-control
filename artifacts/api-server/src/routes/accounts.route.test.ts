@@ -20,8 +20,13 @@ import type {
   AccountListItem,
 } from "../services/accounts.js";
 import {
+  AccountNotFoundError as AccountTruthNotFoundError,
+  type AccountTruthFieldDTO,
+} from "../services/accountTruth.js";
+import {
   createAccountsRouter,
   type GetAccountByIdFn,
+  type GetAccountTruthFn,
   type ListAccountsFn,
 } from "./accounts.js";
 
@@ -135,10 +140,14 @@ const unusedListAccountsFn: ListAccountsFn = async () => {
 const unusedGetAccountByIdFn: GetAccountByIdFn = async () => {
   throw new Error("getAccountByIdFn should not have been called");
 };
+const unusedGetAccountTruthFn: GetAccountTruthFn = async () => {
+  throw new Error("getAccountTruthFn should not have been called");
+};
 
 function buildTestApp(deps: {
   listAccountsFn?: ListAccountsFn;
   getAccountByIdFn?: GetAccountByIdFn;
+  getAccountTruthFn?: GetAccountTruthFn;
 }): Express {
   const app = express();
   app.use(
@@ -146,6 +155,7 @@ function buildTestApp(deps: {
     createAccountsRouter({
       listAccountsFn: deps.listAccountsFn ?? unusedListAccountsFn,
       getAccountByIdFn: deps.getAccountByIdFn ?? unusedGetAccountByIdFn,
+      getAccountTruthFn: deps.getAccountTruthFn ?? unusedGetAccountTruthFn,
     }),
   );
   return app;
@@ -505,5 +515,94 @@ test("GET /:accountId maps an unexpected service error to a safe 500 response, w
     assert.equal(body.code, "internal_error");
     assert.ok(!String(body.error).includes("pg://internal"));
     assert.equal(getAccountByIdFn.mock.calls.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------
+// GET /:accountId/truth — Milestone 3H
+// ---------------------------------------------------------------------
+
+function syntheticTruthField(
+  overrides: Partial<AccountTruthFieldDTO> = {},
+): AccountTruthFieldDTO {
+  return {
+    canonicalField: "company.industry",
+    canonicalValue: "Software",
+    resolutionState: "single_source",
+    policyVersion: "fact-reconciliation-policy-v1",
+    rationale: "single hubspot observation available",
+    computedAt: "2026-08-22T00:00:00.000Z",
+    selectedEvidence: {
+      kind: "observation",
+      id: "aaaaaaaa-0000-4000-8000-000000000001",
+      provider: "hubspot",
+      value: "Software",
+      observedAt: null,
+      importedAt: "2026-08-20T00:00:00.000Z",
+    },
+    supportingEvidence: [],
+    conflictingEvidence: [],
+    ...overrides,
+  };
+}
+
+test("GET /:accountId/truth returns the fields array from the service, calling it exactly once", async () => {
+  const getAccountTruthFn = mock.fn<GetAccountTruthFn>(async () => [syntheticTruthField()]);
+  const app = buildTestApp({ getAccountTruthFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/truth`);
+    const body = await readJson(res, "GET /:accountId/truth response body");
+
+    assert.equal(res.status, 200);
+    assert.equal(Array.isArray(body.fields), true);
+    assert.equal((body.fields as unknown[]).length, 1);
+    assert.equal(getAccountTruthFn.mock.calls.length, 1);
+    assert.equal(getAccountTruthFn.mock.calls[0]?.arguments[0], VALID_ACCOUNT_ID);
+  });
+});
+
+test("GET /:accountId/truth rejects a non-UUID accountId with 400, without calling the service", async () => {
+  const getAccountTruthFn = mock.fn<GetAccountTruthFn>(async () => []);
+  const app = buildTestApp({ getAccountTruthFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/not-a-uuid/truth`);
+    const body = await readJson(res, "GET /:accountId/truth 400 response body");
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(getAccountTruthFn.mock.calls.length, 0);
+  });
+});
+
+test("GET /:accountId/truth maps AccountNotFoundError to a 404 account_not_found response", async () => {
+  const getAccountTruthFn = mock.fn<GetAccountTruthFn>(async () => {
+    throw new AccountTruthNotFoundError(VALID_ACCOUNT_ID);
+  });
+  const app = buildTestApp({ getAccountTruthFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/truth`);
+    const body = await readJson(res, "GET /:accountId/truth 404 response body");
+
+    assert.equal(res.status, 404);
+    assert.equal(body.code, "account_not_found");
+  });
+});
+
+test("GET /:accountId/truth maps an unexpected service error to a safe 500 response", async () => {
+  const getAccountTruthFn = mock.fn<GetAccountTruthFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp({ getAccountTruthFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/truth`);
+    const body = await readJson(res, "GET /:accountId/truth 500 response body");
+
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!String(body.error).includes("pg://internal"));
   });
 });

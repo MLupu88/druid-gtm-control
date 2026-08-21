@@ -25,6 +25,11 @@ import {
   type AccountListResult,
   type AccountDetail,
 } from "../services/accounts.js";
+import {
+  getAccountCanonicalTruth,
+  AccountNotFoundError as AccountTruthNotFoundError,
+  type AccountTruthFieldDTO,
+} from "../services/accountTruth.js";
 
 const DEFAULT_LIMIT = 50;
 const MIN_LIMIT = 1;
@@ -86,6 +91,14 @@ export type GetAccountByIdFn = (
   accountId: string,
 ) => Promise<AccountDetail | undefined>;
 
+// Milestone 3H — throws AccountNotFoundError for an unknown account
+// (mirrors ../services/icpEvaluationResolvers.ts's identical convention)
+// rather than returning undefined; the route below maps that to the same
+// 404 shape GET /:accountId already uses.
+export type GetAccountTruthFn = (
+  accountId: string,
+) => Promise<AccountTruthFieldDTO[]>;
+
 // Two dependency shapes, chosen so a database is only ever required when
 // it would actually be used:
 //   - db supplied: the (optional) fn overrides fall back to the real
@@ -99,12 +112,14 @@ interface AccountsRouterDepsWithDb {
   db: NodePgDatabase<typeof schema>;
   listAccountsFn?: ListAccountsFn;
   getAccountByIdFn?: GetAccountByIdFn;
+  getAccountTruthFn?: GetAccountTruthFn;
 }
 
 interface AccountsRouterDepsInjected {
   db?: undefined;
   listAccountsFn: ListAccountsFn;
   getAccountByIdFn: GetAccountByIdFn;
+  getAccountTruthFn: GetAccountTruthFn;
 }
 
 export type AccountsRouterDeps =
@@ -123,15 +138,19 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
 
   let listAccountsFn: ListAccountsFn;
   let getAccountByIdFn: GetAccountByIdFn;
+  let getAccountTruthFn: GetAccountTruthFn;
   if (deps.db) {
     const db = deps.db;
     listAccountsFn =
       deps.listAccountsFn ?? ((args) => listAccounts({ db, ...args }));
     getAccountByIdFn =
       deps.getAccountByIdFn ?? ((accountId) => getAccountById(db, accountId));
+    getAccountTruthFn =
+      deps.getAccountTruthFn ?? ((accountId) => getAccountCanonicalTruth(db, accountId));
   } else {
     listAccountsFn = deps.listAccountsFn;
     getAccountByIdFn = deps.getAccountByIdFn;
+    getAccountTruthFn = deps.getAccountTruthFn;
   }
 
   // GET / — paginated canonical accounts, each with its latest and latest
@@ -188,6 +207,32 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
       res.status(200).json(result);
     } catch (err) {
       req.log?.error({ err }, "GET /internal/accounts/:accountId failed");
+      sendError(res, 500, "internal_error", "An unexpected error occurred.");
+    }
+  });
+
+  // GET /:accountId/truth — Milestone 3H. Current canonical truth for
+  // every field Milestone 3F can resolve (all 11 RESOLVED_FACT_CANONICAL_FIELDS,
+  // including crm.lifecycleStage — this is not an evaluator-input view),
+  // freshly computed (never a stale resolved_facts read, never written by
+  // this GET) with resolved, display-ready provenance. See
+  // ../services/accountTruth.ts.
+  router.get("/:accountId/truth", async (req: Request, res: Response) => {
+    const parsed = AccountIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      sendError(res, 400, "invalid_request", "accountId must be a valid UUID.");
+      return;
+    }
+
+    try {
+      const fields = await getAccountTruthFn(parsed.data.accountId);
+      res.status(200).json({ fields });
+    } catch (err) {
+      if (err instanceof AccountTruthNotFoundError) {
+        sendError(res, 404, "account_not_found", "No account exists with that ID.");
+        return;
+      }
+      req.log?.error({ err }, "GET /internal/accounts/:accountId/truth failed");
       sendError(res, 500, "internal_error", "An unexpected error occurred.");
     }
   });

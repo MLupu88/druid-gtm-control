@@ -44,6 +44,7 @@ import {
   formatFactDateTime,
   historyForField,
 } from "@/lib/account-facts-presentation";
+import { accountTruthQueryKey } from "@/lib/account-truth-api";
 
 const REGION_LABELS: Record<string, string> = {
   us: "US",
@@ -131,7 +132,14 @@ function FactRow({
       setEditing(false);
       setCorrectionReason("");
       setConflict(false);
-      await queryClient.invalidateQueries({ queryKey: accountFactsQueryKey(accountId) });
+      // Milestone 3H: a manual fact directly participates in Milestone 3F
+      // reconciliation (see factReconciliation.ts's manual-authority
+      // rule) — the current-truth panel must never keep showing the
+      // pre-edit status/value after a successful confirm/correct.
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: accountFactsQueryKey(accountId) }),
+        queryClient.invalidateQueries({ queryKey: accountTruthQueryKey(accountId) }),
+      ]);
     },
     onError: (err) => {
       if (describeAccountFactsError(err).kind === "conflict") {
