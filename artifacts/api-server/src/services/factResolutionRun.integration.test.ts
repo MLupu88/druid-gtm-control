@@ -306,7 +306,10 @@ test("recomputing appends a new resolved_facts row and never mutates the prior o
   assert.equal(first.resolutionState, "single_source");
   assert.equal(first.canonicalValue, "US");
 
-  // New evidence arrives before the second computation.
+  // A later occurrence of the SAME hubspot claim (repeated sync) arrives
+  // before the second computation. It must collapse to one current
+  // candidate, not look like a second independent source agreeing — see
+  // §28/M3.5 "Confirmed by multiple sources" defect fix.
   await addFieldObservation({
     provider: "hubspot",
     sourceRecordId: hubspotCompanyId,
@@ -319,7 +322,7 @@ test("recomputing appends a new resolved_facts row and never mutates the prior o
     accountId,
     canonicalField: "company.country",
   });
-  assert.equal(second.resolutionState, "agreement");
+  assert.equal(second.resolutionState, "single_source");
   assert.notEqual(second.id, first.id);
 
   const allRows = await db!
@@ -346,6 +349,220 @@ test("recomputing appends a new resolved_facts row and never mutates the prior o
       .set({ rationale: "tampered" })
       .where(eq(schema.resolvedFacts.id, first.id)),
   );
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — current-occurrence collapse regression
+// coverage. See ./observationCurrentOccurrence.ts's module comment for
+// the full root-cause explanation. These tests prove the fix end to end
+// against a real Postgres instance (real occurrence rows, real
+// immutability), not just the pure collapse function in isolation.
+// ---------------------------------------------------------------------
+
+test("repeated identical same-provider occurrences (crm_state) collapse to ONE current candidate — single_source, never 'agreement'", { skip }, async () => {
+  const accountId = await makeAccount();
+  const hubspotCompanyId = crypto.randomUUID();
+  await bindHubSpotIdentity(accountId, hubspotCompanyId, "acme-repeated-owner.example");
+
+  // Three occurrences of the identical, unchanged HubSpot claim — the
+  // exact pattern from three repeated syncs.
+  const occurrenceIds = [];
+  for (let i = 0; i < 3; i += 1) {
+    occurrenceIds.push(
+      await addFieldObservation({
+        provider: "hubspot",
+        sourceRecordId: hubspotCompanyId,
+        observationClass: "crm_state",
+        canonicalField: "crm.owner",
+        value: "89684655",
+        importedAt: new Date(Date.now() - (3 - i) * 60_000),
+      }),
+    );
+  }
+
+  const resolved = await resolveAccountCanonicalField({
+    db: db!,
+    accountId,
+    canonicalField: "crm.owner",
+  });
+
+  assert.equal(resolved.resolutionState, "single_source");
+  assert.equal(resolved.canonicalValue, "89684655");
+  assert.equal(resolved.supportingEvidence.length, 1);
+  // The current candidate is the LATEST occurrence, not the first.
+  assert.deepEqual(resolved.selectedObservationId, occurrenceIds[2]);
+  assert.deepEqual(resolved.consideredEvidence, [
+    { kind: "observation", id: occurrenceIds[2] },
+  ]);
+});
+
+test("a changed same-provider crm_state observation: the current candidate is the newest value, and the old value never creates a conflict", { skip }, async () => {
+  const accountId = await makeAccount();
+  const hubspotCompanyId = crypto.randomUUID();
+  await bindHubSpotIdentity(accountId, hubspotCompanyId, "acme-changed-owner.example");
+
+  await addFieldObservation({
+    provider: "hubspot",
+    sourceRecordId: hubspotCompanyId,
+    observationClass: "crm_state",
+    canonicalField: "crm.owner",
+    value: "old-owner-id",
+    importedAt: new Date(Date.now() - 60_000),
+  });
+  const newOccurrenceId = await addFieldObservation({
+    provider: "hubspot",
+    sourceRecordId: hubspotCompanyId,
+    observationClass: "crm_state",
+    canonicalField: "crm.owner",
+    value: "new-owner-id",
+    importedAt: new Date(),
+  });
+
+  const resolved = await resolveAccountCanonicalField({
+    db: db!,
+    accountId,
+    canonicalField: "crm.owner",
+  });
+
+  assert.equal(resolved.resolutionState, "single_source");
+  assert.equal(resolved.canonicalValue, "new-owner-id");
+  assert.equal(resolved.selectedObservationId, newOccurrenceId);
+  // The superseded old value must not appear as conflicting evidence —
+  // it isn't a current candidate at all, it's immutable history only.
+  assert.deepEqual(resolved.conflictingEvidence, []);
+  assert.equal(resolved.supportingEvidence.length, 1);
+});
+
+test("the same value from two independent providers is 'agreement' (multiple real sources), unaffected by the same-provider collapse", { skip }, async () => {
+  const accountId = await makeAccount();
+  const hubspotCompanyId = crypto.randomUUID();
+  const dealfrontId = crypto.randomUUID();
+  await Promise.all([
+    bindHubSpotIdentity(accountId, hubspotCompanyId, "acme-two-providers-agree.example"),
+    addAlias(accountId, "external_id:dealfront", dealfrontId),
+    addIdentityObservation({
+      provider: "dealfront",
+      sourceRecordId: dealfrontId,
+      identityKey: "external_id",
+      identityValue: dealfrontId,
+    }),
+  ]);
+  await addFieldObservation({
+    provider: "hubspot",
+    sourceRecordId: hubspotCompanyId,
+    observationClass: "crm_state",
+    canonicalField: "crm.owner",
+    value: "shared-owner-id",
+  });
+  await addFieldObservation({
+    provider: "dealfront",
+    sourceRecordId: dealfrontId,
+    observationClass: "crm_state",
+    canonicalField: "crm.owner",
+    value: "shared-owner-id",
+  });
+
+  const resolved = await resolveAccountCanonicalField({
+    db: db!,
+    accountId,
+    canonicalField: "crm.owner",
+  });
+
+  assert.equal(resolved.resolutionState, "agreement");
+  assert.equal(resolved.canonicalValue, "shared-owner-id");
+  assert.equal(resolved.supportingEvidence.length, 2);
+});
+
+test("conflicting values from two independent providers still conflict, even when one provider has repeated occurrences that must first collapse", { skip }, async () => {
+  const accountId = await makeAccount();
+  const dealfrontId = crypto.randomUUID();
+  const cognismId = crypto.randomUUID();
+  await Promise.all([
+    addAlias(accountId, "external_id:dealfront", dealfrontId),
+    addIdentityObservation({
+      provider: "dealfront",
+      sourceRecordId: dealfrontId,
+      identityKey: "external_id",
+      identityValue: dealfrontId,
+    }),
+    addAlias(accountId, "external_id:cognism", cognismId),
+    addIdentityObservation({
+      provider: "cognism",
+      sourceRecordId: cognismId,
+      identityKey: "external_id",
+      identityValue: cognismId,
+    }),
+  ]);
+  // dealfront repeats the SAME claim twice (must collapse to one current
+  // candidate before conflict evaluation ever sees it).
+  await addFieldObservation({
+    provider: "dealfront",
+    sourceRecordId: dealfrontId,
+    observationClass: "crm_state",
+    canonicalField: "crm.owner",
+    value: "owner-1",
+    importedAt: new Date(Date.now() - 60_000),
+  });
+  await addFieldObservation({
+    provider: "dealfront",
+    sourceRecordId: dealfrontId,
+    observationClass: "crm_state",
+    canonicalField: "crm.owner",
+    value: "owner-1",
+    importedAt: new Date(),
+  });
+  await addFieldObservation({
+    provider: "cognism",
+    sourceRecordId: cognismId,
+    observationClass: "crm_state",
+    canonicalField: "crm.owner",
+    value: "owner-2",
+  });
+
+  const resolved = await resolveAccountCanonicalField({
+    db: db!,
+    accountId,
+    canonicalField: "crm.owner",
+  });
+
+  assert.equal(resolved.resolutionState, "conflict");
+  assert.equal(resolved.canonicalValue, null);
+  // Exactly 2 pieces of conflicting evidence — one per PROVIDER, not one
+  // per occurrence (would be 3 if dealfront's duplicate leaked through).
+  assert.equal(resolved.conflictingEvidence.length, 2);
+});
+
+test("the current-occurrence collapse applies to firmographic_fact fields too, not only crm_state", { skip }, async () => {
+  const accountId = await makeAccount();
+  const hubspotCompanyId = crypto.randomUUID();
+  await bindHubSpotIdentity(accountId, hubspotCompanyId, "acme-firmographic-collapse.example");
+
+  await addFieldObservation({
+    provider: "hubspot",
+    sourceRecordId: hubspotCompanyId,
+    observationClass: "firmographic_fact",
+    canonicalField: "company.employeeRange",
+    value: "125",
+    importedAt: new Date(Date.now() - 60_000),
+  });
+  const latestId = await addFieldObservation({
+    provider: "hubspot",
+    sourceRecordId: hubspotCompanyId,
+    observationClass: "firmographic_fact",
+    canonicalField: "company.employeeRange",
+    value: "161",
+    importedAt: new Date(),
+  });
+
+  const resolved = await resolveAccountCanonicalField({
+    db: db!,
+    accountId,
+    canonicalField: "company.employeeRange",
+  });
+
+  assert.equal(resolved.resolutionState, "single_source");
+  assert.equal(resolved.canonicalValue, "161");
+  assert.equal(resolved.selectedObservationId, latestId);
 });
 
 test.after(async () => {

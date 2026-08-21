@@ -49,6 +49,7 @@ import {
   selectFieldObservationsBoundToAccount,
   type IdentityLinkObservation,
 } from "./observationSubjectBinding.js";
+import { selectCurrentOccurrencePerStream } from "./observationCurrentOccurrence.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -157,7 +158,17 @@ async function loadBoundObservationCandidates(
     fieldObservations: fieldRows,
   });
 
-  return bound.map((row) => ({
+  // Collapse repeated/updated occurrences of the SAME provider claim
+  // (provider, observationClass, sourceRecordId, semanticKey) down to
+  // exactly one CURRENT candidate before reconciliation ever sees them —
+  // see ./observationCurrentOccurrence.ts's module comment for why. This
+  // is temporal current-state selection within one provider's own
+  // stream, never a cross-provider authority decision.
+  const current = selectCurrentOccurrencePerStream(
+    bound.map((row) => ({ ...row, observationClass, semanticKey: canonicalField })),
+  );
+
+  return current.map((row) => ({
     evidence: { kind: "observation", id: row.id },
     provider: row.provider,
     canonicalField,

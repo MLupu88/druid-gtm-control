@@ -300,7 +300,8 @@ test("a later observation does not mutate an earlier snapshot; a new snapshot se
   const firstInput = first.normalizedInput as { company: { country: string | null } };
   assert.equal(firstInput.company.country, "US");
 
-  // New, conflicting evidence arrives.
+  // A newer occurrence of the SAME hubspot claim arrives (e.g. a later
+  // sync where the field actually changed).
   await addFieldObservation({
     provider: "hubspot",
     sourceRecordId: hubspotId,
@@ -311,10 +312,12 @@ test("a later observation does not mutate an earlier snapshot; a new snapshot se
 
   const second = await createCurrentAccountSnapshot(db!, accountId);
   const secondInput = second.normalizedInput as { company: { country: string | null } };
-  // Two same-provider values now disagree with no authority to break the
-  // tie between them (both "hubspot") and no defensible observedAt ->
-  // unresolved conflict, never guessed.
-  assert.equal(secondInput.company.country, null);
+  // Same-provider, same-stream occurrences collapse to the newest one as
+  // the current candidate — the old "US" occurrence is immutable history,
+  // not a live conflicting source (see §28/M3.5 "Confirmed by multiple
+  // sources" defect fix). This must read as the new value, never as an
+  // unresolved conflict between an account's own provider and itself.
+  assert.equal(secondInput.company.country, "DE");
 
   // The FIRST snapshot itself is untouched — re-read it independently.
   const [reReadFirst] = await db!
@@ -349,8 +352,8 @@ test("a later observation does not mutate an earlier snapshot; a new snapshot se
   assert.equal(allCountryRows.length, 2);
   assert.equal(allCountryRows[0]?.resolutionState, "single_source");
   assert.equal(allCountryRows[0]?.canonicalValue, "US");
-  assert.equal(allCountryRows[1]?.resolutionState, "conflict");
-  assert.equal(allCountryRows[1]?.canonicalValue, null);
+  assert.equal(allCountryRows[1]?.resolutionState, "single_source");
+  assert.equal(allCountryRows[1]?.canonicalValue, "DE");
 
   await assert.rejects(() =>
     db!
