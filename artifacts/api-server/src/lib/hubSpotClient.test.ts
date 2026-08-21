@@ -3,6 +3,7 @@ import { mock, test } from "node:test";
 import {
   fetchHubSpotCompanyById,
   fetchHubSpotOwnerById,
+  searchHubSpotCompaniesByDomain,
   HubSpotApiError,
   HubSpotCompanyArchivedError,
   HubSpotCompanyDomainUnavailableError,
@@ -400,6 +401,151 @@ test("blank/absent email, firstName, or lastName convert to null, never to blank
   try {
     const result = await withAccessToken("test-token", () => fetchHubSpotOwnerById("999"));
     assert.deepEqual(result, { id: "999", email: null, firstName: null, lastName: null });
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+// ---------------------------------------------------------------------
+// RB2B -> HubSpot context link — searchHubSpotCompaniesByDomain
+// ---------------------------------------------------------------------
+
+function searchResponse(companyIds: string[]): Response {
+  return Response.json({
+    total: companyIds.length,
+    results: companyIds.map((id) => ({ id, properties: { domain: "example.com" }, archived: false })),
+  });
+}
+
+test("searches the CRM search API with an exact EQ filter on the normalized domain and a bearer token", async () => {
+  const token = "unit-test-search-token-that-must-not-leak";
+  let requestedUrl: URL | undefined;
+  let requestedInit: RequestInit | undefined;
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    requestedUrl = new URL(String(input));
+    requestedInit = init;
+    return searchResponse(["12345"]);
+  });
+
+  try {
+    const result = await withAccessToken(token, () =>
+      searchHubSpotCompaniesByDomain("HTTPS://WWW.Example.COM/about"),
+    );
+    assert.deepEqual(result, { outcome: "matched", companyId: "12345" });
+    assert.equal(requestedUrl?.pathname, "/crm/v3/objects/companies/search");
+    assert.equal(requestedInit?.method, "POST");
+    assert.equal(
+      (requestedInit?.headers as Record<string, string>)?.Authorization,
+      `Bearer ${token}`,
+    );
+    const body = JSON.parse(String(requestedInit?.body));
+    assert.deepEqual(body.filterGroups, [
+      { filters: [{ propertyName: "domain", operator: "EQ", value: "example.com" }] },
+    ]);
+    assert.equal(body.limit, 2);
+    assert.ok(requestedInit?.signal instanceof AbortSignal);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("zero results resolve to not_found", async () => {
+  mock.method(globalThis, "fetch", async () => searchResponse([]));
+  try {
+    const result = await withAccessToken("test-token", () =>
+      searchHubSpotCompaniesByDomain("example.com"),
+    );
+    assert.deepEqual(result, { outcome: "not_found" });
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("more than one result resolves to ambiguous, never guessing a winner", async () => {
+  mock.method(globalThis, "fetch", async () => searchResponse(["111", "222"]));
+  try {
+    const result = await withAccessToken("test-token", () =>
+      searchHubSpotCompaniesByDomain("example.com"),
+    );
+    assert.deepEqual(result, { outcome: "ambiguous", companyIds: ["111", "222"] });
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("search reads HUBSPOT_ACCESS_TOKEN lazily and fails before fetch when it is absent", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async () => searchResponse([]));
+  try {
+    await assert.rejects(
+      () => withAccessToken(undefined, () => searchHubSpotCompaniesByDomain("example.com")),
+      HubSpotNotConfiguredError,
+    );
+    assert.equal(fetchMock.mock.calls.length, 0);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("search rejects a blank or unnormalizable domain before ever calling fetch", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async () => searchResponse([]));
+  try {
+    await withAccessToken("test-token", async () => {
+      await assert.rejects(() => searchHubSpotCompaniesByDomain("   "), HubSpotResponseError);
+    });
+    assert.equal(fetchMock.mock.calls.length, 0);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("search sanitizes non-success responses (including 429) and never exposes the bearer token or provider body", async () => {
+  const token = "secret-search-marker-token";
+  const providerBody = "sensitive-search-provider-body";
+  mock.method(globalThis, "fetch", async () => new Response(providerBody, { status: 429 }));
+  try {
+    const error = await withAccessToken(token, () =>
+      captureError(() => searchHubSpotCompaniesByDomain("example.com")),
+    );
+    assert.ok(error instanceof HubSpotApiError);
+    assert.equal(error.status, 429);
+    assert.equal(error.message.includes(token), false);
+    assert.equal(error.message.includes(providerBody), false);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("search wraps network failures in a sanitized provider error", async () => {
+  mock.method(globalThis, "fetch", async () => {
+    throw new Error("network failure containing secret-search-marker-token");
+  });
+  try {
+    const error = await withAccessToken("secret-search-marker-token", () =>
+      captureError(() => searchHubSpotCompaniesByDomain("example.com")),
+    );
+    assert.ok(error instanceof HubSpotApiError);
+    assert.equal(error.status, 502);
+    assert.equal(error.message.includes("secret-search-marker-token"), false);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("search rejects malformed JSON and a malformed results shape", async () => {
+  const responses = [
+    new Response("not-json"),
+    Response.json({ results: "not-an-array" }),
+    Response.json({ results: [{ id: 12345 }] }),
+    Response.json({ results: [{ id: "   " }] }),
+  ];
+  const fetchMock = mock.method(globalThis, "fetch", async () => responses.shift()!);
+  try {
+    await withAccessToken("test-token", async () => {
+      for (let index = 0; index < 4; index += 1) {
+        await assert.rejects(() => searchHubSpotCompaniesByDomain("example.com"), HubSpotResponseError);
+      }
+    });
+    assert.equal(fetchMock.mock.calls.length, 4);
   } finally {
     mock.restoreAll();
   }

@@ -17,6 +17,7 @@ import { createAttentionItemsRouter } from "./attentionItems";
 import { createAttentionItemResolutionRouter } from "./attentionItemResolution";
 import { createHubSpotCompanySyncRouter } from "./hubSpotCompanySync";
 import { createRb2bSignalBridgeRouter } from "./rb2bSignalBridge";
+import { createRb2bHubSpotContextRouter } from "./rb2bHubSpotContext";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireServiceAuth } from "../middlewares/requireServiceAuth";
 
@@ -82,6 +83,16 @@ router.use(
   "/internal/rb2b/signals",
   requireServiceAuth,
   createRb2bSignalBridgeRouter({ db }),
+);
+// RB2B -> HubSpot context link (minimal current slice) — POST
+// /internal/rb2b/hubspot-context. Same requireServiceAuth boundary as RB2B
+// signal ingestion above, a prefix no other router in this package uses,
+// so no ordering hazard with any other mount. n8n calls this after the
+// RB2B ingest above has already resolved a canonical Account.
+router.use(
+  "/internal/rb2b/hubspot-context",
+  requireServiceAuth,
+  createRb2bHubSpotContextRouter({ db }),
 );
 
 // Everything below this line requires a valid session.
