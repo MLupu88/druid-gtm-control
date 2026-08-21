@@ -14,14 +14,12 @@ export interface SignalPulseProps {
   rows: Row[];
   source: string;
   activityRows: Record<string, string>[];
-  isSampleMode: boolean;
   isLoading?: boolean;
 }
 
 export function SignalPulse({
   rows,
   source,
-  isSampleMode,
   isLoading = false,
 }: SignalPulseProps) {
   const mqlCount = useMemo(
@@ -37,7 +35,7 @@ export function SignalPulse({
   const totalRows = rows.length;
   const isAccountQueue = String(source).toLowerCase() === "account_queue";
   const totalLabel = isAccountQueue ? "Accounts represented" : "Signals captured";
-  const isLiveEmpty = !isSampleMode && !isLoading && rows.length === 0;
+  const isEmpty = !isLoading && rows.length === 0;
 
   return (
     <div className="rounded-xl border border-border bg-card px-5 py-4 space-y-3">
@@ -51,15 +49,10 @@ export function SignalPulse({
             Counts of what's currently in the queue, by recommendation.
           </p>
         </div>
-        {isSampleMode && (
-          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
-            Sample data
-          </span>
-        )}
       </div>
 
       {/* ── Counts ── */}
-      {isLiveEmpty ? (
+      {isEmpty ? (
         <p className="text-sm text-muted-foreground">No live signals need review right now.</p>
       ) : (
         !isLoading && (

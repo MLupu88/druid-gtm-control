@@ -7,7 +7,6 @@ import {
   QUEUE_SOURCE_LABELS,
   STATUS_LABELS_V3,
   STATUS_FALLBACK_LABEL,
-  MOCK_ACCOUNT_QUEUE,
   QUEUE_QUERY_KEY,
   ACTION_LOG_QUERY_KEY,
 } from "@workspace/gtm-shared";
@@ -17,8 +16,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { OutputTypeBadge } from "@/components/output-type-badge";
 import { AccountDetailSheet } from "@/components/account-detail-sheet";
-import { ViewModeToggle } from "@/components/view-mode-toggle";
-import { useSampleMode } from "@/lib/sample-mode";
 import {
   type Row,
   type OutputTypeKey,
@@ -49,46 +46,9 @@ interface ActionLogResponse {
   usingSampleData: boolean;
 }
 
-// ─── Sample data ──────────────────────────────────────────────────────────────
-const SAMPLE_ROWS: Row[] = (
-  MOCK_ACCOUNT_QUEUE as unknown as Record<string, unknown>[]
-).map(
-  (r) =>
-    Object.fromEntries(
-      Object.entries(r).map(([k, v]) => [k, String(v ?? "")]),
-    ) as Row,
-);
-const SAMPLE_SOURCE = "account_queue";
-
-const SAMPLE_ACTIVITY_ROWS: Record<string, string>[] = [
-  {
-    company_name: "Globex",
-    company_domain: "globex.com",
-    final_status: "approved_email_pending_tool",
-    approved_by: "operator",
-    action_at: "2026-06-30T09:15:00Z",
-  },
-  {
-    company_name: "Allianz X",
-    company_domain: "allianz-x.com",
-    final_status: "owner_alert_logged",
-    approved_by: "operator",
-    action_at: "2026-06-30T08:45:00Z",
-  },
-  {
-    company_name: "DRUID AI",
-    company_domain: "druidai.com",
-    final_status: "suppressed",
-    approved_by: "operator",
-    action_at: "2026-06-30T09:01:00Z",
-  },
-];
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [selectedRow, setSelectedRow] = useState<Row | null>(null);
-  const { viewMode, setViewMode } = useSampleMode();
-  const isSampleMode = viewMode === "sample";
   const queryClient = useQueryClient();
 
   const configQ = useQuery<ConfigResponse>({
@@ -116,18 +76,14 @@ export default function DashboardPage() {
         (r) => r.json(),
       ) as Promise<ActionLogResponse>,
     staleTime: 30_000,
-    enabled: !isSampleMode,
   });
 
   const config = configQ.data?.config ?? {};
-  const liveRows = queueQ.data?.rows ?? [];
-  const liveSource = queueQ.data?.source ?? "signal_queue";
+  const rows = queueQ.data?.rows ?? [];
+  const source = queueQ.data?.source ?? "signal_queue";
   const usingSampleData = queueQ.data?.usingSampleData ?? false;
   const configLoading = configQ.isLoading;
   const queueLoading = queueQ.isLoading;
-
-  const rows = isSampleMode ? SAMPLE_ROWS : liveRows;
-  const source = isSampleMode ? SAMPLE_SOURCE : liveSource;
 
   const engineModeKey = (
     config.engine_mode ?? "recommend_only"
@@ -164,11 +120,8 @@ export default function DashboardPage() {
     "Suppressed",
   ];
 
-  const liveActivityRows = actionLogQ.data?.rows ?? [];
-  const activityRows = isSampleMode ? SAMPLE_ACTIVITY_ROWS : liveActivityRows;
-  const activityLoading = !isSampleMode && actionLogQ.isLoading;
-
-  const liveQueueEmpty = !isSampleMode && !queueLoading && liveRows.length === 0;
+  const activityRows = actionLogQ.data?.rows ?? [];
+  const activityLoading = actionLogQ.isLoading;
 
   // ── Human-readable state descriptions ──────────────────────────────────────
   const sendingHint =
@@ -196,24 +149,13 @@ export default function DashboardPage() {
 
   return (
     <PageLayout className="space-y-6">
-      {/* Header + view mode toggle */}
       <PageHeader
         title="DRUID Signals overview"
         description="See what the GTM signal engine is finding, what needs attention, and what is only being logged for now."
-        actions={<ViewModeToggle viewMode={viewMode} onChange={setViewMode} />}
       />
 
-      {/* Sample data banner */}
-      {isSampleMode && (
-        <InlineNotice tone="info">
-          <p>
-            Showing sample data — this illustrates the full workflow. Switch to Live data to see your real signals.
-          </p>
-        </InlineNotice>
-      )}
-
-      {/* Live backend sample data badge */}
-      {!isSampleMode && usingSampleData && (
+      {/* Backend sample data badge — the Sheets workbook isn't connected yet */}
+      {usingSampleData && (
         <InlineNotice tone="warning">
           Sample data — live workbook not connected yet.
         </InlineNotice>
@@ -224,7 +166,6 @@ export default function DashboardPage() {
         rows={rows}
         source={source}
         activityRows={activityRows}
-        isSampleMode={isSampleMode}
         isLoading={queueLoading}
       />
 
@@ -273,11 +214,6 @@ export default function DashboardPage() {
         <div className="mb-3">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-primary">
             Signals to review
-            {isSampleMode && (
-              <span className="ml-2 normal-case font-normal text-muted-foreground text-[11px]">
-                — sample data
-              </span>
-            )}
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
             These cards group signals by the recommendation the GTM engine made.
@@ -291,19 +227,9 @@ export default function DashboardPage() {
           </div>
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-            <p className="text-sm text-muted-foreground mb-4">
+            <p className="text-sm text-muted-foreground">
               No signals need review right now.
             </p>
-            {!isSampleMode && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setViewMode("sample")}
-                className="text-xs"
-              >
-                View sample workflow
-              </Button>
-            )}
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -333,11 +259,6 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-xs font-semibold uppercase tracking-wider text-primary">
               Needs your attention
-              {isSampleMode && (
-                <span className="ml-2 normal-case font-normal text-muted-foreground text-[11px]">
-                  — sample data
-                </span>
-              )}
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               These are the signals that still need a human decision before anything happens.
@@ -368,16 +289,6 @@ export default function DashboardPage() {
                 ? "No signals need review right now."
                 : "Everything in the review list has been actioned — nothing waiting for a decision."}
             </p>
-            {rows.length === 0 && !isSampleMode && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setViewMode("sample")}
-                className="text-xs mt-3"
-              >
-                View sample workflow
-              </Button>
-            )}
           </div>
         ) : (
           <div className="space-y-2">
@@ -387,7 +298,6 @@ export default function DashboardPage() {
                 row={row}
                 source={source}
                 onClick={() => setSelectedRow(row)}
-                isSampleMode={isSampleMode}
               />
             ))}
           </div>
@@ -398,11 +308,6 @@ export default function DashboardPage() {
       <div>
         <h2 className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
           Recent activity
-          {isSampleMode && (
-            <span className="ml-2 normal-case font-normal text-muted-foreground text-[11px]">
-              — sample data
-            </span>
-          )}
         </h2>
         {activityLoading ? (
           <div className="space-y-2">
@@ -434,16 +339,13 @@ export default function DashboardPage() {
           canonicalAccountId={null}
           open={!!selectedRow}
           onClose={() => setSelectedRow(null)}
-          previewOnly={isSampleMode}
           onAction={() => {
             setSelectedRow(null);
             // Invalidate both — a persisted activation/decision writes a new
             // ICP_Action_Log row, and "Recent activity" reads that query separately
             // from the queue query.
-            if (!isSampleMode) {
-              void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
-              void queryClient.invalidateQueries({ queryKey: ACTION_LOG_QUERY_KEY });
-            }
+            void queryClient.invalidateQueries({ queryKey: QUEUE_QUERY_KEY });
+            void queryClient.invalidateQueries({ queryKey: ACTION_LOG_QUERY_KEY });
           }}
         />
       )}
@@ -544,10 +446,9 @@ interface QueueRowCardProps {
   row: Row;
   source: string;
   onClick: () => void;
-  isSampleMode?: boolean;
 }
 
-function QueueRowCard({ row, source, onClick, isSampleMode }: QueueRowCardProps) {
+function QueueRowCard({ row, source, onClick }: QueueRowCardProps) {
   const outputType = rowOutputType(row, source);
   const identityLabel = rowIdentityLabel(row, source);
   const whyNow = safeWhyNow(row);
@@ -580,7 +481,7 @@ function QueueRowCard({ row, source, onClick, isSampleMode }: QueueRowCardProps)
                 {identityLabel.label}
               </Badge>
             )}
-            {(isTestRow || isSampleMode) && (
+            {isTestRow && (
               <Badge
                 variant="outline"
                 className="text-[10px] px-1.5 py-0 text-amber-400 border-amber-500/30 bg-amber-500/10"

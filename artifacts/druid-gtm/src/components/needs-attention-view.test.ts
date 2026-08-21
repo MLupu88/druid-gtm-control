@@ -56,7 +56,7 @@ test("Dismiss is exposed only through canonical account detail entered from Need
   const liveRow = functionBlock(
     COMPONENT_SOURCE,
     "CanonicalAttentionRow",
-    "SampleNeedsAttentionView",
+    "CanonicalAccountState",
   );
   assert.ok(liveRow.includes("?from=attention"));
   assert.ok(ACCOUNT_DETAIL_SOURCE.includes('searchParams.get("from") === "attention"'));
@@ -67,35 +67,24 @@ test("Dismiss is exposed only through canonical account detail entered from Need
   assert.ok(!DECISION_CONTROLS_SOURCE.includes("resolve attention"));
 });
 
-test("Sample Mode preserves the former preview presentation without live queue invalidations", () => {
-  const sampleBlock = functionBlock(COMPONENT_SOURCE, "SampleNeedsAttentionView", "FilterChip");
+// LS1 — Live Shell Closure: sample/demo mode was removed from production.
+// There is no SampleNeedsAttentionView, no view-mode toggle, and no
+// Sheet-derived recommendation/filter logic anywhere in this component
+// any more — Needs Attention is canonical-only, unconditionally.
+test("no sample/demo mode remains — no toggle, no mock rows, no Sheet-derived recommendation filters", () => {
   for (const marker of [
+    "SampleNeedsAttentionView",
     "SAMPLE_ROWS",
-    "previewOnly",
-    "OutputTypeBadge",
-    "Sample data only. Actions are preview-only and will not be sent.",
-    "MQL / Ready for Sales",
-    "Showing accounts that are ready for sales action now.",
+    "MOCK_ACCOUNT_QUEUE",
+    "useSampleMode",
+    "ViewModeToggle",
+    "FilterChip",
+    "rowOutputType",
+    "rowNeedsReview",
+    "View sample workflow",
   ]) {
-    assert.ok(COMPONENT_SOURCE.includes(marker), `missing restored Sample marker: ${marker}`);
+    assert.ok(!COMPONENT_SOURCE.includes(marker), `stale sample-mode marker still present: ${marker}`);
   }
-  assert.ok(sampleBlock.includes("canonicalAccountId={null}"));
-  assert.ok(!sampleBlock.includes("invalidateQueries"));
-  assert.ok(!COMPONENT_SOURCE.includes("QUEUE_QUERY_KEY"));
-  assert.ok(!COMPONENT_SOURCE.includes("ACTION_LOG_QUERY_KEY"));
-});
-
-test("Sheet-derived recommendation filters remain Sample-only", () => {
-  const liveBlock = functionBlock(
-    COMPONENT_SOURCE,
-    "CanonicalNeedsAttentionView",
-    "CanonicalAttentionRow",
-  );
-  const sampleBlock = functionBlock(COMPONENT_SOURCE, "SampleNeedsAttentionView", "FilterChip");
-  assert.ok(!liveBlock.includes("FilterChip"));
-  assert.ok(!liveBlock.includes("rowOutputType"));
-  assert.ok(sampleBlock.includes("rowOutputType"));
-  assert.ok(sampleBlock.includes("rowNeedsReview"));
 });
 
 test("Accounts page describes the canonical open-attention model", () => {

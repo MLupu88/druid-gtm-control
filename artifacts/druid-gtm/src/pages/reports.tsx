@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,18 +13,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { ViewModeToggle } from "@/components/view-mode-toggle";
 import { InlineNotice } from "@/components/inline-notice";
 import { PageHeader, PageLayout } from "@/components/page-layout";
 import { StatusBadge } from "@/components/status-badge";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { useSampleMode } from "@/lib/sample-mode";
 import { cn } from "@/lib/utils";
 import {
   Download,
@@ -96,125 +92,6 @@ const ANALYTICS_URL: string =
   (import.meta.env.VITE_MARKETPLACE_ANALYTICS_URL as string | undefined) ||
   "https://datastudio.google.com/u/0/reporting/8475305e-1260-4c51-851d-b2f755d4c82c/page/p_92rv9whn3d";
 
-// ─── Sample-mode types & data (unchanged — sample experience is preserved as-is) ──
-
-interface Campaign {
-  id: string;
-  name: string;
-  region: string;
-  industry: string;
-  dateRange: string;
-  status: string;
-}
-
-const SAMPLE_CAMPAIGNS: Campaign[] = [
-  { id: "insurance_claims_us",        name: "Insurance Claims Automation — US",        region: "United States",  industry: "Insurance",          dateRange: "May – Jun 2026", status: "Active" },
-  { id: "healthcare_scheduling_emea", name: "Healthcare Patient Scheduling — EMEA",    region: "Europe",         industry: "Healthcare",          dateRange: "May – Jun 2026", status: "Active" },
-  { id: "banking_self_service",       name: "Banking Customer Self-Service — Global",  region: "Global",         industry: "Banking & Finance",   dateRange: "May – Jun 2026", status: "Active" },
-  { id: "marketplace_emea",           name: "Marketplace Publisher Recruitment — EMEA",region: "Europe",         industry: "Technology",          dateRange: "May – Jun 2026", status: "Active" },
-];
-
-interface CampaignStats {
-  accounts_reviewed: number;
-  ready_for_sales: number;
-  worth_a_look: number;
-  nurture: number;
-  blocked: number;
-  actions_logged: number;
-  estimated_cost: string;
-}
-
-const SAMPLE_STATS: Record<string, CampaignStats> = {
-  insurance_claims_us:        { accounts_reviewed:24, ready_for_sales:6, worth_a_look:8,  nurture:5, blocked:3, actions_logged:14, estimated_cost:"~$1.20" },
-  healthcare_scheduling_emea: { accounts_reviewed:18, ready_for_sales:3, worth_a_look:7,  nurture:4, blocked:2, actions_logged:10, estimated_cost:"~$0.00" },
-  banking_self_service:       { accounts_reviewed:31, ready_for_sales:9, worth_a_look:11, nurture:6, blocked:4, actions_logged:20, estimated_cost:"~$2.40" },
-  marketplace_emea:           { accounts_reviewed:12, ready_for_sales:2, worth_a_look:5,  nurture:3, blocked:1, actions_logged:7,  estimated_cost:"~$0.00" },
-};
-
-interface CostAction {
-  type: string;
-  count: number;
-  unit_cost: string;
-  total_cost: string;
-  cost_driver: string;
-  execution_status: string;
-}
-
-const SAMPLE_COST_ACTIONS: Record<string, CostAction[]> = {
-  insurance_claims_us: [
-    { type:"AI call",                         count:3,  unit_cost:"~$0.05 / min", total_cost:"~$1.20",  cost_driver:"AI telephony call minutes (avg ~8 min/call)",          execution_status:"Active" },
-    { type:"Email approval logged",           count:4,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no email tool connected yet",                   execution_status:"Pending tool" },
-    { type:"LinkedIn approval logged",        count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — prepared for manual export to Dripify",         execution_status:"Manual export" },
-    { type:"Account owner notification",      count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no CRM write connected yet",                    execution_status:"Pending tool" },
-    { type:"Retargeting marker",              count:1,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Marker set — no ad platform connected yet",              execution_status:"Pending sync" },
-    { type:"Nurture decision",                count:5,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation — decision recorded only",            execution_status:"Logged" },
-    { type:"Not a fit",                       count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation — decision recorded only",            execution_status:"Logged" },
-    { type:"Blocked / do-not-contact",        count:3,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation — added to do-not-contact list",      execution_status:"Logged" },
-  ],
-  healthcare_scheduling_emea: [
-    { type:"AI call",                         count:0,  unit_cost:"~$0.05 / min", total_cost:"$0",      cost_driver:"No calls placed (EMEA region — voice not cleared)",      execution_status:"Locked" },
-    { type:"Email approval logged",           count:3,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no email tool connected yet",                   execution_status:"Pending tool" },
-    { type:"LinkedIn approval logged",        count:3,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — prepared for manual export to Dripify",         execution_status:"Manual export" },
-    { type:"Account owner notification",      count:1,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no CRM write connected yet",                    execution_status:"Pending tool" },
-    { type:"Retargeting marker",              count:0,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Marker set — no ad platform connected yet",              execution_status:"Pending sync" },
-    { type:"Nurture decision",                count:4,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation",                                     execution_status:"Logged" },
-    { type:"Not a fit",                       count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation",                                     execution_status:"Logged" },
-    { type:"Blocked / do-not-contact",        count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Added to do-not-contact list",                           execution_status:"Logged" },
-  ],
-  banking_self_service: [
-    { type:"AI call",                         count:4,  unit_cost:"~$0.05 / min", total_cost:"~$2.40",  cost_driver:"AI telephony call minutes (avg ~12 min/call)",           execution_status:"Active" },
-    { type:"Email approval logged",           count:6,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no email tool connected yet",                   execution_status:"Pending tool" },
-    { type:"LinkedIn approval logged",        count:4,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — prepared for manual export to Dripify",         execution_status:"Manual export" },
-    { type:"Account owner notification",      count:3,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no CRM write connected yet",                    execution_status:"Pending tool" },
-    { type:"Retargeting marker",              count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Marker set — no ad platform connected yet",              execution_status:"Pending sync" },
-    { type:"Nurture decision",                count:6,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation",                                     execution_status:"Logged" },
-    { type:"Not a fit",                       count:3,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation",                                     execution_status:"Logged" },
-    { type:"Blocked / do-not-contact",        count:4,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Added to do-not-contact list",                           execution_status:"Logged" },
-  ],
-  marketplace_emea: [
-    { type:"AI call",                         count:0,  unit_cost:"~$0.05 / min", total_cost:"$0",      cost_driver:"No calls placed",                                        execution_status:"Locked" },
-    { type:"Email approval logged",           count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no email tool connected yet",                   execution_status:"Pending tool" },
-    { type:"LinkedIn approval logged",        count:2,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — prepared for manual export to Dripify",         execution_status:"Manual export" },
-    { type:"Account owner notification",      count:1,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Logged — no CRM write connected yet",                    execution_status:"Pending tool" },
-    { type:"Retargeting marker",              count:1,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Marker set — no ad platform connected yet",              execution_status:"Pending sync" },
-    { type:"Nurture decision",                count:3,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation",                                     execution_status:"Logged" },
-    { type:"Not a fit",                       count:1,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"No tool activation",                                     execution_status:"Logged" },
-    { type:"Blocked / do-not-contact",        count:1,  unit_cost:"$0",           total_cost:"$0",      cost_driver:"Added to do-not-contact list",                           execution_status:"Logged" },
-  ],
-};
-
-interface LinkedInExportRow {
-  company_name: string;
-  company_domain: string;
-  country: string;
-  industry: string;
-  contact_name: string;
-  export_status: string;
-}
-
-const SAMPLE_LINKEDIN_ROWS: Record<string, LinkedInExportRow[]> = {
-  insurance_claims_us: [
-    { company_name:"Acme Insurance",    company_domain:"acme-insure.com",   country:"US", industry:"Insurance",  contact_name:"Jordan Rivera",  export_status:"Ready for export" },
-    { company_name:"SafeGuard Mutual",  company_domain:"safeguard.com",     country:"US", industry:"Insurance",  contact_name:"",               export_status:"Ready for export" },
-    { company_name:"ClaimsFirst",       company_domain:"claimsfirst.com",   country:"US", industry:"Insurance",  contact_name:"Alex Torrez",    export_status:"Exported for Dripify" },
-  ],
-  healthcare_scheduling_emea: [
-    { company_name:"StadtKlinik Group", company_domain:"stadtklinik.de",    country:"DE", industry:"Healthcare", contact_name:"",               export_status:"Ready for export" },
-    { company_name:"EuroCare Health",   company_domain:"eurocare.eu",       country:"NL", industry:"Healthcare", contact_name:"Sophie Linden",  export_status:"Exported for Dripify" },
-    { company_name:"MedikZentrum",      company_domain:"medikzentrum.de",   country:"DE", industry:"Healthcare", contact_name:"",               export_status:"Imported to Dripify" },
-  ],
-  banking_self_service: [
-    { company_name:"Globex Corp",       company_domain:"globex.com",        country:"US", industry:"Banking",    contact_name:"Morgan Chen",    export_status:"Exported for Dripify" },
-    { company_name:"EuroBank AG",       company_domain:"eurobank.eu",       country:"DE", industry:"Banking",    contact_name:"",               export_status:"Ready for export" },
-    { company_name:"FinanceFirst",      company_domain:"financefirst.com",  country:"GB", industry:"Finance",    contact_name:"Sam Wright",     export_status:"Imported to Dripify" },
-    { company_name:"NordCredit",        company_domain:"nordcredit.se",     country:"SE", industry:"Banking",    contact_name:"",               export_status:"No outcome yet" },
-  ],
-  marketplace_emea: [
-    { company_name:"TechPub EMEA",      company_domain:"techpub.eu",        country:"DE", industry:"Technology", contact_name:"Lena Braun",     export_status:"Ready for export" },
-    { company_name:"MarketLink",        company_domain:"marketlink.io",     country:"FR", industry:"Technology", contact_name:"",               export_status:"Ready for export" },
-  ],
-};
-
 interface MomMetric {
   label: string;
   current: string;
@@ -223,74 +100,6 @@ interface MomMetric {
   pct: string;
   direction: "up" | "down" | "flat";
 }
-
-const SAMPLE_MOM: Record<string, MomMetric[]> = {
-  insurance_claims_us: [
-    { label:"Accounts reviewed",            current:"24",   previous:"17",  change:"+7",    pct:"+41%", direction:"up" },
-    { label:"Ready for sales",              current:"6",    previous:"4",   change:"+2",    pct:"+50%", direction:"up" },
-    { label:"Worth a look",                 current:"8",    previous:"6",   change:"+2",    pct:"+33%", direction:"up" },
-    { label:"Actions logged",               current:"14",   previous:"9",   change:"+5",    pct:"+56%", direction:"up" },
-    { label:"Estimated cost",               current:"~$1.20","previous":"~$0.80", change:"+$0.40",pct:"+50%",direction:"up" },
-    { label:"Estimated cost per ready-for-sales account", current:"~$0.20","previous":"~$0.20",change:"$0",pct:"0%",direction:"flat" },
-    { label:"Blocked / do-not-contact",     current:"3",    previous:"2",   change:"+1",    pct:"+50%", direction:"up" },
-    { label:"LinkedIn approvals logged",    current:"2",    previous:"1",   change:"+1",    pct:"+100%",direction:"up" },
-    { label:"LinkedIn rows exported",       current:"0",    previous:"0",   change:"0",     pct:"0%",   direction:"flat" },
-  ],
-  healthcare_scheduling_emea: [
-    { label:"Accounts reviewed",            current:"18",   previous:"11",  change:"+7",    pct:"+64%", direction:"up" },
-    { label:"Ready for sales",              current:"3",    previous:"2",   change:"+1",    pct:"+50%", direction:"up" },
-    { label:"Worth a look",                 current:"7",    previous:"5",   change:"+2",    pct:"+40%", direction:"up" },
-    { label:"Actions logged",               current:"10",   previous:"6",   change:"+4",    pct:"+67%", direction:"up" },
-    { label:"Estimated cost",               current:"$0.00","previous":"$0.00",change:"$0", pct:"0%",   direction:"flat" },
-    { label:"Estimated cost per ready-for-sales account",current:"$0.00","previous":"$0.00",change:"$0",pct:"0%",direction:"flat" },
-    { label:"Blocked / do-not-contact",     current:"2",    previous:"1",   change:"+1",    pct:"+100%",direction:"up" },
-    { label:"LinkedIn approvals logged",    current:"3",    previous:"2",   change:"+1",    pct:"+50%", direction:"up" },
-    { label:"LinkedIn rows exported",       current:"1",    previous:"0",   change:"+1",    pct:"new",  direction:"up" },
-  ],
-  banking_self_service: [
-    { label:"Accounts reviewed",            current:"31",   previous:"22",  change:"+9",    pct:"+41%", direction:"up" },
-    { label:"Ready for sales",              current:"9",    previous:"6",   change:"+3",    pct:"+50%", direction:"up" },
-    { label:"Worth a look",                 current:"11",   previous:"8",   change:"+3",    pct:"+38%", direction:"up" },
-    { label:"Actions logged",               current:"20",   previous:"14",  change:"+6",    pct:"+43%", direction:"up" },
-    { label:"Estimated cost",               current:"~$2.40","previous":"~$1.80",change:"+$0.60",pct:"+33%",direction:"up" },
-    { label:"Estimated cost per ready-for-sales account",current:"~$0.27","previous":"~$0.30",change:"-$0.03",pct:"-10%",direction:"down" },
-    { label:"Blocked / do-not-contact",     current:"4",    previous:"3",   change:"+1",    pct:"+33%", direction:"up" },
-    { label:"LinkedIn approvals logged",    current:"4",    previous:"3",   change:"+1",    pct:"+33%", direction:"up" },
-    { label:"LinkedIn rows exported",       current:"1",    previous:"0",   change:"+1",    pct:"new",  direction:"up" },
-  ],
-  marketplace_emea: [
-    { label:"Accounts reviewed",            current:"12",   previous:"7",   change:"+5",    pct:"+71%", direction:"up" },
-    { label:"Ready for sales",              current:"2",    previous:"1",   change:"+1",    pct:"+100%",direction:"up" },
-    { label:"Worth a look",                 current:"5",    previous:"3",   change:"+2",    pct:"+67%", direction:"up" },
-    { label:"Actions logged",               current:"7",    previous:"4",   change:"+3",    pct:"+75%", direction:"up" },
-    { label:"Estimated cost",               current:"$0.00","previous":"$0.00",change:"$0", pct:"0%",   direction:"flat" },
-    { label:"Estimated cost per ready-for-sales account",current:"$0.00","previous":"$0.00",change:"$0",pct:"0%",direction:"flat" },
-    { label:"Blocked / do-not-contact",     current:"1",    previous:"0",   change:"+1",    pct:"new",  direction:"up" },
-    { label:"LinkedIn approvals logged",    current:"2",    previous:"1",   change:"+1",    pct:"+100%",direction:"up" },
-    { label:"LinkedIn rows exported",       current:"0",    previous:"0",   change:"0",     pct:"0%",   direction:"flat" },
-  ],
-};
-
-// Sample CSV rows (one per campaign for LinkedIn export)
-const SAMPLE_CSV_ROWS: Record<string, Record<string, string>[]> = {
-  insurance_claims_us: [
-    { campaign_name:"Insurance Claims Automation — US", company_name:"Acme Insurance", company_domain:"acme-insure.com", contact_name:"Jordan Rivera", contact_title:"Director of Customer Experience", linkedin_profile_url:"", country:"US", industry:"Insurance", recommended_solution:"Customer Self-Service & Claims Automation", safe_context:"Acme Insurance appears to be exploring claims automation solutions.", message_1:"Hi [first name], I noticed Acme Insurance has been exploring claims automation — happy to share how we help insurers reduce handling time.", message_2:"Following up briefly — is reducing manual claims handling a priority this quarter?", message_3:"Last note from me for now — would a short call to walk through the workflow make sense?", status:"Ready for export" },
-    { campaign_name:"Insurance Claims Automation — US", company_name:"SafeGuard Mutual", company_domain:"safeguard.com", contact_name:"", contact_title:"", linkedin_profile_url:"", country:"US", industry:"Insurance", recommended_solution:"Claims Automation", safe_context:"The company appears to be exploring claims automation.", message_1:"Hi [first name], we help insurance teams automate routine claims steps — happy to share a quick example.", message_2:"Following up — is automating your claims process on your roadmap?", message_3:"I'll leave it here for now, but happy to reconnect when the timing works.", status:"Ready for export" },
-    { campaign_name:"Insurance Claims Automation — US", company_name:"ClaimsFirst", company_domain:"claimsfirst.com", contact_name:"Alex Torrez", contact_title:"VP Operations", linkedin_profile_url:"", country:"US", industry:"Insurance", recommended_solution:"Customer Self-Service & Claims Automation", safe_context:"ClaimsFirst appears to be exploring self-service automation.", message_1:"Hi Alex, I noticed ClaimsFirst has been exploring self-service automation — happy to share how we've helped similar teams.", message_2:"Following up briefly — is this a priority for your ops team this half?", message_3:"I'll leave it here for now — happy to reconnect when the time is right.", status:"Exported for Dripify" },
-  ],
-  healthcare_scheduling_emea: [
-    { campaign_name:"Healthcare Patient Scheduling — EMEA", company_name:"StadtKlinik Group", company_domain:"stadtklinik.de", contact_name:"", contact_title:"", linkedin_profile_url:"", country:"DE", industry:"Healthcare", recommended_solution:"Patient Scheduling & Intake Automation", safe_context:"The company appears to be exploring patient scheduling automation.", message_1:"Hallo, we help healthcare groups automate patient scheduling to reduce front-desk load — happy to share a quick overview.", message_2:"Following up briefly — is reducing scheduling overhead on your radar this quarter?", message_3:"I'll leave it here for now — happy to reconnect when the timing works.", status:"Ready for export" },
-    { campaign_name:"Healthcare Patient Scheduling — EMEA", company_name:"EuroCare Health", company_domain:"eurocare.eu", contact_name:"Sophie Linden", contact_title:"Head of Operations", linkedin_profile_url:"", country:"NL", industry:"Healthcare", recommended_solution:"Patient Scheduling & Intake Automation", safe_context:"EuroCare Health appears to be exploring intake automation.", message_1:"Hi Sophie, I noticed EuroCare Health has been exploring scheduling automation — happy to share how we help similar teams.", message_2:"Following up briefly — is automating patient intake on your roadmap?", message_3:"I'll leave it here for now — happy to reconnect when the timing is right.", status:"Exported for Dripify" },
-  ],
-  banking_self_service: [
-    { campaign_name:"Banking Customer Self-Service — Global", company_name:"Globex Corp", company_domain:"globex.com", contact_name:"Morgan Chen", contact_title:"Head of Digital", linkedin_profile_url:"", country:"US", industry:"Banking", recommended_solution:"Customer Self-Service & Claims Automation", safe_context:"Globex Corp appears to be exploring self-service automation.", message_1:"Hi Morgan, I noticed Globex has been exploring self-service automation — happy to share how we help banks reduce call center volume.", message_2:"Following up briefly — is this a priority for your team this quarter?", message_3:"I'll leave it here for now — happy to reconnect when the timing works.", status:"Exported for Dripify" },
-    { campaign_name:"Banking Customer Self-Service — Global", company_name:"EuroBank AG", company_domain:"eurobank.eu", contact_name:"", contact_title:"", linkedin_profile_url:"", country:"DE", industry:"Banking", recommended_solution:"Banking Self-Service Automation", safe_context:"The company appears to be exploring customer self-service solutions.", message_1:"Hallo, we help banking teams automate routine customer queries — happy to share a quick overview.", message_2:"Following up briefly — is this a priority for your digital team?", message_3:"I'll leave it here for now — happy to reconnect when the timing is right.", status:"Ready for export" },
-  ],
-  marketplace_emea: [
-    { campaign_name:"Marketplace Publisher Recruitment — EMEA", company_name:"TechPub EMEA", company_domain:"techpub.eu", contact_name:"Lena Braun", contact_title:"Director of Partnerships", linkedin_profile_url:"", country:"DE", industry:"Technology", recommended_solution:"Marketplace Publisher Recruitment Automation", safe_context:"TechPub EMEA appears to be exploring marketplace automation.", message_1:"Hi Lena, I noticed TechPub has been exploring marketplace automation — happy to share how we help publishers recruit at scale.", message_2:"Following up briefly — is publisher recruitment automation on your roadmap?", message_3:"I'll leave it here for now — happy to reconnect when the timing works.", status:"Ready for export" },
-    { campaign_name:"Marketplace Publisher Recruitment — EMEA", company_name:"MarketLink", company_domain:"marketlink.io", contact_name:"", contact_title:"", linkedin_profile_url:"", country:"FR", industry:"Technology", recommended_solution:"Marketplace Publisher Recruitment Automation", safe_context:"The company appears to be exploring publisher recruitment.", message_1:"Bonjour, we help marketplace teams automate publisher outreach — happy to share a quick overview.", message_2:"Following up briefly — is scaling publisher recruitment a priority this quarter?", message_3:"I'll leave it here for now — happy to reconnect when the timing is right.", status:"Ready for export" },
-  ],
-};
 
 // ─── CSV download helper (generic — column set is passed in by each caller) ──────
 const CSV_COLUMNS = [
@@ -348,579 +157,6 @@ function pdfFilenameSlug(value: string): string {
     .slice(0, 70);
 }
 
-// ─── MoM insight generator (sample mode only — see live MoM section below) ───────
-interface MomInsights {
-  bullets: string[];
-  whatNext: string[];
-}
-
-function buildMomInsights(metrics: MomMetric[]): MomInsights {
-  const get = (label: string) => metrics.find((m) => m.label === label);
-  const bullets: string[] = [];
-  const whatNext: string[] = [];
-
-  const accounts = get("Accounts reviewed");
-  const ready    = get("Ready for sales");
-  const cost     = get("Estimated cost");
-  const costPer  = get("Estimated cost per ready-for-sales account");
-  const blocked  = get("Blocked / do-not-contact");
-  const liLogged = get("LinkedIn approvals logged");
-  const liExp    = get("LinkedIn rows exported");
-
-  if (accounts) {
-    if (accounts.direction === "up")
-      bullets.push(`More accounts were reviewed this month — ${accounts.current}, up from ${accounts.previous}.`);
-    else if (accounts.direction === "down")
-      bullets.push(`Fewer accounts were reviewed this month — ${accounts.current}, down from ${accounts.previous}.`);
-    else
-      bullets.push(`Account review volume stayed flat at ${accounts.current}.`);
-  }
-
-  if (ready) {
-    if (ready.direction === "up")
-      bullets.push(`Ready-for-sales accounts increased to ${ready.current}, up from ${ready.previous} last month.`);
-    else if (ready.direction === "down")
-      bullets.push(`Ready-for-sales accounts decreased to ${ready.current}, down from ${ready.previous}.`);
-    else
-      bullets.push(`Ready-for-sales count held steady at ${ready.current}.`);
-  }
-
-  if (cost) {
-    if (cost.direction === "up")
-      bullets.push(`Estimated cost increased to ${cost.current} (${cost.pct}), in line with higher activity.`);
-    else if (cost.direction === "down")
-      bullets.push(`Estimated cost decreased to ${cost.current} (${cost.pct}).`);
-    else
-      bullets.push(`Estimated cost stayed flat.`);
-  }
-
-  if (liLogged && !(liLogged.direction === "flat" && liLogged.current === "0")) {
-    if (liLogged.direction === "up")
-      bullets.push(`LinkedIn approval activity increased — ${liLogged.current} logged this month, up from ${liLogged.previous}.`);
-    else if (liLogged.direction === "down")
-      bullets.push(`LinkedIn approvals decreased to ${liLogged.current}.`);
-  }
-
-  if (blocked) {
-    if (blocked.direction === "up")
-      bullets.push(`Blocked accounts also increased — worth reviewing data quality and suppression rules.`);
-    else if (blocked.direction === "down")
-      bullets.push(`Blocked account count decreased — fewer accounts are being filtered out.`);
-  }
-
-  if (ready) {
-    const n = parseInt(ready.current, 10);
-    if (!isNaN(n) && n > 0)
-      whatNext.push(`${ready.current} account${n !== 1 ? "s are" : " is"} ready for sales — review any pending approvals in the queue.`);
-  }
-  if (liLogged) {
-    const n = parseInt(liLogged.current, 10);
-    if (!isNaN(n) && n > 0)
-      whatNext.push(`${liLogged.current} LinkedIn approval${n !== 1 ? "s are" : " is"} logged — download the CSV to prepare for manual import into Dripify.`);
-  }
-  if (blocked?.direction === "up")
-    whatNext.push(`Blocked count increased — check the do-not-contact list and suppression rules for this campaign.`);
-  if (costPer?.direction === "flat")
-    whatNext.push(`Cost efficiency held steady — cost per ready-for-sales account did not change.`);
-  if (liExp && parseInt(liExp.current, 10) === 0 && liLogged && parseInt(liLogged.current, 10) > 0)
-    whatNext.push(`No rows have been exported yet for this month — the CSV is ready to download.`);
-
-  return { bullets, whatNext };
-}
-
-// ─── Sample PDF (unchanged — the existing working export) ───────────────────────
-
-interface CampaignPdfMeta {
-  status?: string;
-  period?: string;
-  region?: string;
-  industry?: string;
-}
-
-interface CampaignPdfInput {
-  campaignName: string;
-  mode: "sample";
-  campaignMeta?: CampaignPdfMeta;
-  stats: CampaignStats;
-  costActions: CostAction[];
-  linkedinRows: LinkedInExportRow[];
-  momMetrics: MomMetric[] | null;
-}
-
-async function downloadCampaignPdf(input: CampaignPdfInput): Promise<void> {
-  const [{ jsPDF }, { autoTable }] = await Promise.all([
-    import("jspdf"),
-    import("jspdf-autotable"),
-  ]);
-
-  const doc = new jsPDF({
-    orientation: "landscape",
-    unit: "mm",
-    format: "a4",
-  });
-
-  const tableDoc = doc as typeof doc & {
-    lastAutoTable?: {
-      finalY: number;
-    };
-  };
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 14;
-  const contentWidth = pageWidth - margin * 2;
-  const footerReserve = 18;
-
-  const generatedAt = new Date();
-  const campaignName = pdfText(input.campaignName) || "Campaign";
-
-  doc.setProperties({
-    title: `${campaignName} - Campaign Signal Report`,
-    subject: "DRUID GTM campaign signal report",
-    author: "DRUID GTM Mission Control",
-    creator: "DRUID GTM Mission Control",
-  });
-
-  let y = 0;
-
-  const ensureSpace = (requiredHeight = 18) => {
-    if (y + requiredHeight > pageHeight - footerReserve) {
-      doc.addPage();
-      y = 16;
-    }
-  };
-
-  const drawWrapped = (
-    value: string,
-    fontSize = 9,
-    color: [number, number, number] = [56, 61, 71],
-  ) => {
-    const lines = doc.splitTextToSize(
-      pdfText(value),
-      contentWidth,
-    ) as string[];
-
-    ensureSpace(lines.length * 4.2 + 4);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(fontSize);
-    doc.setTextColor(...color);
-    doc.text(lines, margin, y);
-
-    y += lines.length * 4.2 + 3;
-  };
-
-  const drawSectionTitle = (title: string) => {
-    ensureSpace(13);
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(91, 74, 163);
-    doc.text(pdfText(title).toUpperCase(), margin, y);
-
-    y += 2;
-
-    doc.setDrawColor(91, 74, 163);
-    doc.setLineWidth(0.35);
-    doc.line(margin, y, pageWidth - margin, y);
-
-    y += 6;
-  };
-
-  const updateYAfterTable = () => {
-    y = (tableDoc.lastAutoTable?.finalY ?? y) + 7;
-  };
-
-  // Header
-  doc.setFillColor(91, 74, 163);
-  doc.rect(0, 0, pageWidth, 27, "F");
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
-  doc.setTextColor(255, 255, 255);
-  doc.text("DRUID GTM Mission Control", margin, 11);
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text("Campaign signal report", margin, 19);
-
-  y = 37;
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.setTextColor(31, 35, 43);
-
-  const campaignTitleLines = doc.splitTextToSize(
-    campaignName,
-    contentWidth,
-  ) as string[];
-
-  doc.text(campaignTitleLines, margin, y);
-  y += campaignTitleLines.length * 7 + 1;
-
-  const metadata = [
-    "Mode: Sample data",
-    input.campaignMeta?.status
-      ? `Status: ${input.campaignMeta.status}`
-      : "",
-    input.campaignMeta?.period
-      ? `Period: ${input.campaignMeta.period}`
-      : "",
-    input.campaignMeta?.region
-      ? `Region: ${input.campaignMeta.region}`
-      : "",
-    input.campaignMeta?.industry
-      ? `Industry: ${input.campaignMeta.industry}`
-      : "",
-    `Generated: ${generatedAt.toLocaleString("en-GB")}`,
-  ].filter(Boolean);
-
-  drawWrapped(metadata.join(" | "), 8.5, [90, 95, 105]);
-
-  ensureSpace(14);
-
-  doc.setFillColor(255, 247, 224);
-  doc.setDrawColor(224, 174, 65);
-  doc.roundedRect(
-    margin,
-    y,
-    contentWidth,
-    10,
-    2,
-    2,
-    "FD",
-  );
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.5);
-  doc.setTextColor(130, 84, 0);
-  doc.text(
-    "SAMPLE DATA - This report is for workflow demonstration and must not be used as external performance reporting.",
-    margin + 4,
-    y + 6.4,
-  );
-
-  y += 16;
-
-  // Campaign summary
-  drawSectionTitle("Campaign summary");
-
-  autoTable(doc, {
-    startY: y,
-    head: [["Metric", "Value"]],
-    body: [
-      ["Accounts reviewed", pdfText(input.stats.accounts_reviewed)],
-      ["Ready for sales", pdfText(input.stats.ready_for_sales)],
-      ["Worth a look", pdfText(input.stats.worth_a_look)],
-      ["Nurture decisions", pdfText(input.stats.nurture)],
-      ["Blocked", pdfText(input.stats.blocked)],
-      ["Actions logged", pdfText(input.stats.actions_logged)],
-      ["Estimated cost", pdfText(input.stats.estimated_cost)],
-    ],
-    theme: "grid",
-    margin: {
-      left: margin,
-      right: margin,
-      bottom: footerReserve,
-    },
-    styles: {
-      font: "helvetica",
-      fontSize: 8.5,
-      cellPadding: 2.4,
-      overflow: "linebreak",
-      textColor: "#20242C",
-      lineColor: "#D9DCE3",
-      lineWidth: 0.15,
-    },
-    headStyles: {
-      fillColor: "#5B4AA3",
-      textColor: "#FFFFFF",
-      fontStyle: "bold",
-    },
-    columnStyles: {
-      0: { cellWidth: 120 },
-      1: { cellWidth: 55, halign: "right", fontStyle: "bold" },
-    },
-    showHead: "everyPage",
-  });
-
-  updateYAfterTable();
-
-  // Cost breakdown
-  drawSectionTitle("Cost per action");
-
-  const costRows = input.costActions.length
-    ? input.costActions.map((action) => [
-        pdfText(action.type),
-        pdfText(action.count),
-        pdfText(action.unit_cost),
-        pdfText(action.total_cost),
-        pdfText(action.cost_driver),
-        pdfText(action.execution_status),
-      ])
-    : [[
-        "No actions logged",
-        "0",
-        "$0",
-        "$0",
-        "No action data is available for this campaign.",
-        "Not available",
-      ]];
-
-  autoTable(doc, {
-    startY: y,
-    head: [[
-      "Action type",
-      "Count",
-      "Unit cost",
-      "Total",
-      "Cost driver",
-      "Status",
-    ]],
-    body: costRows,
-    theme: "grid",
-    margin: {
-      left: margin,
-      right: margin,
-      bottom: footerReserve,
-    },
-    styles: {
-      font: "helvetica",
-      fontSize: 7.5,
-      cellPadding: 2.1,
-      overflow: "linebreak",
-      valign: "top",
-      textColor: "#20242C",
-      lineColor: "#D9DCE3",
-      lineWidth: 0.15,
-    },
-    headStyles: {
-      fillColor: "#5B4AA3",
-      textColor: "#FFFFFF",
-      fontStyle: "bold",
-    },
-    columnStyles: {
-      0: { cellWidth: 45 },
-      1: { cellWidth: 17, halign: "right" },
-      2: { cellWidth: 28, halign: "right" },
-      3: { cellWidth: 25, halign: "right" },
-      4: { cellWidth: 105 },
-      5: { cellWidth: 35 },
-    },
-    showHead: "everyPage",
-    rowPageBreak: "avoid",
-  });
-
-  updateYAfterTable();
-
-  drawWrapped(
-    "Costs shown in this report are estimates until production vendor cost feeds are connected.",
-    8,
-    [100, 104, 113],
-  );
-
-  // LinkedIn workflow
-  drawSectionTitle("Manual LinkedIn export workflow");
-
-  const linkedinRows = input.linkedinRows.length
-    ? input.linkedinRows.map((row) => [
-        pdfText(
-          row.company_domain
-            ? `${row.company_name} (${row.company_domain})`
-            : row.company_name,
-        ),
-        pdfText(row.country),
-        pdfText(row.industry),
-        pdfText(row.contact_name || "-"),
-        pdfText(row.export_status),
-      ])
-    : [[
-        "No LinkedIn rows",
-        "",
-        "",
-        "",
-        "Nothing ready for export",
-      ]];
-
-  autoTable(doc, {
-    startY: y,
-    head: [[
-      "Company",
-      "Country",
-      "Industry",
-      "Contact",
-      "Export status",
-    ]],
-    body: linkedinRows,
-    theme: "grid",
-    margin: {
-      left: margin,
-      right: margin,
-      bottom: footerReserve,
-    },
-    styles: {
-      font: "helvetica",
-      fontSize: 7.8,
-      cellPadding: 2.2,
-      overflow: "linebreak",
-      textColor: "#20242C",
-      lineColor: "#D9DCE3",
-      lineWidth: 0.15,
-    },
-    headStyles: {
-      fillColor: "#5B4AA3",
-      textColor: "#FFFFFF",
-      fontStyle: "bold",
-    },
-    columnStyles: {
-      0: { cellWidth: 90 },
-      1: { cellWidth: 25 },
-      2: { cellWidth: 45 },
-      3: { cellWidth: 60 },
-      4: { cellWidth: 48 },
-    },
-    showHead: "everyPage",
-    rowPageBreak: "avoid",
-  });
-
-  updateYAfterTable();
-
-  drawWrapped(
-    "LinkedIn activity is prepared for manual CSV export and import into Dripify. No LinkedIn message is sent automatically from this application.",
-    8,
-    [100, 104, 113],
-  );
-
-  // Month-over-month
-  drawSectionTitle("Month-over-month");
-
-  if (input.momMetrics?.length) {
-    autoTable(doc, {
-      startY: y,
-      head: [[
-        "Metric",
-        "This month",
-        "Last month",
-        "Change",
-      ]],
-      body: input.momMetrics.map((metric) => [
-        pdfText(metric.label),
-        pdfText(metric.current),
-        pdfText(metric.previous),
-        pdfText(`${metric.change} ${metric.pct}`),
-      ]),
-      theme: "grid",
-      margin: {
-        left: margin,
-        right: margin,
-        bottom: footerReserve,
-      },
-      styles: {
-        font: "helvetica",
-        fontSize: 8,
-        cellPadding: 2.2,
-        overflow: "linebreak",
-        textColor: "#20242C",
-        lineColor: "#D9DCE3",
-        lineWidth: 0.15,
-      },
-      headStyles: {
-        fillColor: "#5B4AA3",
-        textColor: "#FFFFFF",
-        fontStyle: "bold",
-      },
-      columnStyles: {
-        0: { cellWidth: 130 },
-        1: { cellWidth: 42, halign: "right" },
-        2: { cellWidth: 42, halign: "right" },
-        3: { cellWidth: 48, halign: "right" },
-      },
-      showHead: "everyPage",
-      rowPageBreak: "avoid",
-    });
-
-    updateYAfterTable();
-
-    const insights = buildMomInsights(input.momMetrics);
-
-    if (insights.bullets.length) {
-      drawSectionTitle("Management interpretation");
-
-      for (const insight of insights.bullets) {
-        drawWrapped(`- ${insight}`, 8.5);
-      }
-    }
-
-    if (insights.whatNext.length) {
-      drawSectionTitle("What to do next");
-
-      for (const nextStep of insights.whatNext) {
-        drawWrapped(`- ${nextStep}`, 8.5);
-      }
-    }
-  } else {
-    drawWrapped(
-      "Not enough dated campaign history is available yet. Month-over-month reporting requires activity across two calendar months.",
-      8.5,
-    );
-  }
-
-  // Assumptions and operational status
-  drawSectionTitle("Operational assumptions");
-
-  const assumptions = [
-    "Costs are estimates until production vendor cost feeds are connected.",
-    "Email approvals are logged only; no email-sending tool is connected.",
-    "LinkedIn approvals are prepared for manual import into Dripify.",
-    "Account owner notifications are logged until CRM writeback is connected.",
-    "Retargeting markers do not spend advertising budget until an ad-platform sync is connected.",
-    "Nurture, not-a-fit, and blocked decisions have no direct tool cost.",
-  ];
-
-  for (const assumption of assumptions) {
-    drawWrapped(`- ${assumption}`, 8.2);
-  }
-
-  // Footer and pagination
-  const pageCount = doc.getNumberOfPages();
-
-  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-    doc.setPage(pageNumber);
-
-    doc.setDrawColor(214, 217, 225);
-    doc.setLineWidth(0.2);
-    doc.line(
-      margin,
-      pageHeight - 11,
-      pageWidth - margin,
-      pageHeight - 11,
-    );
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor(112, 116, 126);
-
-    doc.text(
-      pdfText(`DRUID GTM Mission Control - ${campaignName}`),
-      margin,
-      pageHeight - 6,
-    );
-
-    doc.text(
-      `Page ${pageNumber} of ${pageCount}`,
-      pageWidth - margin,
-      pageHeight - 6,
-      { align: "right" },
-    );
-  }
-
-  const filenameCampaign = pdfFilenameSlug(campaignName) || "campaign";
-  const filenameDate = generatedAt.toISOString().slice(0, 10);
-
-  doc.save(
-    `druid-sample-campaign-report-${filenameCampaign}-${filenameDate}.pdf`,
-  );
-}
 
 // ─── Canonical campaign-report contract (GET /api/sheets/campaign-report) ───────
 // Types mirror artifacts/api-server/src/routes/sheets.ts exactly. The cockpit
@@ -1296,9 +532,7 @@ function buildOperationalCsvRows(report: CampaignReportResponse): Record<string,
   return [...attention, ...recommendations, ...decisions, ...actions, ...outcomes];
 }
 
-// ─── Live PDF (extends the same jsPDF/autoTable approach as the sample PDF) ──────
-// Kept as a separate function (rather than branching inside downloadCampaignPdf)
-// so the existing, already-validated sample PDF path is never touched by live-mode changes.
+// ─── Campaign PDF export (jsPDF/autoTable) ───────────────────────────────────────
 
 interface LiveCampaignPdfInput {
   campaignName: string;
@@ -1746,14 +980,8 @@ interface ActionLogResponse {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ReportsPage() {
-  const { viewMode, setViewMode } = useSampleMode();
-  const isSample = viewMode === "sample";
-
-  // Sample-mode state (unchanged)
-  const [selectedId, setSelectedId] = useState<string>(SAMPLE_CAMPAIGNS[0].id);
   const [pdfExporting, setPdfExporting] = useState(false);
 
-  // Live-mode state
   const [selectedCampaignKey, setSelectedCampaignKey] = useState<string | null>(null);
   const [periodMode, setPeriodMode] = useState<PeriodMode>("lifetime");
   const [customStart, setCustomStart] = useState("");
@@ -1780,7 +1008,6 @@ export default function ReportsPage() {
         (r) => r.json(),
       ) as Promise<ActionLogResponse>,
     staleTime: 30_000,
-    enabled: !isSample,
   });
 
   // Canonical campaign-report query — single source of truth for live reporting.
@@ -1798,7 +1025,6 @@ export default function ReportsPage() {
         start: resolvedRequestPeriod.start,
         end: resolvedRequestPeriod.end,
       }),
-    enabled: !isSample,
     staleTime: 30_000,
     retry: 1,
   });
@@ -1808,13 +1034,12 @@ export default function ReportsPage() {
   // campaign_key and never depends on the endpoint's default-campaign logic again.
   useEffect(() => {
     if (
-      !isSample &&
       selectedCampaignKey === null &&
       campaignReportQ.data?.selected_campaign?.campaign_key
     ) {
       setSelectedCampaignKey(campaignReportQ.data.selected_campaign.campaign_key);
     }
-  }, [isSample, selectedCampaignKey, campaignReportQ.data]);
+  }, [selectedCampaignKey, campaignReportQ.data]);
 
   // Month-over-month: two explicit requests (current month, previous month),
   // both pinned to the operator's selected campaign_key.
@@ -1826,7 +1051,7 @@ export default function ReportsPage() {
         start: thisMonthRange.start,
         end: thisMonthRange.end,
       }),
-    enabled: !isSample && Boolean(selectedCampaignKey),
+    enabled: Boolean(selectedCampaignKey),
     staleTime: 30_000,
     retry: 1,
   });
@@ -1839,23 +1064,15 @@ export default function ReportsPage() {
         start: previousMonthRange.start,
         end: previousMonthRange.end,
       }),
-    enabled: !isSample && Boolean(selectedCampaignKey),
+    enabled: Boolean(selectedCampaignKey),
     staleTime: 30_000,
     retry: 1,
   });
 
   const liveMomMetrics = useMemo(() => {
-    if (isSample || !momCurrentQ.data || !momPreviousQ.data) return null;
+    if (!momCurrentQ.data || !momPreviousQ.data) return null;
     return buildLiveMomMetrics(momCurrentQ.data.summary, momPreviousQ.data.summary);
-  }, [isSample, momCurrentQ.data, momPreviousQ.data]);
-
-  // Current sample campaign (unchanged)
-  const sampleCampaign = SAMPLE_CAMPAIGNS.find((c) => c.id === selectedId) ?? SAMPLE_CAMPAIGNS[0];
-  const sampleStats    = SAMPLE_STATS[selectedId]        ?? SAMPLE_STATS[SAMPLE_CAMPAIGNS[0].id];
-  const sampleCosts    = SAMPLE_COST_ACTIONS[selectedId] ?? [];
-  const sampleLinkedIn = SAMPLE_LINKEDIN_ROWS[selectedId]?? [];
-  const sampleMom      = SAMPLE_MOM[selectedId]          ?? [];
-  const sampleCsvRows  = SAMPLE_CSV_ROWS[selectedId]     ?? [];
+  }, [momCurrentQ.data, momPreviousQ.data]);
 
   // CSV for live mode (linkedin-approved rows) — unchanged source (action log),
   // unchanged shape, unchanged behavior. Accepts both the older
@@ -1881,36 +1098,9 @@ export default function ReportsPage() {
   const hasLiveLinkedIn = liveCsvRows.length > 0;
 
   const operationalCsvRows = useMemo(() => {
-    if (isSample || !campaignReportQ.data) return [];
+    if (!campaignReportQ.data) return [];
     return buildOperationalCsvRows(campaignReportQ.data);
-  }, [isSample, campaignReportQ.data]);
-
-  async function handleSamplePdfExport() {
-    setPdfExporting(true);
-    try {
-      await downloadCampaignPdf({
-        campaignName: sampleCampaign.name,
-        mode: "sample",
-        campaignMeta: {
-          status: sampleCampaign.status,
-          period: sampleCampaign.dateRange,
-          region: sampleCampaign.region,
-          industry: sampleCampaign.industry,
-        },
-        stats: sampleStats,
-        costActions: sampleCosts,
-        linkedinRows: sampleLinkedIn,
-        momMetrics: sampleMom,
-      });
-    } catch (error) {
-      console.error("Sample campaign PDF export failed", error);
-      window.alert(
-        "The campaign report could not be generated. Check the browser console for details.",
-      );
-    } finally {
-      setPdfExporting(false);
-    }
-  }
+  }, [campaignReportQ.data]);
 
   async function handleLivePdfExport() {
     const data = campaignReportQ.data;
@@ -1956,305 +1146,7 @@ export default function ReportsPage() {
     downloadCsv(rows, name, OPERATIONAL_CSV_COLUMNS);
   }
 
-  // ── Sample mode: unchanged experience ──────────────────────────────────────
-  if (isSample) {
-    return (
-      <PageLayout width="wide" className="space-y-8">
-        {/* Header */}
-        <PageHeader
-          title="DRUID Signals reports"
-          description={
-            <>
-              <p>Compare campaign activity, estimated action cost, and manual export progress.</p>
-              {ANALYTICS_URL && (
-                <p className="text-xs text-muted-foreground/70 mt-2 max-w-lg leading-relaxed">
-                  Use Marketplace Analytics for traffic and campaign source performance. Use this page for DRUID Signals review, action cost estimates, manual exports, and month-over-month signal reporting.
-                </p>
-              )}
-            </>
-          }
-          actions={
-            <div className="flex items-start gap-3 flex-wrap">
-            {ANALYTICS_URL && (
-              <a
-                href={ANALYTICS_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <ExternalLink className="w-3 h-3" />
-                Open Marketplace Analytics
-              </a>
-            )}
-            <div className="flex flex-col items-end gap-1">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={pdfExporting}
-                className="gap-2 text-xs"
-                onClick={() => void handleSamplePdfExport()}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                {pdfExporting ? "Generating PDF..." : "Export campaign report"}
-              </Button>
-              <p className="text-[10px] text-muted-foreground/60 text-right max-w-[220px] leading-snug">
-                Exports the selected sample campaign as a PDF.
-              </p>
-            </div>
-            <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
-            </div>
-          }
-        />
-
-        <InlineNotice tone="info">
-          Showing sample data — this illustrates the full reporting workflow. Switch to Live data when campaign activity has been recorded.
-        </InlineNotice>
-
-        {/* Campaign selector */}
-        <Section title="Campaign">
-          <div className="flex flex-wrap gap-2">
-            {SAMPLE_CAMPAIGNS.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedId(c.id)}
-                className={cn(
-                  "px-4 py-2 rounded-lg border text-sm font-medium transition-all",
-                  selectedId === c.id
-                    ? "bg-primary/20 text-primary border-primary/50"
-                    : "bg-card text-muted-foreground border-border hover:text-foreground hover:border-border/80",
-                )}
-              >
-                {c.name}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3">
-            <MetaPair label="Status"  value={sampleCampaign.status}    />
-            <MetaPair label="Period"  value={sampleCampaign.dateRange} />
-            <MetaPair label="Region"  value={sampleCampaign.region}    />
-            <MetaPair label="Industry"value={sampleCampaign.industry}  />
-            <SampleBadge />
-          </div>
-        </Section>
-
-        {/* Campaign summary */}
-        <Section title="Campaign summary">
-          <div className="mb-3"><SampleBadge /></div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <MetricCard label="Accounts reviewed"   value={String(sampleStats.accounts_reviewed)} />
-            <MetricCard label="Ready for sales"     value={String(sampleStats.ready_for_sales)}   accent />
-            <MetricCard label="Worth a look"        value={String(sampleStats.worth_a_look)}       />
-            <MetricCard label="Nurture decisions"   value={String(sampleStats.nurture)}            />
-            <MetricCard label="Blocked"             value={String(sampleStats.blocked)}            />
-            <MetricCard label="Actions logged"      value={String(sampleStats.actions_logged)}     />
-            <MetricCard label="Estimated cost"      value={sampleStats.estimated_cost}             />
-          </div>
-        </Section>
-
-        {/* Cost per action */}
-        <Section title="Cost per action">
-          <div className="mb-3"><SampleBadge /></div>
-          <div className="rounded-xl border border-border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/30 hover:bg-muted/30">
-                  <TableHead className="text-xs text-muted-foreground font-medium">Action type</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium text-right">Count</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium text-right">Unit cost</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium text-right">Total</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Cost driver</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sampleCosts.map((a, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
-                    <TableCell className="text-sm font-medium text-foreground">{a.type}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums text-foreground">{a.count}</TableCell>
-                    <TableCell className="text-sm text-right text-muted-foreground">{a.unit_cost}</TableCell>
-                    <TableCell className="text-sm text-right font-medium text-foreground">{a.total_cost}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground max-w-[200px]">{a.cost_driver}</TableCell>
-                    <TableCell>
-                      <ExecStatusBadge status={a.execution_status} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-2">
-            Costs are estimates until production cost feeds are connected. AI call minutes are an approximation.
-          </p>
-        </Section>
-
-        {/* Manual export workflow */}
-        <Section title="Manual export workflow — LinkedIn via Dripify">
-          <div className="rounded-lg bg-muted/20 border border-border px-4 py-4 text-sm text-foreground space-y-2 mb-4">
-            <p className="font-medium">How LinkedIn outreach works in the current setup</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              LinkedIn execution happens outside this app through a manual import/export workflow.
-              When you approve a LinkedIn message here, the approval is logged and the row is prepared for export.
-              A team member then downloads the CSV and imports it into Dripify manually.
-              Outcomes can be imported back once they are available.
-            </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-              {["Ready for export","Exported for Dripify","Imported to Dripify","Outcome received"].map((s) => (
-                <div key={s} className="rounded-lg border border-border bg-card px-3 py-2 text-center">
-                  <p className="text-[10px] text-muted-foreground leading-snug">{s}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mb-3"><SampleBadge /></div>
-
-          <div className="rounded-xl border border-border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/30 hover:bg-muted/30">
-                  <TableHead className="text-xs text-muted-foreground font-medium">Company</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Country</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Industry</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Contact</TableHead>
-                  <TableHead className="text-xs text-muted-foreground font-medium">Export status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sampleLinkedIn.map((row, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
-                    <TableCell className="text-sm font-medium text-foreground">
-                      {row.company_name}
-                      {row.company_domain && (
-                        <span className="text-xs text-muted-foreground ml-1.5">{row.company_domain}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{row.country}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{row.industry}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{row.contact_name || "—"}</TableCell>
-                    <TableCell>
-                      <ExportStatusBadge status={row.export_status} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="mt-4 flex items-center gap-3">
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-2 text-xs"
-              disabled={sampleCsvRows.length === 0}
-              onClick={() => {
-                downloadCsv(sampleCsvRows, `druid-linkedin-sample-${selectedId}.csv`, CSV_COLUMNS);
-              }}
-            >
-              <Download className="w-3.5 h-3.5" />
-              Download LinkedIn CSV
-            </Button>
-            <p className="text-[11px] text-muted-foreground">
-              Downloads sample rows for reference — not real contact data.
-            </p>
-          </div>
-        </Section>
-
-        {/* Month-over-month */}
-        <Section title="Month-over-month">
-          <div className="mb-3"><SampleBadge /></div>
-          {(() => {
-            const insights = buildMomInsights(sampleMom);
-            return (
-              <div className="space-y-4">
-                {insights.bullets.length > 0 && (
-                  <div className="rounded-lg bg-muted/20 border border-border px-4 py-3 space-y-1.5">
-                    {insights.bullets.map((b, i) => (
-                      <div key={i} className="flex items-start gap-2 text-xs text-foreground/80 leading-relaxed">
-                        <span className="text-primary mt-0.5 shrink-0">›</span>
-                        <span>{b}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/30 hover:bg-muted/30">
-                        <TableHead className="text-xs text-muted-foreground font-medium">Metric</TableHead>
-                        <TableHead className="text-xs text-muted-foreground font-medium text-right">This month</TableHead>
-                        <TableHead className="text-xs text-muted-foreground font-medium text-right">Last month</TableHead>
-                        <TableHead className="text-xs text-muted-foreground font-medium text-right">Change</TableHead>
-                        <TableHead className="text-xs text-muted-foreground font-medium"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {sampleMom.map((m, i) => (
-                        <TableRow key={i} className="hover:bg-white/[0.02]">
-                          <TableCell className="text-sm text-foreground">{m.label}</TableCell>
-                          <TableCell className="text-sm font-semibold text-right tabular-nums text-foreground">{m.current}</TableCell>
-                          <TableCell className="text-sm text-right tabular-nums text-muted-foreground">{m.previous}</TableCell>
-                          <TableCell className={cn(
-                            "text-sm text-right tabular-nums font-medium",
-                            m.direction === "up"   ? "text-emerald-400" :
-                            m.direction === "down" ? "text-red-400"     : "text-muted-foreground",
-                          )}>
-                            {m.change} <span className="text-[10px] opacity-70">{m.pct}</span>
-                          </TableCell>
-                          <TableCell>
-                            <DirectionIcon direction={m.direction} />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                {insights.whatNext.length > 0 && (
-                  <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3">
-                    <p className="text-xs font-semibold text-primary mb-2">What this means</p>
-                    <div className="space-y-1">
-                      {insights.whatNext.map((line, i) => (
-                        <p key={i} className="text-xs text-foreground/70 leading-relaxed">{line}</p>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-          <p className="text-[11px] text-muted-foreground mt-2">
-            Costs are estimates only. Do not use these figures to report external performance.
-          </p>
-        </Section>
-
-        {/* Cost assumptions */}
-        <Section title="Cost assumptions">
-          <div className="space-y-2 text-xs text-muted-foreground leading-relaxed">
-            {[
-              "Costs shown are estimates until production cost feeds are connected.",
-              "AI calls may consume call minutes and telephony — the figures shown assume an average call duration.",
-              "Email approvals are logged until an email-sending tool is connected. No email has left the system.",
-              "LinkedIn approvals are prepared for manual import into Dripify. LinkedIn does not receive anything automatically — a team member imports the CSV.",
-              "Account owner notifications are logged until CRM writeback is connected. Nothing is written to HubSpot automatically.",
-              "Retargeting markers do not spend ad budget until an ad sync is connected. These are markers for later.",
-              "Nurture, not-a-fit, and blocked decisions have no direct tool cost.",
-              "Actual cost per action requires production action logs plus vendor cost data, which are not connected yet.",
-            ].map((line, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <ChevronRight className="w-3 h-3 text-primary shrink-0 mt-0.5" />
-                <span>{line}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-
-        <DataReadiness isSample />
-      </PageLayout>
-    );
-  }
-
-  // ── Live mode: canonical campaign-report endpoint is the source of truth ──
+  // ── Canonical campaign-report endpoint is the source of truth ──
 
   const headerControls = (
     <div className="flex items-start gap-3 flex-wrap">
@@ -2301,7 +1193,6 @@ export default function ReportsPage() {
             : "Select a campaign before exporting."}
         </p>
       </div>
-      <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
     </div>
   );
 
@@ -2390,11 +1281,6 @@ export default function ReportsPage() {
             Reports are built from campaign activity in the canonical reporting endpoint. Once activity is recorded, campaigns will appear here automatically.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <Button size="sm" variant="outline" className="text-xs" onClick={() => setViewMode("sample")}>
-              View sample report
-            </Button>
-          </EmptyContent>
         </Empty>
         {report.limitations.length > 0 && (
           <div className="rounded-lg border border-border bg-card px-4 py-3">
@@ -2974,15 +1860,6 @@ function MetaPair({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ─── Sample badge ─────────────────────────────────────────────────────────────
-function SampleBadge() {
-  return (
-    <StatusBadge tone="warning">
-      Sample data
-    </StatusBadge>
-  );
-}
-
 // ─── Empty state note (honest, no invented numbers) ──────────────────────────
 function EmptyNote({ text }: { text: string }) {
   return (
@@ -2990,17 +1867,6 @@ function EmptyNote({ text }: { text: string }) {
       <p className="text-sm text-muted-foreground">{text}</p>
     </div>
   );
-}
-
-// ─── Execution status badge (sample cost table) ──────────────────────────────
-function ExecStatusBadge({ status }: { status: string }) {
-  const tone =
-    status === "Active"       ? "success" :
-    status === "Pending tool" ? "warning" :
-    status === "Manual export" || status === "Pending sync" ? "info" :
-    status === "Locked" ? "danger" :
-    "neutral";
-  return <StatusBadge tone={tone}>{status}</StatusBadge>;
 }
 
 // ─── Export status badge ──────────────────────────────────────────────────────
@@ -3029,45 +1895,3 @@ function DirectionIcon({ direction }: { direction: "up" | "down" | "flat" }) {
   return <Minus className="w-3.5 h-3.5 text-muted-foreground" />;
 }
 
-// ─── Data readiness (sample mode only — live mode uses the Attribution section) ─
-function DataReadiness({ isSample }: { isSample: boolean }) {
-  const items = [
-    { label: "Campaign activity source",       status: "Sample data", ok: true },
-    { label: "Action log source",              status: "Sample data", ok: true },
-    { label: "Campaign tracking",              status: "Sample data", ok: true },
-    { label: "LinkedIn export source",         status: "Sample data", ok: true },
-    { label: "Cost data",                      status: "Sample data", ok: true },
-    { label: "Month-over-month comparison",    status: "Sample data", ok: true },
-  ];
-
-  if (!isSample) return null;
-
-  return (
-    <Section title="Data readiness">
-      <div className="rounded-xl border border-border overflow-hidden">
-        <Table>
-          <TableBody>
-            {items.map((item, i) => (
-              <TableRow key={i} className="hover:bg-white/[0.02]">
-                <TableCell className="text-sm text-foreground">{item.label}</TableCell>
-                <TableCell>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "text-[10px]",
-                      item.ok
-                        ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-                        : "text-muted-foreground border-border bg-muted/30",
-                    )}
-                  >
-                    {item.status}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </Section>
-  );
-}
