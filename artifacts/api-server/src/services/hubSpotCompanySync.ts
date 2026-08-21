@@ -24,7 +24,9 @@ import type * as schema from "@workspace/db/schema";
 import type { ProviderObservationV1 } from "@workspace/observation";
 import {
   fetchHubSpotCompanyById,
+  fetchHubSpotOwnerById,
   type HubSpotCompany,
+  type HubSpotOwner,
 } from "../lib/hubSpotClient.js";
 import {
   bootstrapHubSpotCompanyIdentity,
@@ -39,6 +41,7 @@ import {
 type Db = NodePgDatabase<typeof schema>;
 
 export type FetchHubSpotCompanyFn = (companyId: string) => Promise<HubSpotCompany>;
+export type FetchHubSpotOwnerFn = (ownerId: string) => Promise<HubSpotOwner | null>;
 export type BootstrapHubSpotCompanyIdentityFn = (
   args: Parameters<typeof bootstrapHubSpotCompanyIdentity>[0],
 ) => Promise<BootstrapHubSpotCompanyIdentityResult>;
@@ -50,8 +53,14 @@ export interface SyncHubSpotCompanyArgs {
   db: Db;
   companyId: string;
   fetchCompanyFn?: FetchHubSpotCompanyFn;
+  fetchOwnerFn?: FetchHubSpotOwnerFn;
   bootstrapCompanyIdentityFn?: BootstrapHubSpotCompanyIdentityFn;
   recordObservationFn?: RecordObservationFn;
+}
+
+function ownerDisplayNameFrom(owner: HubSpotOwner): string | null {
+  const name = [owner.firstName, owner.lastName].filter((part) => part !== null).join(" ").trim();
+  return name !== "" ? name : owner.email;
 }
 
 // Additive: every existing field (outcome/accountId/source/
@@ -67,6 +76,7 @@ export async function syncHubSpotCompany(
   args: SyncHubSpotCompanyArgs,
 ): Promise<SyncHubSpotCompanyResult> {
   const fetchCompanyFn = args.fetchCompanyFn ?? fetchHubSpotCompanyById;
+  const fetchOwnerFn = args.fetchOwnerFn ?? fetchHubSpotOwnerById;
   const bootstrapCompanyIdentityFn =
     args.bootstrapCompanyIdentityFn ?? bootstrapHubSpotCompanyIdentity;
   const recordObservationFn: RecordObservationFn =
@@ -76,9 +86,27 @@ export async function syncHubSpotCompany(
   const company = await fetchCompanyFn(args.companyId);
   const importedAt = new Date().toISOString();
 
+  // M3.5 real-data defect fix: resolve the owner's human display name
+  // during ingestion, once, rather than on every GET /truth read (see
+  // ../lib/hubSpotClient.ts's own comment on why this lives here). A
+  // failure to resolve it (HubSpot error, unexpected shape) must never
+  // fail the whole company sync — the owner id itself was already read
+  // successfully as part of the company fetch above; this is best-effort
+  // enrichment only, degrading to no display name.
+  let ownerDisplayName: string | null = null;
+  if (company.hubspotOwnerId !== null) {
+    try {
+      const owner = await fetchOwnerFn(company.hubspotOwnerId);
+      ownerDisplayName = owner ? ownerDisplayNameFrom(owner) : null;
+    } catch {
+      ownerDisplayName = null;
+    }
+  }
+
   const observationCandidates = mapHubSpotCompanyToObservations({
     company,
     importedAt,
+    ownerDisplayName,
   });
   const observations: RecordObservationResult[] = [];
   for (const candidate of observationCandidates) {

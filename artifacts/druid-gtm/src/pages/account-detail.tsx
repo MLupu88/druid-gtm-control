@@ -16,6 +16,7 @@ import { ClientRadarResearchPanel } from "@/components/client-radar-research-pan
 import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
 import { AccountFactsPanel } from "@/components/account-facts-panel";
 import { AccountTruthPanel } from "@/components/account-truth-panel";
+import { humanizeAliasType } from "@/lib/account-truth-presentation";
 import { EvaluationRunsList } from "@/components/evaluation-runs-list";
 import { InlineNotice } from "@/components/inline-notice";
 import { PageHeader, PageLayout } from "@/components/page-layout";
@@ -105,7 +106,7 @@ function AccountDetailContent({
   tab: string;
   onTabChange: (tab: string) => void;
 }) {
-  const { account, evaluations } = detail;
+  const { account, evaluations, identityAliasTypes } = detail;
   const identity = accountIdentity(account);
   const latestProduction = findLatestCompletedProductionEvaluation(evaluations);
 
@@ -124,7 +125,7 @@ function AccountDetailContent({
         </div>
 
         <TabsContent value="overview" className="space-y-4">
-          <AccountSnapshot account={account} evaluation={latestProduction} />
+          <AccountSnapshot account={account} identityAliasTypes={identityAliasTypes} />
           <AccountTruthPanel accountId={account.id} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
             <AccountFactsPanel accountId={account.id} />
@@ -152,11 +153,28 @@ function AccountDetailContent({
 
 function AccountSnapshot({
   account,
-  evaluation,
+  identityAliasTypes,
 }: {
   account: Account;
-  evaluation: AccountEvaluation | null;
+  identityAliasTypes: string[];
 }) {
+  // Milestone 3.5 defect fix: this used to show evaluation?.identityResolutionLevel
+  // here, which reads "Not available" for any account with no evaluation
+  // yet — even one with real, known domain/HubSpot aliases — because
+  // that field describes a specific evaluation's engagement/contact-level
+  // identity classification, not "do we know who this account is."
+  // identityAliasTypes is the actual canonical alias state (see
+  // ../lib/accounts-api.ts's AccountDetail.identityAliasTypes) and is
+  // never a confidence score — an empty array here is a genuine "no
+  // strong identifier known yet," not a guess either way. Evaluation-
+  // level identity resolution AND confidence remain shown, correctly
+  // labeled ("Identity resolution" / "Identity confidence"), in
+  // LatestEvaluationPanel below — unchanged, not duplicated here.
+  const identityText =
+    identityAliasTypes.length > 0
+      ? identityAliasTypes.map(humanizeAliasType).join(", ")
+      : "Not available";
+
   return (
     <section className="rounded-lg border border-border bg-card/50 px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -166,11 +184,10 @@ function AccountSnapshot({
         </div>
         <p className="text-[11px] text-muted-foreground">Updated {formatDateTime(account.updatedAt)}</p>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
         <MetaField label="Account key" value={account.accountKey} />
         <MetaField label="Created" value={formatDateTime(account.createdAt)} />
-        <MetaField label="Identity" value={evaluation?.identityResolutionLevel ?? null} />
-        <MetaField label="Confidence" value={evaluation?.identityConfidence ?? null} />
+        <MetaField label="Identity" value={identityText} />
       </div>
     </section>
   );

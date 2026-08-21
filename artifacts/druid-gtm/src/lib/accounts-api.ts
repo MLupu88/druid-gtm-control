@@ -150,6 +150,16 @@ export interface AccountDetail {
   account: Account;
   /** Ordered by createdAt descending, then id descending. */
   evaluations: AccountEvaluation[];
+  /**
+   * Distinct strong account_aliases.alias_type values this account
+   * currently holds (e.g. "domain", "external_id:hubspot"), sorted. A
+   * plain factual list of known identifiers — never a confidence score,
+   * and a distinct concept from any one evaluation's own
+   * identityResolutionLevel/identityConfidence, which legitimately stay
+   * absent when no evaluation has run yet. See
+   * artifacts/api-server/src/services/accounts.ts's AccountDetail.
+   */
+  identityAliasTypes: string[];
 }
 
 const DEFAULT_LIMIT = 50;

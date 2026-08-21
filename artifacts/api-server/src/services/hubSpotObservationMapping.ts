@@ -41,6 +41,17 @@ const HUBSPOT_CUSTOMER_LIFECYCLE_STAGE = "customer";
 export interface MapHubSpotCompanyToObservationsArgs {
   company: HubSpotCompany;
   importedAt: string;
+  /**
+   * M3.5 real-data defect fix: crm.owner's canonicalValue is the stable
+   * HubSpot owner ID (never renamed to a human name — provenance must
+   * stay truthful to what was actually reconciled); a resolved display
+   * name, when the caller already fetched one (see
+   * ../services/hubSpotCompanySync.ts), rides along in this one
+   * observation's providerMetadata instead. Still a pure function: this
+   * module never fetches the name itself. Absent/null when no owner id
+   * exists or the caller could not resolve one — never fabricated.
+   */
+  ownerDisplayName?: string | null;
 }
 
 function identityObservation(
@@ -90,6 +101,7 @@ function crmStateObservation(
   canonicalField: CrmStateObservationV1["canonicalField"],
   rawValue: string,
   normalizedValue: CrmStateObservationV1["normalizedValue"] = null,
+  providerMetadata: Record<string, unknown> | null = null,
 ): CrmStateObservationV1 {
   return {
     schemaVersion: "v1",
@@ -103,7 +115,7 @@ function crmStateObservation(
     importedAt: args.importedAt,
     confidence: null,
     evidenceRefs: [],
-    providerMetadata: null,
+    providerMetadata,
   };
 }
 
@@ -188,7 +200,13 @@ export function mapHubSpotCompanyToObservations(
 
   if (company.hubspotOwnerId !== null) {
     observations.push(
-      crmStateObservation(args, "crm.owner", company.hubspotOwnerId),
+      crmStateObservation(
+        args,
+        "crm.owner",
+        company.hubspotOwnerId,
+        null,
+        args.ownerDisplayName ? { displayName: args.ownerDisplayName } : null,
+      ),
     );
   }
   if (company.lifecycleStage !== null) {

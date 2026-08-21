@@ -3,9 +3,13 @@ import test from "node:test";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "@workspace/db/schema";
 import type { ProviderObservationV1 } from "@workspace/observation";
-import { syncHubSpotCompany, type RecordObservationFn } from "./hubSpotCompanySync.js";
+import {
+  syncHubSpotCompany,
+  type FetchHubSpotOwnerFn,
+  type RecordObservationFn,
+} from "./hubSpotCompanySync.js";
 import type { BootstrapHubSpotCompanyIdentityArgs } from "./hubSpotCompanyIdentity.js";
-import type { HubSpotCompany } from "../lib/hubSpotClient.js";
+import type { HubSpotCompany, HubSpotOwner } from "../lib/hubSpotClient.js";
 
 type Db = NodePgDatabase<typeof schema>;
 const db = {} as Db;
@@ -190,6 +194,117 @@ test("repeated calls remain a thin idempotent delegation to the canonical bootst
   }
   assert.equal(fetchCalls, 2);
   assert.equal(bootstrapCalls, 2);
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — owner display-name resolution during sync.
+// ---------------------------------------------------------------------
+
+const DEFAULT_BOOTSTRAP_RESULT = {
+  outcome: "created" as const,
+  accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  source: "hubspot" as const,
+  attachedAliasTypes: ["domain" as const, "external_id:hubspot" as const],
+};
+
+test("when hubspot_owner_id exists, owner lookup happens exactly once and the resolved display name lands in the crm.owner observation's providerMetadata", async () => {
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
+  let ownerCalls = 0;
+  const fetchOwnerFn: FetchHubSpotOwnerFn = async (ownerId) => {
+    ownerCalls += 1;
+    assert.equal(ownerId, "999");
+    return { id: "999", email: "mark@example.com", firstName: "Mark", lastName: "van der Ree" };
+  };
+
+  await syncHubSpotCompany({
+    db,
+    companyId: "12345",
+    recordObservationFn,
+    fetchOwnerFn,
+    fetchCompanyFn: async () => minimalHubSpotCompany({ hubspotOwnerId: "999" }),
+    bootstrapCompanyIdentityFn: async () => DEFAULT_BOOTSTRAP_RESULT,
+  });
+
+  assert.equal(ownerCalls, 1);
+  const ownerObservation = recorded.find(
+    (o) => o.observationClass === "crm_state" && o.canonicalField === "crm.owner",
+  );
+  assert.ok(ownerObservation);
+  assert.equal(ownerObservation!.observationClass, "crm_state");
+  if (ownerObservation!.observationClass !== "crm_state") return;
+  // The stable id remains the real, untouched canonical value.
+  assert.equal(ownerObservation!.rawValue, "999");
+  assert.deepEqual(ownerObservation!.providerMetadata, { displayName: "Mark van der Ree" });
+});
+
+test("a failed owner lookup does not fail the whole company sync, and the crm.owner observation persists with no display name", async () => {
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
+  const fetchOwnerFn: FetchHubSpotOwnerFn = async () => {
+    throw new Error("HubSpot owners endpoint unavailable");
+  };
+
+  const result = await syncHubSpotCompany({
+    db,
+    companyId: "12345",
+    recordObservationFn,
+    fetchOwnerFn,
+    fetchCompanyFn: async () => minimalHubSpotCompany({ hubspotOwnerId: "999" }),
+    bootstrapCompanyIdentityFn: async () => DEFAULT_BOOTSTRAP_RESULT,
+  });
+
+  assert.equal(result.outcome, "created");
+  const ownerObservation = recorded.find(
+    (o) => o.observationClass === "crm_state" && o.canonicalField === "crm.owner",
+  );
+  assert.ok(ownerObservation);
+  assert.equal(ownerObservation!.observationClass, "crm_state");
+  if (ownerObservation!.observationClass !== "crm_state") return;
+  assert.equal(ownerObservation!.rawValue, "999");
+  assert.equal(ownerObservation!.providerMetadata, null);
+});
+
+test("a not-found owner (fetchOwnerFn resolves null) degrades the same way as a failure — no display name, sync still succeeds", async () => {
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
+  const fetchOwnerFn: FetchHubSpotOwnerFn = async () => null;
+
+  const result = await syncHubSpotCompany({
+    db,
+    companyId: "12345",
+    recordObservationFn,
+    fetchOwnerFn,
+    fetchCompanyFn: async () => minimalHubSpotCompany({ hubspotOwnerId: "999" }),
+    bootstrapCompanyIdentityFn: async () => DEFAULT_BOOTSTRAP_RESULT,
+  });
+
+  assert.equal(result.outcome, "created");
+  const ownerObservation = recorded.find(
+    (o) => o.observationClass === "crm_state" && o.canonicalField === "crm.owner",
+  );
+  assert.equal(ownerObservation!.providerMetadata, null);
+});
+
+test("when there is no owner id, no owner lookup is attempted and no crm.owner observation is recorded", async () => {
+  const { fn: recordObservationFn, recorded } = fakeRecordObservationFn();
+  let ownerCalls = 0;
+  const fetchOwnerFn: FetchHubSpotOwnerFn = async () => {
+    ownerCalls += 1;
+    return null;
+  };
+
+  await syncHubSpotCompany({
+    db,
+    companyId: "12345",
+    recordObservationFn,
+    fetchOwnerFn,
+    fetchCompanyFn: async () => minimalHubSpotCompany({ hubspotOwnerId: null }),
+    bootstrapCompanyIdentityFn: async () => DEFAULT_BOOTSTRAP_RESULT,
+  });
+
+  assert.equal(ownerCalls, 0);
+  assert.equal(
+    recorded.some((o) => o.observationClass === "crm_state" && o.canonicalField === "crm.owner"),
+    false,
+  );
 });
 
 test("a fetch failure stops before canonical bootstrap and before any observation is recorded", async () => {

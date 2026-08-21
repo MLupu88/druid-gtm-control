@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
@@ -106,6 +107,41 @@ test(
     if (first[0]?.outcome === "created" && second[0]?.outcome === "created") {
       assert.notEqual(first[0].observation.id, second[0].observation.id);
     }
+  },
+);
+
+// M3.5 real-data defect fix: providerMetadata.displayName must survive a
+// real Postgres jsonb round trip on the crm.owner observation — proves
+// the persistence layer (not just the pure mapper) actually carries the
+// resolved owner name through, and that the stable id stays in rawValue.
+test(
+  "crm.owner's resolved displayName survives persistence, and rawValue stays the stable owner id",
+  { skip },
+  async () => {
+    const c = company({ hubspotOwnerId: "999" });
+    const observations = mapHubSpotCompanyToObservations({
+      company: c,
+      importedAt: new Date().toISOString(),
+      ownerDisplayName: "Mark van der Ree",
+    });
+    const results = await recordAll(observations);
+
+    const ownerResult = results.find(
+      (r, i) =>
+        r.outcome === "created" &&
+        observations[i]!.observationClass === "crm_state" &&
+        observations[i]!.canonicalField === "crm.owner",
+    );
+    assert.ok(ownerResult);
+    if (ownerResult!.outcome !== "created") return;
+
+    const [persisted] = await db!
+      .select()
+      .from(schema.observations)
+      .where(eq(schema.observations.id, ownerResult!.observation.id))
+      .limit(1);
+    assert.equal(persisted?.rawValue, "999");
+    assert.deepEqual(persisted?.providerMetadata, { displayName: "Mark van der Ree" });
   },
 );
 

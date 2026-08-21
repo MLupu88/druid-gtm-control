@@ -19,6 +19,7 @@ const OBSERVATION_DTO: ResolvedEvidenceDTO = {
   value: "Software",
   observedAt: null,
   importedAt: "2026-08-20T00:00:00.000Z",
+  displayName: null,
 };
 const MANUAL_DTO: ResolvedEvidenceDTO = {
   kind: "manual_account_fact",
@@ -70,6 +71,7 @@ test("agreement: multiple supporting sources all resolved", () => {
     value: "Software",
     observedAt: null,
     importedAt: "2026-08-20T00:00:00.000Z",
+    displayName: null,
   };
   const lookup = new Map<string, ResolvedEvidenceDTO>([
     [`observation:${OBSERVATION_ID}`, OBSERVATION_DTO],
@@ -247,4 +249,62 @@ test("a reference absent from the evidence lookup degrades to {kind: 'unknown'},
   const dto = toFieldDTO("company.industry", result(), new Map(), COMPUTED_AT);
   assert.deepEqual(dto.selectedEvidence, { kind: "unknown", id: OBSERVATION_ID });
   assert.deepEqual(dto.supportingEvidence, [{ kind: "unknown", id: OBSERVATION_ID }]);
+  assert.equal(dto.canonicalDisplayValue, null);
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix: canonicalDisplayValue mirrors the selected
+// evidence's own resolved displayName (e.g. crm.owner's stable id paired
+// with the owner's real name, captured during HubSpot ingestion — see
+// ../services/hubSpotCompanySync.ts) without ever mutating canonicalValue
+// itself.
+// ---------------------------------------------------------------------
+test("canonicalDisplayValue mirrors the selected observation's resolved displayName", () => {
+  const ownerObservationId = "ffffffff-0000-4000-8000-000000000006";
+  const lookup = new Map<string, ResolvedEvidenceDTO>([
+    [
+      `observation:${ownerObservationId}`,
+      {
+        kind: "observation",
+        id: ownerObservationId,
+        provider: "hubspot",
+        value: "89684655",
+        observedAt: null,
+        importedAt: "2026-08-20T00:00:00.000Z",
+        displayName: "Mark van der Ree",
+      },
+    ],
+  ]);
+  const dto = toFieldDTO(
+    "crm.owner",
+    result({
+      canonicalValue: "89684655",
+      selectedEvidence: { kind: "observation", id: ownerObservationId },
+      supportingEvidence: [{ kind: "observation", id: ownerObservationId }],
+      consideredEvidence: [{ kind: "observation", id: ownerObservationId }],
+    }),
+    lookup,
+    COMPUTED_AT,
+  );
+  assert.equal(dto.canonicalValue, "89684655");
+  assert.equal(dto.canonicalDisplayValue, "Mark van der Ree");
+});
+
+test("canonicalDisplayValue is null when the selected evidence is a manual fact (no provider metadata exists)", () => {
+  const lookup = new Map<string, ResolvedEvidenceDTO>([[`manual_account_fact:${MANUAL_FACT_ID}`, MANUAL_DTO]]);
+  const dto = toFieldDTO(
+    "company.industry",
+    result({
+      selectedEvidence: { kind: "manual_account_fact", id: MANUAL_FACT_ID },
+      supportingEvidence: [{ kind: "manual_account_fact", id: MANUAL_FACT_ID }],
+    }),
+    lookup,
+    COMPUTED_AT,
+  );
+  assert.equal(dto.canonicalDisplayValue, null);
+});
+
+test("canonicalDisplayValue is null when the selected observation carries no displayName metadata", () => {
+  const dto = toFieldDTO("company.industry", result(), new Map([[`observation:${OBSERVATION_ID}`, OBSERVATION_DTO]]), COMPUTED_AT);
+  assert.equal(dto.canonicalDisplayValue, null);
 });

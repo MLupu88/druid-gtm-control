@@ -26,7 +26,10 @@ and inspect the implementation that actually exists.
 - Production server: `88.99.81.51`
 - Production repository: `/root/gtm-control`
 - Public app: `https://gtm.aiexperiments.eu`
-- Current deployed/main commit: `7b219f5`
+- Current deployed/main commit: `62d5fe6` (Milestone 3/3H — see §27, now
+  committed/pushed/deployed). Migrations 0012–0015 are live in production.
+  The first real HubSpot pilot sync has run against this deployment — see
+  §28.
 - Docker app service: `gtm-control`
 - Production health was verified internally and externally after deployment.
 
@@ -1900,18 +1903,20 @@ section first, then §26 for the 3G precedent this integrates with, and
 ### Status
 
 - 3A–3G — DONE, verified (3G unit 33/33, integration 10/10; see §26).
-- **3H — Provenance/conflict UX — DONE locally, verified,
-  uncommitted/unpushed, not migrated to production, not deployed.**
-  Backend unit+route **38/38 pass**. Backend integration, after the
-  field-set correction below: **7/7 pass**. Frontend presentation, after
-  the `sortFieldsForDisplay` expectation fix below: **20/20 pass**. Full
-  workspace `api-server` typecheck clean; `druid-gtm` frontend typecheck
-  clean. **Fully verified locally.**
-- **Milestone 3 code-complete as of 3H — NOT operationally complete.**
-  See §11 (M3.5 — Live Data Activation & Reality Check) for exactly what
-  remains before Milestone 3 can be called done in practice, not just in
-  code. 3E.2b (n8n RB2B fan-out) is explicitly absorbed into M3.5, not a
-  separate deferred item anymore.
+- **3H — Provenance/conflict UX — DONE, committed and pushed at `62d5fe6`,
+  and now deployed to production.** (Superseded since this section was
+  written: it originally read "uncommitted/unpushed" — see §28 for the
+  current M3.5 real-data activation work running on top of this
+  deployment.) Backend unit+route **38/38 pass**. Backend integration,
+  after the field-set correction below: **7/7 pass**. Frontend
+  presentation, after the `sortFieldsForDisplay` expectation fix below:
+  **20/20 pass**. Full workspace `api-server` typecheck clean; `druid-gtm`
+  frontend typecheck clean.
+- **Milestone 3 code-complete as of 3H — M3.5 (live data activation) is
+  now IN PROGRESS, not merely next.** See §11 for the original scope and
+  §28 for the current checkpoint: a real HubSpot pilot sync has run in
+  production and a real-data defect-fix pass is implemented locally,
+  verified, but still uncommitted/unpushed/undeployed.
 
 ### Architecture implemented
 
@@ -2075,7 +2080,186 @@ untouched: no migration applied, nothing deployed, nothing committed.
 2. Begin M3.5 — Live Data Activation & Reality Check (see §11) — NOT
    started. This is the actual next milestone; do not jump to M4 first.
 
-## 28. New-session startup instruction
+## 28. Session checkpoint — M3.5 real-data pilot + defect fix (2026-08-21, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §27 (3H, now deployed) and §11 (M3.5's original
+scope) for background.
+
+### 1. Production baseline
+
+- Milestone 3/3H is deployed to production at commit `62d5fe6`.
+- Migrations 0012–0015 are live in production.
+- The **first real production HubSpot pilot sync** has run successfully:
+  company **alltours**, HubSpot company ID `57671486019`, Mission Control
+  account ID `830e1583-3279-48d1-9a7c-f6c4ab73d79b`. The sync returned
+  `created`, with `domain` + `external_id:hubspot` aliases and 7
+  observations persisted.
+
+### 2. Real-data defects found (via `GET /internal/accounts/:id/truth` against the real account above)
+
+- `company.employeeRange`'s real canonical value was `161`, but the UI
+  showed `—` (the display layer only accepted strings).
+- `crm.owner`'s real canonical value was the raw HubSpot owner ID; the UI
+  also showed `—`, and even once numeric display was fixed, showing the
+  bare numeric ID is not acceptable end-user copy.
+- `crm.lifecycleStage` "lead" needed human presentation "Lead", not the
+  raw lowercase provider string.
+- Account Snapshot used the evaluator's `identityResolutionLevel` under a
+  generic "Identity" label and showed "Not available" despite the account
+  actually having strong `domain` + `external_id:hubspot` aliases — a
+  mislabeling, not a resolution bug.
+- HubSpot's standard `industry` property currently produces
+  `LEISURE_TRAVEL_TOURISM`, while the HubSpot UI separately shows a
+  custom **"Industry NEW: Hospitality"** field. The custom property's
+  internal/API name is **still unknown and must not be guessed** — see
+  item 6 below for what discovery step is required before this can be
+  fixed.
+
+### 3. Fixes implemented locally (verified, not committed)
+
+- `isDisplayableScalar` (`account-truth-presentation.ts`) now accepts
+  finite numbers as well as strings — finite scalar numbers display
+  safely; non-scalars (objects/arrays/NaN/Infinity) still never dump raw
+  JSON, they render `—`.
+- HubSpot owner lookup (`fetchHubSpotOwnerById`, a genuinely different
+  HubSpot API surface — `GET /crm/v3/owners/{id}`, not the versioned
+  companies-object path) now runs once during ingestion
+  (`hubSpotCompanySync.ts`), never per page load.
+- The canonical `crm.owner` value remains the stable HubSpot owner ID —
+  never overwritten. The resolved human `displayName` rides along only in
+  that one observation's `providerMetadata`, a narrow, established,
+  display-only use of that column.
+- `accountTruth.ts` exposes a new `canonicalDisplayValue` field (derived
+  from the selected evidence's `displayName`, else `null`); the frontend
+  prefers it for display while provenance/evidence still shows the real
+  ID — full truthful traceability preserved.
+- `crm.lifecycleStage` gets first-letter capitalization only ("lead" →
+  "Lead") — a generic display rule, not an invented per-value business
+  taxonomy.
+- Account Snapshot's identity line now uses a new, genuinely factual
+  `identityAliasTypes: string[]` field (distinct STRONG
+  `account_aliases.alias_type` values for the account) instead of the
+  evaluator's `identityResolutionLevel` — explicitly not a confidence
+  score, per standing instruction not to invent one.
+- **Root-cause fix, not a HubSpot-specific patch:** a process-wide
+  `pg`/Drizzle jsonb double-parse defect was found and fixed so
+  numeric-looking identifier strings survive persistence as strings —
+  see §4 below. This is what actually made `crm.owner`'s canonical value
+  a JS number in production; the display-layer number-tolerance fix
+  above is now a defensive fallback, not the load-bearing fix.
+
+### 4. JSONB root cause (provider-neutral — record this precisely, do not scope it to HubSpot)
+
+`pg` (node-postgres, via `pg-types`) registers its own default type
+parser for the `json`/`jsonb` OIDs that already runs `JSON.parse` on the
+raw column text. `drizzle-orm`'s `PgJsonb.mapFromDriverValue`
+(`drizzle-orm/pg-core/columns/jsonb.js`) then unconditionally re-parses
+any string result via `JSON.parse` **a second time**, on the (now-false)
+assumption that it is still looking at raw, unparsed text.
+
+For `rawValue: "999"`: Postgres stores the JSON text `"999"`. `pg`'s
+default parser turns that into the JS string `"999"`. Drizzle's own
+parser then runs `JSON.parse("999")` → the **number** `999`. An
+identifier is silently turned into a quantity. Strings whose contents
+aren't valid JSON (e.g. `"acme.com"`) only survived by accident — the
+second `JSON.parse` throws and falls back to the original string, not
+because the pipeline was correct.
+
+**Fix**: `lib/db/src/pgJsonTypeParsers.ts` (new) disables `pg`'s default
+json/jsonb parsers (`pg.types.setTypeParser` for OIDs 114/3802, passed
+through as raw text), so Drizzle's own single `JSON.parse` becomes the
+only — and therefore correct — parse step, for every jsonb column in the
+schema (`observations.raw_value`, `normalized_value`,
+`provider_metadata`, `evidence_refs`, and any future jsonb column).
+Wired via a one-line side-effect import at the top of
+`lib/db/src/schema/index.ts` — the one module every DB-touching file
+(production and every integration test) already imports; `pg.types` is a
+process-wide singleton and node-postgres resolves the parser at
+result-decode time, so this single import fixes every `Pool`/`Client` in
+the process automatically. Genuine JSON numbers (e.g. a real numeric
+`rawValue`) still round-trip correctly as numbers — this is a correctness
+fix for the parse pipeline, not a blanket string coercion. **Do not
+characterize this as a HubSpot-specific fix** — it silently affected (and
+now correctly fixes) every jsonb column in the schema, for every
+provider.
+
+### 5. Final verification (all executed externally, not by the assistant)
+
+- JSONB parser regression (`lib/db/src/pgJsonTypeParsers.integration.test.ts`,
+  new): **4/4 pass**.
+- Full HubSpot suite (`pnpm --filter @workspace/api-server run
+  test:hubspot`): **66/66 pass**.
+- Frontend presentation (`account-truth-presentation.test.ts`): **30/30
+  pass**.
+- Earlier focused backend unit/route tests: **68/68 pass**.
+- Workspace typecheck: clean.
+- Also recorded: a full `@workspace/db` suite run exposed **4 unrelated,
+  pre-existing `attention_items` timing-test failures**, where a
+  test-generated `resolved_at` preceded the DB-created `created_at` by a
+  few milliseconds. The production `resolved_at >= created_at` CHECK
+  constraint behaved correctly — **do not weaken it**. This is a flaky
+  test-fixture timing issue (same family as the pre-existing 4 failures
+  noted back in §20's 3D checkpoint), tracked as separate future cleanup,
+  not part of this fix.
+
+### 6. M3.5 current state — what remains
+
+- HubSpot pilot proven end-to-end against real production data (§1).
+- This real-data defect fix pass (§2–§5) is **local, verified,
+  uncommitted, unpushed, undeployed.**
+- **Industry NEW mapping still pending property-name discovery** — the
+  custom HubSpot property behind "Industry NEW: Hospitality" must be
+  identified (HubSpot portal → Settings → Properties → Companies, or
+  equivalent API property listing) before it can be mapped; do not guess
+  its internal name.
+- HubSpot bulk enumeration + recurring sync are still missing — only a
+  single manually-triggered pilot sync has run.
+- RB2B tracking is live in RB2B itself, but no outbound integration to
+  Mission Control is configured yet.
+- The 3E.2b n8n RB2B fan-out workflows exist but are **unpublished /
+  inactive**.
+- Production `GTM_SIGNAL_INGESTION_SECRET` remains **unset**.
+- RB2B Account/Person/activity binding, and proving minimum visible real
+  activity end to end, still remain entirely open (see §11's RB2B
+  section — none of it has started).
+- GA4 is parked for later attribution work: property `druidai.com - GA4`,
+  property ID `330864840`, GA4 Data API is the intended integration
+  surface, Google Cloud project setup for it is not completed.
+
+### Files changed for this pass (all currently uncommitted)
+
+Modified: `artifacts/api-server/src/lib/hubSpotClient.ts` (+`.test.ts`),
+`artifacts/api-server/src/services/accountTruth.ts` (+`.test.ts`),
+`artifacts/api-server/src/services/accounts.ts`,
+`artifacts/api-server/src/services/hubSpotCompanySync.ts` (+`.test.ts`),
+`artifacts/api-server/src/services/hubSpotObservationMapping.ts`
+(+`.test.ts` +`.integration.test.ts`),
+`artifacts/api-server/src/routes/accounts.route.test.ts`,
+`artifacts/druid-gtm/src/lib/account-truth-api.ts`,
+`artifacts/druid-gtm/src/lib/account-truth-presentation.ts`
+(+`.test.ts`), `artifacts/druid-gtm/src/lib/accounts-api.ts`,
+`artifacts/druid-gtm/src/pages/account-detail.tsx`,
+`lib/db/package.json`, `lib/db/src/schema/index.ts`.
+
+New: `lib/db/src/pgJsonTypeParsers.ts`,
+`lib/db/src/pgJsonTypeParsers.integration.test.ts`.
+
+Untouched: RB2B/Client Radar adapters, n8n (including the unrelated
+untracked root `n8n` file), evaluator semantics, reconciliation policy,
+Industry NEW mapping (investigation-only, no code change — the internal
+property name cannot be proven from the repo).
+
+### Next exact action for the next session
+
+1. Get explicit approval to commit this pass (§2–§5 above).
+2. Discover the "Industry NEW" custom property's internal HubSpot name
+   (requires HubSpot portal/API access this repo cannot perform itself)
+   before implementing that mapping.
+3. Only after that: HubSpot bulk enumeration + recurring sync, then the
+   RB2B activation sequence in §11, are the remaining M3.5 work.
+
+## 29. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository

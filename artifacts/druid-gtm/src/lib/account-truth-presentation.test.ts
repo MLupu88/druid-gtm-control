@@ -25,6 +25,7 @@ import {
   evidenceValueText,
   fieldLabel,
   formatEvidenceTimestamp,
+  humanizeAliasType,
   sortFieldsForDisplay,
   statusBadgeVariant,
   statusLabel,
@@ -50,9 +51,11 @@ function syntheticField(overrides: Partial<AccountTruthField> = {}): AccountTrut
       value: "Financial Services",
       observedAt: null,
       importedAt: "2026-08-20T00:00:00.000Z",
+      displayName: null,
     },
     supportingEvidence: [],
     conflictingEvidence: [],
+    canonicalDisplayValue: null,
     ...overrides,
   };
 }
@@ -71,6 +74,7 @@ const OBSERVATION_EVIDENCE: EvidenceDTO = {
   value: "France",
   observedAt: "2026-08-18T00:00:00.000Z",
   importedAt: "2026-08-20T00:00:00.000Z",
+  displayName: null,
 };
 const UNKNOWN_EVIDENCE: EvidenceDTO = { kind: "unknown", id: "dddddddd-0000-4000-8000-000000000004" };
 
@@ -212,10 +216,9 @@ test("unknown evidence renders 'Evidence unavailable' and '—', never throws", 
 // 9. never renders a raw object/array — defensive fallback to the
 // existing missing-value convention.
 // ---------------------------------------------------------------------
-test("a non-string, non-boolean canonical value never renders as raw JSON", () => {
+test("non-scalar canonical values never render as raw JSON", () => {
   assert.equal(displayCanonicalValue("company.industry", { nested: "object" }), "—");
   assert.equal(displayCanonicalValue("company.industry", ["array", "value"]), "—");
-  assert.equal(displayCanonicalValue("company.industry", 42), "—");
   assert.equal(displayCanonicalValue("crm.existingCustomer", "true"), "—"); // string, not boolean
 });
 
@@ -282,9 +285,15 @@ test("crm.lifecycleStage has the label 'Lifecycle stage' and is included in the 
   assert.ok(CANONICAL_TRUTH_FIELDS.includes("crm.lifecycleStage"));
 });
 
-test("crm.lifecycleStage renders its raw string value as-is, never boolean-ified or region-relabeled", () => {
-  assert.equal(displayCanonicalValue("crm.lifecycleStage", "lead"), "lead");
-  assert.equal(displayCanonicalValue("crm.lifecycleStage", "customer"), "customer");
+// M3.5 real-data defect fix: real production data showed raw lowercase
+// "lead" rendered verbatim — capitalize the first letter only (never a
+// per-value lookup/reinterpretation of HubSpot's open lifecycle-stage
+// vocabulary, which would be inventing business meaning this milestone
+// was not asked to define).
+test("crm.lifecycleStage capitalizes its first letter only, never boolean-ified or region-relabeled", () => {
+  assert.equal(displayCanonicalValue("crm.lifecycleStage", "lead"), "Lead");
+  assert.equal(displayCanonicalValue("crm.lifecycleStage", "customer"), "Customer");
+  assert.equal(displayCanonicalValue("crm.lifecycleStage", "marketingqualifiedlead"), "Marketingqualifiedlead");
   // Not treated as a BOOLEAN_FIELDS member: a boolean value here would be
   // unexpected input, but must still fail safe to "—", never "Yes"/"No".
   assert.equal(displayCanonicalValue("crm.lifecycleStage", true), "—");
@@ -299,8 +308,81 @@ test("crm.lifecycleStage participates in a truth row view model like any other f
   });
   const vm = buildTruthRowViewModel("crm.lifecycleStage", field);
   assert.equal(vm.label, "Lifecycle stage");
-  assert.equal(vm.valueText, "lead");
+  assert.equal(vm.valueText, "Lead");
   assert.equal(vm.statusText, "Confirmed");
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — numeric canonical values (e.g.
+// company.employeeRange = 161, observed against real production HubSpot
+// data) must display, never fall back to "—".
+// ---------------------------------------------------------------------
+test("a finite number renders as its plain string form, e.g. company.employeeRange = 161", () => {
+  assert.equal(displayCanonicalValue("company.employeeRange", 161), "161");
+  assert.equal(displayCanonicalValue("crm.owner", 89684655), "89684655");
+});
+
+test("NaN and non-finite numbers still fall back to the missing-value convention", () => {
+  assert.equal(displayCanonicalValue("company.employeeRange", Number.NaN), "—");
+  assert.equal(displayCanonicalValue("company.employeeRange", Number.POSITIVE_INFINITY), "—");
+});
+
+test("objects and arrays are never rendered as raw JSON, even now that numbers are allowed", () => {
+  assert.equal(displayCanonicalValue("company.employeeRange", { nested: "object" }), "—");
+  assert.equal(displayCanonicalValue("company.employeeRange", [1, 2, 3]), "—");
+});
+
+test("a numeric field participates in a truth row view model showing the plain number", () => {
+  const field = syntheticField({
+    canonicalField: "company.employeeRange",
+    canonicalValue: 161,
+  });
+  const vm = buildTruthRowViewModel("company.employeeRange", field);
+  assert.equal(vm.valueText, "161");
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — crm.owner: the stable HubSpot owner id is
+// never shown to the user when a resolved human display name is
+// available; the raw id is still preserved, truthfully, alongside it in
+// evidence detail.
+// ---------------------------------------------------------------------
+test("crm.owner's row value prefers canonicalDisplayValue (the resolved name) over the raw stable id", () => {
+  const field = syntheticField({
+    canonicalField: "crm.owner",
+    canonicalValue: "89684655",
+    canonicalDisplayValue: "Mark van der Ree",
+  });
+  const vm = buildTruthRowViewModel("crm.owner", field);
+  assert.equal(vm.valueText, "Mark van der Ree");
+  assert.notEqual(vm.valueText, "89684655");
+});
+
+test("crm.owner falls back to the raw stable id when no display name was resolved", () => {
+  const field = syntheticField({
+    canonicalField: "crm.owner",
+    canonicalValue: "89684655",
+    canonicalDisplayValue: null,
+  });
+  const vm = buildTruthRowViewModel("crm.owner", field);
+  assert.equal(vm.valueText, "89684655");
+});
+
+test("owner evidence lines show the resolved name AND the raw id together, never the id alone", () => {
+  const ownerEvidence: EvidenceDTO = {
+    kind: "observation",
+    id: "eeeeeeee-0000-4000-8000-000000000005",
+    provider: "hubspot",
+    value: "89684655",
+    observedAt: null,
+    importedAt: "2026-08-20T00:00:00.000Z",
+    displayName: "Mark van der Ree",
+  };
+  assert.equal(evidenceValueText("crm.owner", ownerEvidence), "Mark van der Ree (89684655)");
+});
+
+test("owner evidence with no resolved display name shows only the raw id, unchanged", () => {
+  assert.equal(evidenceValueText("crm.owner", { ...OBSERVATION_EVIDENCE, value: "89684655" }), "89684655");
 });
 
 test("every canonical field has a non-blank human label", () => {
@@ -328,4 +410,18 @@ test("formatEvidenceTimestamp returns null for a null/unparseable timestamp, nev
   assert.equal(formatEvidenceTimestamp(null), null);
   assert.equal(formatEvidenceTimestamp("not-a-date"), null);
   assert.equal(typeof formatEvidenceTimestamp("2026-08-19T00:00:00.000Z"), "string");
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — Account Snapshot identity summary.
+// ---------------------------------------------------------------------
+test("humanizeAliasType maps domain and known external_id providers to friendly labels", () => {
+  assert.equal(humanizeAliasType("domain"), "Domain");
+  assert.equal(humanizeAliasType("external_id:hubspot"), "HubSpot");
+  assert.equal(humanizeAliasType("external_id:rb2b"), "RB2B");
+});
+
+test("humanizeAliasType falls back to the raw alias type for an unrecognized shape, never fabricating a label", () => {
+  assert.equal(humanizeAliasType("external_id:some_future_provider"), "some_future_provider");
+  assert.equal(humanizeAliasType("client_radar_account_id"), "client_radar_account_id");
 });

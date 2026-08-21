@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import {
   fetchHubSpotCompanyById,
+  fetchHubSpotOwnerById,
   HubSpotApiError,
   HubSpotCompanyArchivedError,
   HubSpotCompanyDomainUnavailableError,
@@ -263,6 +264,142 @@ test("rejects a non-string value for any of the new optional properties", async 
     await withAccessToken("test-token", () =>
       assert.rejects(() => fetchHubSpotCompanyById("12345"), HubSpotResponseError),
     );
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — fetchHubSpotOwnerById
+// ---------------------------------------------------------------------
+
+function ownerResponse(overrides: Record<string, unknown> = {}): Response {
+  return Response.json({
+    id: "999",
+    email: "mark@example.com",
+    firstName: "Mark",
+    lastName: "van der Ree",
+    ...overrides,
+  });
+}
+
+test("fetches exactly one owner from the real HubSpot Owners API (not the versioned companies-object path) with a bearer token", async () => {
+  const token = "unit-test-owner-token-that-must-not-leak";
+  let requestedUrl: URL | undefined;
+  let requestedInit: RequestInit | undefined;
+  mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    requestedUrl = new URL(String(input));
+    requestedInit = init;
+    return ownerResponse();
+  });
+
+  try {
+    const result = await withAccessToken(token, () => fetchHubSpotOwnerById(" 999 "));
+    assert.deepEqual(result, {
+      id: "999",
+      email: "mark@example.com",
+      firstName: "Mark",
+      lastName: "van der Ree",
+    });
+    assert.equal(requestedUrl?.pathname, "/crm/v3/owners/999");
+    // Deliberately NOT /crm/objects/<version>/... — owners are a
+    // different HubSpot API surface than the companies object endpoint.
+    assert.equal(requestedUrl?.pathname.includes("/crm/objects/"), false);
+    assert.equal(requestedInit?.method, "GET");
+    assert.deepEqual(requestedInit?.headers, { Authorization: `Bearer ${token}` });
+    assert.ok(requestedInit?.signal instanceof AbortSignal);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("owner lookup reads HUBSPOT_ACCESS_TOKEN lazily and fails before fetch when it is absent", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async () => ownerResponse());
+  try {
+    await assert.rejects(
+      () => withAccessToken(undefined, () => fetchHubSpotOwnerById("999")),
+      HubSpotNotConfiguredError,
+    );
+    assert.equal(fetchMock.mock.calls.length, 0);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("a blank ownerId resolves to null without ever calling fetch", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async () => ownerResponse());
+  try {
+    const result = await withAccessToken("test-token", () => fetchHubSpotOwnerById("   "));
+    assert.equal(result, null);
+    assert.equal(fetchMock.mock.calls.length, 0);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("a 404 owner response resolves to null, not an error", async () => {
+  mock.method(globalThis, "fetch", async () => new Response("not found", { status: 404 }));
+  try {
+    const result = await withAccessToken("test-token", () => fetchHubSpotOwnerById("999"));
+    assert.equal(result, null);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("owner lookup sanitizes non-success responses and never exposes the bearer token or provider body", async () => {
+  const token = "secret-owner-marker-token";
+  const providerBody = "sensitive-owner-provider-body";
+  mock.method(globalThis, "fetch", async () => new Response(providerBody, { status: 401 }));
+  try {
+    const error = await withAccessToken(token, () =>
+      captureError(() => fetchHubSpotOwnerById("999")),
+    );
+    assert.ok(error instanceof HubSpotApiError);
+    assert.equal(error.status, 401);
+    assert.equal(error.message.includes(token), false);
+    assert.equal(error.message.includes(providerBody), false);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("owner lookup wraps network failures in a sanitized provider error, exactly like the company client", async () => {
+  mock.method(globalThis, "fetch", async () => {
+    throw new Error("network failure containing secret-owner-marker-token");
+  });
+  try {
+    const error = await withAccessToken("secret-owner-marker-token", () =>
+      captureError(() => fetchHubSpotOwnerById("999")),
+    );
+    assert.ok(error instanceof HubSpotApiError);
+    assert.equal(error.status, 502);
+    assert.equal(error.message.includes("secret-owner-marker-token"), false);
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("rejects malformed JSON and a mismatched owner id", async () => {
+  const responses = [new Response("not-json"), ownerResponse({ id: "different" })];
+  mock.method(globalThis, "fetch", async () => responses.shift()!);
+  try {
+    await withAccessToken("test-token", async () => {
+      await assert.rejects(() => fetchHubSpotOwnerById("999"), HubSpotResponseError);
+      await assert.rejects(() => fetchHubSpotOwnerById("999"), HubSpotResponseError);
+    });
+  } finally {
+    mock.restoreAll();
+  }
+});
+
+test("blank/absent email, firstName, or lastName convert to null, never to blank strings", async () => {
+  mock.method(globalThis, "fetch", async () =>
+    ownerResponse({ email: "   ", firstName: null, lastName: undefined }),
+  );
+  try {
+    const result = await withAccessToken("test-token", () => fetchHubSpotOwnerById("999"));
+    assert.deepEqual(result, { id: "999", email: null, firstName: null, lastName: null });
   } finally {
     mock.restoreAll();
   }

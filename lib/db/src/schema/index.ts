@@ -2,6 +2,12 @@
 // See docs/icp-rule-discovery.md for the Phase 0 discovery this schema is
 // built on, and ROADMAP.md Package 2 for the phase plan this belongs to.
 
+// M3.5 real-data defect fix — must load before any query result is
+// decoded; see ../pgJsonTypeParsers.ts for why this schema barrel (the
+// one module every DB-touching file, production and test, already
+// imports) is pg.types' correct home.
+import "../pgJsonTypeParsers";
+
 export * from "./enums";
 export * from "./icpProfiles";
 export * from "./icpProfileVersions";

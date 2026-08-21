@@ -20,6 +20,7 @@ import { and, count, desc, eq, inArray, min, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   accounts,
+  accountAliases,
   accountEvaluations,
   accountDecisions,
   accountSnapshots,
@@ -554,6 +555,20 @@ export interface AccountDetail {
   evaluations: AccountEvaluationDetail[];
   /** Staleness of the account's latest completed, production evaluation — the exact evaluation the first entry of `evaluations` satisfying (status: "completed", evaluationMode: "production") represents, the same row ../services/accountEvaluations.ts's findLatestCompletedProductionEvaluation would return. Derived the same way as listAccounts' AccountProductionEvaluationSummary.staleness. Null when no such evaluation exists yet (preview-only or failed-only accounts) — never a query-failure placeholder. */
   latestProductionEvaluationStaleness: AccountEvaluationStaleness | null;
+  /**
+   * Distinct account_aliases.alias_type values this account currently
+   * holds a STRONG alias for (e.g. "domain", "external_id:hubspot"),
+   * sorted for deterministic rendering. This is a plain factual list —
+   * "which strong identifiers does this account actually have" — never a
+   * confidence score and never the same concept as
+   * AccountEvaluationDetail.identityResolutionLevel/identityConfidence
+   * above, which describe a specific evaluation's engagement/contact-
+   * level identity classification and legitimately stay null when no
+   * evaluation has run yet. An account can have zero, one, or several
+   * alias types; an empty array means genuinely no strong alias exists
+   * yet, not a lookup failure.
+   */
+  identityAliasTypes: string[];
 }
 
 export async function getAccountById(
@@ -583,7 +598,7 @@ export async function getAccountById(
     (row) => row.status === "completed" && row.evaluationMode === "production",
   );
 
-  const [snapshotById, stalenessByEvaluationId] = await Promise.all([
+  const [snapshotById, stalenessByEvaluationId, aliasRows] = await Promise.all([
     loadSnapshotsForReadiness(
       db,
       [...new Set(evaluationRows.map((row) => row.snapshotId))],
@@ -592,6 +607,12 @@ export async function getAccountById(
       db,
       latestProductionEvaluationRow ? [latestProductionEvaluationRow.id] : [],
     ),
+    db
+      .selectDistinct({ aliasType: accountAliases.aliasType })
+      .from(accountAliases)
+      .where(
+        and(eq(accountAliases.accountId, accountId), eq(accountAliases.isStrong, true)),
+      ),
   ]);
 
   const evaluations: AccountEvaluationDetail[] = evaluationRows.map((row) => ({
@@ -608,5 +629,6 @@ export async function getAccountById(
     latestProductionEvaluationStaleness: latestProductionEvaluationRow
       ? toEvaluationStaleness(latestProductionEvaluationRow.id, stalenessByEvaluationId)
       : null,
+    identityAliasTypes: aliasRows.map((row) => row.aliasType).sort(),
   };
 }

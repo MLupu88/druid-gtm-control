@@ -104,6 +104,9 @@ function syntheticDetail(
     // ../services/accounts.ts), so this is a plain fixture default, not a
     // computed one, mirroring mqlDecisionReadiness above.
     latestProductionEvaluationStaleness: null,
+    // M3.5 real-data defect fix — same fixture-default rationale as
+    // latestProductionEvaluationStaleness above.
+    identityAliasTypes: [],
     ...overrides,
   };
 }
@@ -539,9 +542,11 @@ function syntheticTruthField(
       value: "Software",
       observedAt: null,
       importedAt: "2026-08-20T00:00:00.000Z",
+      displayName: null,
     },
     supportingEvidence: [],
     conflictingEvidence: [],
+    canonicalDisplayValue: null,
     ...overrides,
   };
 }

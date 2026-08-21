@@ -112,6 +112,45 @@ test("maps crm.owner from hubspotOwnerId when present", () => {
   assert.equal(owner?.observationClass === "crm_state" && owner.rawValue, "999");
 });
 
+// M3.5 real-data defect fix: canonical crm.owner stays the stable
+// HubSpot owner id; a caller-resolved human display name (see
+// ../services/hubSpotCompanySync.ts, the only real caller) rides along
+// in providerMetadata only, never replacing rawValue.
+test("crm.owner's rawValue stays the stable owner id even when a resolved ownerDisplayName is supplied; the name lands only in providerMetadata", () => {
+  const observations = mapHubSpotCompanyToObservations({
+    company: minimalCompany({ hubspotOwnerId: "999" }),
+    importedAt: "2026-08-20T10:00:00Z",
+    ownerDisplayName: "Mark van der Ree",
+  });
+  const owner = byClassAndKey(observations, "crm_state", "crm.owner");
+  assert.equal(owner?.observationClass === "crm_state" && owner.rawValue, "999");
+  assert.deepEqual(
+    owner?.observationClass === "crm_state" ? owner.providerMetadata : undefined,
+    { displayName: "Mark van der Ree" },
+  );
+});
+
+test("crm.owner's providerMetadata is null when no ownerDisplayName was resolved", () => {
+  const observations = mapHubSpotCompanyToObservations({
+    company: minimalCompany({ hubspotOwnerId: "999" }),
+    importedAt: "2026-08-20T10:00:00Z",
+  });
+  const owner = byClassAndKey(observations, "crm_state", "crm.owner");
+  assert.equal(
+    owner?.observationClass === "crm_state" ? owner.providerMetadata : undefined,
+    null,
+  );
+});
+
+test("an ownerDisplayName with no hubspotOwnerId never produces a crm.owner observation at all", () => {
+  const observations = mapHubSpotCompanyToObservations({
+    company: minimalCompany({ hubspotOwnerId: null }),
+    importedAt: "2026-08-20T10:00:00Z",
+    ownerDisplayName: "Mark van der Ree",
+  });
+  assert.equal(byClassAndKey(observations, "crm_state", "crm.owner"), undefined);
+});
+
 test("lifecycleStage \"customer\" emits crm.lifecycleStage and crm.existingCustomer=true", () => {
   const observations = mapHubSpotCompanyToObservations({
     company: minimalCompany({ lifecycleStage: "customer" }),

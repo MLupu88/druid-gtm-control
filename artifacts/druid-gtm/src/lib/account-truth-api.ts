@@ -46,6 +46,11 @@ export type EvidenceDTO =
       value: unknown;
       observedAt: string | null;
       importedAt: string;
+      /** Human-readable override for `value` when the ingesting adapter
+       * resolved one (e.g. crm.owner's stable id vs. the owner's real
+       * name) — null when no such metadata exists; `value` itself is
+       * never replaced. */
+      displayName: string | null;
     }
   | {
       kind: "manual_account_fact";
@@ -66,6 +71,9 @@ export interface AccountTruthField {
   selectedEvidence: EvidenceDTO | null;
   supportingEvidence: EvidenceDTO[];
   conflictingEvidence: EvidenceDTO[];
+  /** Mirrors selectedEvidence's own displayName when present — see
+   * accountTruth.ts's identical field for the full rationale. */
+  canonicalDisplayValue: string | null;
 }
 
 export interface AccountTruthResponse {

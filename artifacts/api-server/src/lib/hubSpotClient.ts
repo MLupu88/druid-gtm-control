@@ -172,3 +172,76 @@ export async function fetchHubSpotCompanyById(companyId: string): Promise<HubSpo
   }
   return parseCompanyResponse(data, requestedCompanyId);
 }
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — crm.owner's canonicalValue is the stable
+// HubSpot owner ID (hubspot_owner_id), not a human name; that ID alone
+// is not useful product copy. This resolves one owner id to a display
+// name via HubSpot's own Owners API (a distinct resource from Companies
+// — /crm/v3/owners, not /crm/objects/<version>/..., so it is
+// deliberately NOT using HUBSPOT_COMPANIES_API_VERSION). Called during
+// ingestion (../services/hubSpotCompanySync.ts), never from a per-page-
+// load read path — see that module's own comment.
+// ---------------------------------------------------------------------
+
+export interface HubSpotOwner {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+}
+
+function nullableTrimmedString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function parseOwnerResponse(data: unknown, requestedOwnerId: string): HubSpotOwner {
+  if (!isRecord(data) || typeof data.id !== "string") {
+    throw new HubSpotResponseError();
+  }
+  if (data.id !== requestedOwnerId) {
+    throw new HubSpotResponseError("HubSpot returned a different owner id than requested.");
+  }
+  return {
+    id: data.id,
+    email: nullableTrimmedString(data.email),
+    firstName: nullableTrimmedString(data.firstName),
+    lastName: nullableTrimmedString(data.lastName),
+  };
+}
+
+/**
+ * Returns null (never throws) for a not-found owner (404) or a blank
+ * ownerId — a missing/unresolvable owner name is not a sync-blocking
+ * failure, see ../services/hubSpotCompanySync.ts's own call site, which
+ * degrades to no display name rather than failing the whole sync.
+ */
+export async function fetchHubSpotOwnerById(ownerId: string): Promise<HubSpotOwner | null> {
+  const requestedOwnerId = ownerId.trim();
+  if (requestedOwnerId === "") return null;
+
+  const accessToken = getAccessToken();
+  const url = new URL(`${HUBSPOT_API_BASE_URL}/crm/v3/owners/${encodeURIComponent(requestedOwnerId)}`);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new HubSpotApiError(502);
+  }
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw new HubSpotApiError(response.status);
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new HubSpotResponseError("HubSpot returned malformed or non-JSON owner data.");
+  }
+  return parseOwnerResponse(data, requestedOwnerId);
+}

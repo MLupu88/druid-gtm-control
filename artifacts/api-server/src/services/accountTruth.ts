@@ -63,6 +63,17 @@ export type ResolvedEvidenceDTO =
       value: unknown;
       observedAt: string | null;
       importedAt: string;
+      /**
+       * M3.5 real-data defect fix: a human-readable override for `value`,
+       * when the ingesting adapter already resolved one into
+       * providerMetadata.displayName (string) — e.g. crm.owner's stable
+       * HubSpot owner ID paired with the owner's actual name, captured
+       * during ingestion (see
+       * ../services/hubSpotCompanySync.ts/hubSpotObservationMapping.ts).
+       * Null whenever no such metadata exists — `value` (the real,
+       * stable canonical value) is never replaced, only supplemented.
+       */
+      displayName: string | null;
     }
   | {
       kind: "manual_account_fact";
@@ -88,6 +99,15 @@ export interface AccountTruthFieldDTO {
   selectedEvidence: ResolvedEvidenceDTO | null;
   supportingEvidence: ResolvedEvidenceDTO[];
   conflictingEvidence: ResolvedEvidenceDTO[];
+  /**
+   * M3.5 real-data defect fix: mirrors selectedEvidence's own
+   * displayName (when selectedEvidence is an observation carrying one),
+   * hoisted to the top level purely so the frontend's primary row value
+   * never needs to branch on evidence shape to find it. canonicalValue
+   * itself stays the real, stable canonical value untouched — this is an
+   * additive display hint only, null whenever no such metadata exists.
+   */
+  canonicalDisplayValue: string | null;
 }
 
 function dedupeRefsByKind(
@@ -119,6 +139,7 @@ async function loadEvidenceLookup(
             normalizedValue: observations.normalizedValue,
             observedAt: observations.observedAt,
             importedAt: observations.importedAt,
+            providerMetadata: observations.providerMetadata,
           })
           .from(observations)
           .where(inArray(observations.id, observationIds))
@@ -137,6 +158,7 @@ async function loadEvidenceLookup(
   ]);
 
   for (const row of observationRows) {
+    const metadataDisplayName = row.providerMetadata?.["displayName"];
     lookup.set(`observation:${row.id}`, {
       kind: "observation",
       id: row.id,
@@ -144,6 +166,7 @@ async function loadEvidenceLookup(
       value: row.normalizedValue ?? row.rawValue,
       observedAt: row.observedAt ? row.observedAt.toISOString() : null,
       importedAt: row.importedAt.toISOString(),
+      displayName: typeof metadataDisplayName === "string" ? metadataDisplayName : null,
     });
   }
   for (const row of manualFactRows) {
@@ -180,6 +203,7 @@ export function toFieldDTO(
   lookup: ReadonlyMap<string, ResolvedEvidenceDTO>,
   computedAt: string,
 ): AccountTruthFieldDTO {
+  const selectedEvidence = result.selectedEvidence ? resolveRef(lookup, result.selectedEvidence) : null;
   return {
     canonicalField,
     canonicalValue: result.canonicalValue,
@@ -187,9 +211,11 @@ export function toFieldDTO(
     policyVersion: result.policyVersion,
     rationale: result.rationale,
     computedAt,
-    selectedEvidence: result.selectedEvidence ? resolveRef(lookup, result.selectedEvidence) : null,
+    selectedEvidence,
     supportingEvidence: result.supportingEvidence.map((ref) => resolveRef(lookup, ref)),
     conflictingEvidence: result.conflictingEvidence.map((ref) => resolveRef(lookup, ref)),
+    canonicalDisplayValue:
+      selectedEvidence?.kind === "observation" ? selectedEvidence.displayName : null,
   };
 }
 

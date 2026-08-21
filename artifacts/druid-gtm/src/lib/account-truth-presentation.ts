@@ -89,18 +89,44 @@ const REGION_LABELS: Record<string, string> = {
 
 const MISSING_VALUE_TEXT = "—";
 
-// Never renders a raw object/array — anything not a plain string or
-// boolean for these specific fields falls back to the same missing-value
-// convention as a genuinely absent value, rather than risking a raw JSON
-// dump (defensive: this repo's own contract never produces such a shape
-// for these fields, but the UI must not trust that blindly).
+// company.employeeRange in particular has been observed, against real
+// production HubSpot data, to arrive as a genuine JS number (e.g. 161
+// employees) rather than a string — HubSpot's own numeric properties are
+// not guaranteed to round-trip as strings the way this repo's write path
+// assumes for every other field (see NEXT_SESSION.md's M3.5 checkpoint
+// for the real-data finding this fixed). A finite number is therefore a
+// legitimate scalar canonical value, not just a string or boolean — but
+// this remains a strict allowlist: objects, arrays, NaN, and ±Infinity
+// still fall back to the same missing-value convention as a genuinely
+// absent value, never a raw JSON dump (defensive: even where this
+// repo's own write path shouldn't produce such a shape, the UI must not
+// trust that blindly).
+function isDisplayableScalar(value: unknown): value is string | number {
+  if (typeof value === "string") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  return false;
+}
+
+// crm.lifecycleStage is an open HubSpot vocabulary (never a closed enum
+// this repo defines — see canonicalFactEvaluatorInput.ts's own comment on
+// why 3F never invents one) — this only capitalizes the first letter of
+// whatever raw stage string HubSpot returned ("lead" -> "Lead"); it never
+// reinterprets or maps specific stage values, which would be inventing
+// business meaning this milestone was not asked to define.
+function capitalizeFirstLetter(value: string): string {
+  return value.length === 0 ? value : value[0]!.toUpperCase() + value.slice(1);
+}
+
 export function displayCanonicalValue(field: CanonicalTruthField, value: unknown): string {
   if (value === null || value === undefined) return MISSING_VALUE_TEXT;
   if (BOOLEAN_FIELDS.has(field)) {
     return typeof value === "boolean" ? (value ? "Yes" : "No") : MISSING_VALUE_TEXT;
   }
-  if (typeof value !== "string") return MISSING_VALUE_TEXT;
-  return field === "company.region" ? (REGION_LABELS[value] ?? value) : value;
+  if (!isDisplayableScalar(value)) return MISSING_VALUE_TEXT;
+  const text = String(value);
+  if (field === "company.region") return REGION_LABELS[text] ?? text;
+  if (field === "crm.lifecycleStage") return capitalizeFirstLetter(text);
+  return text;
 }
 
 // ---------------------------------------------------------------------
@@ -158,20 +184,57 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   cognism: "Cognism",
 };
 
+/** Display-name casing only, reused by evidenceSourceLabel below and by
+ * ../pages/account-detail.tsx's identity-alias summary (via
+ * humanizeAliasType) — the one place this repo maps a provider's raw
+ * name to product copy. */
+export function providerDisplayName(provider: string): string {
+  return PROVIDER_DISPLAY_NAMES[provider] ?? provider;
+}
+
 export function evidenceSourceLabel(evidence: EvidenceDTO): string {
   switch (evidence.kind) {
     case "manual_account_fact":
       return "Manual confirmation";
     case "observation":
-      return PROVIDER_DISPLAY_NAMES[evidence.provider] ?? evidence.provider;
+      return providerDisplayName(evidence.provider);
     case "unknown":
       return "Evidence unavailable";
   }
 }
 
+// Milestone 3.5 defect fix — Account Snapshot's "Identity" summary reads
+// this account's real account_aliases.alias_type values (see
+// artifacts/api-server/src/services/accounts.ts's AccountDetail.
+// identityAliasTypes), never an evaluation's identityResolutionLevel
+// (see ../pages/account-detail.tsx's own comment on why those are
+// different concepts). "domain" -> "Domain"; "external_id:<provider>" ->
+// that provider's display name; anything else falls back to the raw
+// alias type rather than fabricating a label.
+export function humanizeAliasType(aliasType: string): string {
+  if (aliasType === "domain") return "Domain";
+  const externalIdMatch = aliasType.match(/^external_id:(.+)$/);
+  if (externalIdMatch) {
+    return providerDisplayName(externalIdMatch[1]!);
+  }
+  return aliasType;
+}
+
+// M3.5 real-data defect fix: an observation carrying a resolved
+// displayName (e.g. crm.owner's stable HubSpot id paired with the
+// owner's real name — see accountTruth.ts's own comment) shows the name
+// AND the raw value together ("Mark van der Ree (89684655)") — never the
+// bare stable id alone when a human name is available, but never hiding
+// the real value either, so provenance stays fully truthful/traceable.
 export function evidenceValueText(field: CanonicalTruthField, evidence: EvidenceDTO): string {
   if (evidence.kind === "unknown") return MISSING_VALUE_TEXT;
-  return displayCanonicalValue(field, evidence.value);
+  const rawText = displayCanonicalValue(field, evidence.value);
+  if (evidence.kind === "observation" && evidence.displayName) {
+    return rawText === MISSING_VALUE_TEXT
+      ? evidence.displayName
+      : `${evidence.displayName} (${rawText})`;
+  }
+  return rawText;
 }
 
 export function formatEvidenceTimestamp(iso: string | null): string | null {
@@ -214,7 +277,12 @@ export function buildTruthRowViewModel(
   return {
     field,
     label: fieldLabel(field),
-    valueText: displayCanonicalValue(field, apiField.canonicalValue),
+    // M3.5 real-data defect fix: canonicalDisplayValue (e.g. an owner's
+    // resolved name) is preferred when present; canonicalValue itself —
+    // the real, stable value 3F actually reconciled — is never mutated,
+    // only its on-screen presentation is overridden. See
+    // accountTruth.ts's own comment on this field.
+    valueText: apiField.canonicalDisplayValue ?? displayCanonicalValue(field, apiField.canonicalValue),
     statusText: statusLabel(apiField.resolutionState, apiField.canonicalValue),
     badgeVariant: statusBadgeVariant(apiField.resolutionState, apiField.canonicalValue),
     rationale: apiField.rationale,
