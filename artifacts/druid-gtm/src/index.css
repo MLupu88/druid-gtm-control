@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
+/* LS2 — dark is the only supported production theme; there is no runtime
+   toggle any more. `data-theme="dark"` is a static attribute set directly
+   on <html> in index.html (never mutated by JS) purely so this Tailwind
+   `dark:` variant — used across the app, not just for the logo — keeps
+   resolving correctly and unconditionally. */
 @custom-variant dark (&:is([data-theme="dark"] *));
 
 @theme inline {
@@ -154,127 +159,11 @@
   }
 }
 
-/* ─── Light mode (optional) ───────────────────────────────────────────────── */
-/* page bg #f5f7f6 · card #ffffff · border #dde0e6 · text #1a1a1a
-   muted text #6b7280 · primary green #00c158 · muted surface #f3f4f6        */
-
-[data-theme="light"] {
-  --button-outline: rgba(0,0,0, .08);
-  --badge-outline: rgba(0,0,0, .05);
-  --opaque-button-border-intensity: -5;
-  --elevate-1: rgba(0,0,0, .03);
-  --elevate-2: rgba(0,0,0, .06);
-
-  /* Page / surface / border */
-  --background:         150 11% 97%;   /* #f5f7f6 */
-  --foreground:         0   0%  10%;   /* #1a1a1a */
-  --border:             221 15% 88%;   /* #dde0e6 */
-  --border-strong:      220 12% 76%;
-  --input:              220 15% 96%;   /* #f3f4f6 */
-  --ring:               147 100% 38%;  /* #00c158 */
-  --surface-1:          0 0% 100%;
-  --surface-2:          150 11% 97%;
-  --surface-3:          220 15% 94%;
-  --content-primary:    0 0% 10%;
-  --content-secondary:  220 9% 38%;
-  --content-muted:      220 9% 47%;
-
-  /* Card */
-  --card:               0   0%  100%;  /* #ffffff */
-  --card-foreground:    0   0%  10%;
-  --card-border:        221 15% 88%;
-
-  /* Popover */
-  --popover:            0   0%  100%;
-  --popover-foreground: 0   0%  10%;
-  --popover-border:     221 15% 88%;
-
-  /* Primary — DRUID green */
-  --primary:            147 100% 38%;  /* #00c158 */
-  --primary-foreground: 0   0%  100%;  /* white text on green */
-
-  /* Secondary */
-  --secondary:          220 12% 92%;
-  --secondary-foreground: 0 0% 10%;
-
-  /* Muted */
-  --muted:              220 15% 96%;   /* #f3f4f6 */
-  --muted-foreground:   220 9%  47%;   /* #6b7280 */
-
-  /* Accent */
-  --accent:             220 15% 96%;
-  --accent-foreground:  0   0%  10%;
-
-  /* Destructive */
-  --destructive:        0   72% 51%;
-  --destructive-foreground: 0 0% 100%;
-
-  /* Semantic status surfaces */
-  --status-neutral: 220 15% 96%;
-  --status-neutral-foreground: 220 11% 38%;
-  --status-neutral-border: 220 13% 84%;
-  --status-info: 211 100% 96%;
-  --status-info-foreground: 213 76% 38%;
-  --status-info-border: 212 72% 82%;
-  --status-success: 149 55% 94%;
-  --status-success-foreground: 151 68% 28%;
-  --status-success-border: 150 47% 76%;
-  --status-warning: 43 100% 94%;
-  --status-warning-foreground: 35 85% 30%;
-  --status-warning-border: 42 78% 75%;
-  --status-danger: 0 86% 97%;
-  --status-danger-foreground: 0 67% 42%;
-  --status-danger-border: 0 68% 84%;
-
-  /* Sidebar — white, premium */
-  --sidebar:            0   0%  100%;
-  --sidebar-foreground: 0   0%  15%;
-  --sidebar-border:     221 15% 88%;
-  --sidebar-primary:    147 100% 38%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent:     220 15% 96%;
-  --sidebar-accent-foreground: 0 0% 10%;
-  --sidebar-ring:       147 100% 38%;
-
-  /* Charts */
-  --chart-1: 147 100% 38%;
-  --chart-2: 38  92%  50%;
-  --chart-3: 200 80%  55%;
-  --chart-4: 280 65%  60%;
-  --chart-5: 0   84%  60%;
-
-  /* Shadows — subtle in light mode */
-  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-xs:  0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.04);
-  --shadow-sm:  0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.04);
-  --shadow:     0 10px 15px -3px rgb(0 0 0 / 0.07), 0 4px 6px -4px rgb(0 0 0 / 0.04);
-  --shadow-md:  0 20px 25px -5px rgb(0 0 0 / 0.07), 0 8px 10px -6px rgb(0 0 0 / 0.04);
-  --shadow-lg:  0 25px 50px -12px rgb(0 0 0 / 0.10);
-  --shadow-xl:  0 30px 60px -15px rgb(0 0 0 / 0.12);
-  --shadow-2xl: 0 40px 80px -20px rgb(0 0 0 / 0.15);
-
-  --sidebar-primary-border: hsl(var(--sidebar-primary));
-  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --sidebar-accent-border: hsl(var(--sidebar-accent));
-  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --primary-border: hsl(var(--primary));
-  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --secondary-border: hsl(var(--secondary));
-  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --muted-border: hsl(var(--muted));
-  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --accent-border: hsl(var(--accent));
-  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --destructive-border: hsl(var(--destructive));
-  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-}
-
-/* ─── Dark mode (default) ─────────────────────────────────────────────────── */
+/* ─── Dark theme (the only supported production appearance — LS2) ─────────── */
 /* bg #0a0f0d · card #111816 · border #1f2924 · input #1a2220
    primary green #00e676 · muted text #9ca3af                                 */
 
-:root,
-[data-theme="dark"] {
+:root {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
   --opaque-button-border-intensity: 9;

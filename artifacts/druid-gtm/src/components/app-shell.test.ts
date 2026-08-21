@@ -54,13 +54,24 @@ test("operator and shell utilities remain available", () => {
   assert.ok(source.includes("Marketplace Analytics"));
   assert.ok(source.includes("Acting as {operator.name}"));
   assert.ok(source.includes("logout.mutate()"));
-  assert.ok(source.includes('setTheme(option)'));
 });
 
-test("the DRUID logo uses the active theme without rendering both variants", () => {
+// LS2 — Live Shell Closure: dark is the only supported production
+// appearance. There is no appearance toggle, no theme state/persistence,
+// and no light-logo variant any more — the shell renders exactly one
+// logo image, unconditionally.
+test("no appearance toggle or theme-switching logic remains, and exactly one logo image is rendered", () => {
   const source = readFileSync(SOURCE_PATH, "utf8");
-  assert.ok(source.includes('className="hidden h-7 w-auto max-w-[116px] object-contain dark:block'));
-  assert.ok(source.includes('className="block h-7 w-auto max-w-[116px] object-contain dark:hidden'));
-  assert.ok(!source.includes('className="logo-white'));
-  assert.ok(!source.includes('className="logo-black'));
+  for (const marker of [
+    "useTheme",
+    "setTheme",
+    "Appearance",
+    "logoBlack",
+    "dark:block",
+    "dark:hidden",
+  ]) {
+    assert.ok(!source.includes(marker), `stale theme-toggle marker still present: ${marker}`);
+  }
+  assert.equal((source.match(/<img\b/g) ?? []).length, 1);
+  assert.ok(source.includes("src={logoWhite}"));
 });
