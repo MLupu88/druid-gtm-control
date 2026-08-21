@@ -7,6 +7,7 @@ import sheetsRouter from "./sheets";
 import { createAccountEvaluationsRouter } from "./accountEvaluations";
 import { createIcpProfilesRouter } from "./icpProfiles";
 import { createAccountsRouter } from "./accounts";
+import { createOverviewRouter } from "./overview";
 import { createAccountDecisionsRouter } from "./accountDecisions";
 import { createClientRadarResearchRunsRouter } from "./clientRadarResearchRuns";
 import { createAccountIcpEvaluationsRouter } from "./accountIcpEvaluations";
@@ -109,6 +110,10 @@ router.use(
   createIcpProfilesRouter({ db }),
 );
 router.use("/internal/accounts", requireAuth, createAccountsRouter({ db }));
+// LS3 — Live Shell Closure: GET /internal/overview/metrics, the
+// canonical Overview aggregate. Same requireAuth boundary as every other
+// browser-facing /internal route.
+router.use("/internal/overview", requireAuth, createOverviewRouter({ db }));
 router.use(
   "/internal/hubspot/company-sync",
   requireAuth,
