@@ -38,6 +38,8 @@ import {
 } from "@/lib/global-activity-presentation";
 import { fetchOverviewCharts, overviewChartsQueryKey } from "@/lib/overview-charts-api";
 import { OverviewChartsSection } from "@/components/overview-charts-section";
+import { fetchOverviewSummary, overviewSummaryQueryKey } from "@/lib/overview-summary-api";
+import { OverviewSummaryCard } from "@/components/overview-summary-card";
 
 // A small, fixed preview — the full searchable/filterable/paginated
 // experience lives under Accounts (?view=attention); Overview is
@@ -90,11 +92,29 @@ export default function DashboardPage() {
     staleTime: 30_000,
   });
 
+  // LS6 — grounded, factual AI Summary (Postgres-derived facts only, no
+  // Sheets). Cached server-side for several minutes — see
+  // ../../api-server/src/routes/overview.ts's SUMMARY_CACHE_TTL_MS — so
+  // this query does not need an aggressive staleTime of its own.
+  const overviewSummaryQ = useQuery({
+    queryKey: overviewSummaryQueryKey(),
+    queryFn: fetchOverviewSummary,
+    staleTime: 60_000,
+  });
+
   return (
     <PageLayout className="space-y-6">
       <PageHeader
         title="DRUID Signals overview"
         description="See what the GTM signal engine is finding, what needs attention, and what is only being logged for now."
+      />
+
+      {/* AI Summary — grounded, factual digest (LS6) */}
+      <OverviewSummaryCard
+        summary={overviewSummaryQ.data}
+        isLoading={overviewSummaryQ.isLoading}
+        isError={overviewSummaryQ.isError}
+        onRetry={() => void overviewSummaryQ.refetch()}
       />
 
       {/* Overview metrics — canonical, Postgres-only (LS3) */}

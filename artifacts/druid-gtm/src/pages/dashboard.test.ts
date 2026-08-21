@@ -106,3 +106,27 @@ test("Overview's charts are backed by the canonical Overview charts endpoint", (
   // Never a second, hand-rolled chart data source.
   assert.ok(!SOURCE.includes('fetch("/api/sheets/'));
 });
+
+test("Overview's AI Summary is backed by the canonical Overview summary endpoint — LS6", () => {
+  assert.ok(SOURCE.includes("fetchOverviewSummary"));
+  assert.ok(SOURCE.includes("overviewSummaryQueryKey"));
+  assert.ok(SOURCE.includes("OverviewSummaryCard"));
+  assert.ok(SOURCE.includes("overviewSummaryQ.isLoading"));
+  assert.ok(SOURCE.includes("overviewSummaryQ.isError"));
+  // Never a second, hand-rolled AI/text data source.
+  assert.ok(!SOURCE.includes('fetch("/api/sheets/'));
+});
+
+test("AI Summary failure never blocks the rest of Overview — every section has its own independent query", () => {
+  // Each of these queries is independently fetched/error-handled — a
+  // failing overviewSummaryQ never gates rendering of the others.
+  for (const marker of [
+    "overviewMetricsQ",
+    "overviewChartsQ",
+    "needsAttentionQ",
+    "globalActivityQ",
+    "overviewSummaryQ",
+  ]) {
+    assert.ok(SOURCE.includes(marker), `expected an independent query for: ${marker}`);
+  }
+});

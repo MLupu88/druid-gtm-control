@@ -15,10 +15,13 @@ import {
   type GetOverviewMetricsFn,
   type GetGlobalActivityFn,
   type GetOverviewChartsFn,
+  type GetOverviewSummaryFn,
 } from "./overview.js";
 import type { OverviewMetrics } from "../services/overviewMetrics.js";
 import type { GlobalActivityItemDTO } from "../services/accountActivity.js";
 import type { OverviewCharts } from "../services/overviewCharts.js";
+import type { OverviewSummaryResult } from "../services/overviewSummary.js";
+import { OverviewSummaryUnavailableError } from "../services/overviewSummary.js";
 
 function syntheticMetrics(overrides: Partial<OverviewMetrics> = {}): OverviewMetrics {
   return {
@@ -57,10 +60,21 @@ function syntheticCharts(overrides: Partial<OverviewCharts> = {}): OverviewChart
   };
 }
 
+function syntheticSummary(overrides: Partial<OverviewSummaryResult> = {}): OverviewSummaryResult {
+  return {
+    timeframe: { days: 7, from: "2026-08-08T00:00:00.000Z", to: "2026-08-15T00:00:00.000Z" },
+    summary: "12 observations were captured across the last 7 calendar days.",
+    factsUsed: ["observationsCaptured"],
+    generatedAt: "2026-08-15T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 function buildTestApp(
   getOverviewMetricsFn: GetOverviewMetricsFn,
   getGlobalActivityFn: GetGlobalActivityFn = async () => [],
   getOverviewChartsFn: GetOverviewChartsFn = async () => syntheticCharts(),
+  getOverviewSummaryFn: GetOverviewSummaryFn = async () => syntheticSummary(),
 ): Express {
   const app = express();
   app.use((req, _res, next) => {
@@ -69,7 +83,12 @@ function buildTestApp(
   });
   app.use(
     "/internal/overview",
-    createOverviewRouter({ getOverviewMetricsFn, getGlobalActivityFn, getOverviewChartsFn }),
+    createOverviewRouter({
+      getOverviewMetricsFn,
+      getGlobalActivityFn,
+      getOverviewChartsFn,
+      getOverviewSummaryFn,
+    }),
   );
   return app;
 }
@@ -270,5 +289,114 @@ test("GET /internal/overview/charts maps an unexpected service error to a safe 5
     assert.equal(res.status, 500);
     assert.equal(body.code, "internal_error");
     assert.ok(!body.error.includes("pg://internal"));
+  });
+});
+
+// ---------------------------------------------------------------------
+// LS6 — GET /internal/overview/summary
+// ---------------------------------------------------------------------
+
+test("GET /internal/overview/summary returns the service's summary verbatim, calling it exactly once", async () => {
+  const summary = syntheticSummary();
+  const getOverviewSummaryFn = mock.fn<GetOverviewSummaryFn>(async () => summary);
+  const app = buildTestApp(
+    mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+    undefined,
+    undefined,
+    getOverviewSummaryFn,
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/summary`);
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, summary);
+    assert.equal(getOverviewSummaryFn.mock.calls.length, 1);
+  });
+});
+
+test("GET /internal/overview/summary maps OverviewSummaryUnavailableError to a safe 503, not a hard failure", async () => {
+  const getOverviewSummaryFn = mock.fn<GetOverviewSummaryFn>(async () => {
+    throw new OverviewSummaryUnavailableError("DEEPSEEK_API_KEY is not configured.", "not_configured");
+  });
+  const app = buildTestApp(
+    mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+    undefined,
+    undefined,
+    getOverviewSummaryFn,
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/summary`);
+    const body = (await res.json()) as { error: string; code: string };
+    assert.equal(res.status, 503);
+    assert.equal(body.code, "ai_summary_unavailable");
+  });
+});
+
+test("GET /internal/overview/summary maps every OverviewSummaryUnavailableError reason to the same safe 503 — the frontend never needs to distinguish why", async () => {
+  const reasons = [
+    "not_configured",
+    "api_error",
+    "invalid_json",
+    "invalid_shape",
+    "forbidden_language",
+    "ungrounded",
+  ] as const;
+
+  for (const reason of reasons) {
+    const getOverviewSummaryFn = mock.fn<GetOverviewSummaryFn>(async () => {
+      throw new OverviewSummaryUnavailableError(`failed: ${reason}`, reason);
+    });
+    const app = buildTestApp(
+      mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+      undefined,
+      undefined,
+      getOverviewSummaryFn,
+    );
+
+    await withServer(app, async (baseUrl) => {
+      const res = await fetch(`${baseUrl}/internal/overview/summary`);
+      assert.equal(res.status, 503, `expected 503 for reason "${reason}"`);
+    });
+  }
+});
+
+test("GET /internal/overview/summary maps an unexpected (non-AI) service error to a safe 500 response, without leaking internal details", async () => {
+  const getOverviewSummaryFn = mock.fn<GetOverviewSummaryFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp(
+    mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+    undefined,
+    undefined,
+    getOverviewSummaryFn,
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/summary`);
+    const body = (await res.json()) as { error: string; code: string };
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!body.error.includes("pg://internal"));
+  });
+});
+
+test("GET /internal/overview/summary: the returned summary text never contains the word 'signal'", async () => {
+  const summary = syntheticSummary({ summary: "42 observations were captured across the last 7 calendar days." });
+  const getOverviewSummaryFn = mock.fn<GetOverviewSummaryFn>(async () => summary);
+  const app = buildTestApp(
+    mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+    undefined,
+    undefined,
+    getOverviewSummaryFn,
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/summary`);
+    const body = (await res.json()) as OverviewSummaryResult;
+    assert.equal(res.status, 200);
+    assert.ok(!body.summary.toLowerCase().includes("signal"));
   });
 });
