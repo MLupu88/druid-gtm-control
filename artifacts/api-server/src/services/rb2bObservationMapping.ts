@@ -25,9 +25,36 @@
 // validates only the inbound REQUEST shape, not the outbound observation
 // shape — the two are deliberately not conflated into one validation
 // pass, mirroring ../services/signals.ts's own request-vs-contract split.
+//
+// M3.5 real-data defect fix — the account-binding gap. The original
+// 3E.2 design (comment above, still accurate for firmographic_fact/
+// crm_state) deliberately emitted no identity observation for RB2B,
+// since nothing consumed one yet. That is no longer true:
+// ../services/observationSubjectBinding.ts (reused unmodified by both
+// 3F reconciliation and ../services/accountActivity.ts's Activity feed)
+// binds a non-identity observation to an account ONLY via a persisted
+// `identity`-class observation sharing that non-identity observation's
+// exact (provider, sourceRecordId) — the same mechanism
+// ../services/hubSpotObservationMapping.ts already relies on for every
+// HubSpot observation. Without a matching identity observation, a
+// behavioral_signal observation can never be selected for any account,
+// no matter how correctly ../services/rb2bIdentity.ts resolves the
+// canonical Account (that resolution writes account_aliases directly,
+// entirely independent of — and, until this fix, invisible to — the
+// observations table's own binding mechanism).
+//
+// mapRb2bSignalToIdentityObservation below closes exactly that gap: one
+// additional `identity`/`domain` observation, sharing the SAME
+// sourceRecordId/importedAt as the behavioral_signal observation from
+// the same mapping call, only when a usable company_domain exists —
+// never a fabricated external_id (RB2B supplies no stable one; see
+// ../services/rb2bIdentity.ts's own comment), never emitted for a
+// domain-less (unresolvable) event. This is the provider's own
+// evidence, immutable and append-only exactly like every other
+// observation — not a new persistence mechanism.
 
 import { z } from "zod/v4";
-import type { BehavioralSignalObservationV1 } from "@workspace/observation";
+import type { BehavioralSignalObservationV1, IdentityObservationV1 } from "@workspace/observation";
 
 // Every optional field below mirrors ICP 01's already-identified
 // normalized RB2B signal fields (see NEXT_SESSION.md's 3E.2 design
@@ -89,6 +116,49 @@ export function mapRb2bSignalToObservation(
     eventType: dto.signal_type,
     rawValue: dto as unknown as BehavioralSignalObservationV1["rawValue"],
     normalizedValue: null,
+    observedAt: dto.provider_observed_at ?? null,
+    importedAt: dto.ingestion_attempt_at,
+    confidence: null,
+    evidenceRefs: [],
+    providerMetadata: null,
+  };
+}
+
+/**
+ * M3.5 real-data defect fix — see module comment. Returns the one
+ * `identity`/`domain` observation needed so
+ * ../services/observationSubjectBinding.ts can later bind THIS SAME
+ * ingestion event's behavioral_signal observation (mapRb2bSignalToObservation
+ * above) to a canonical account — sharing its exact sourceRecordId/
+ * importedAt is what makes that binding possible, mirroring exactly how
+ * ../services/hubSpotObservationMapping.ts's identity observations share
+ * sourceRecordId with that same fetch's firmographic_fact/crm_state
+ * observations.
+ *
+ * Returns null (never a fabricated identity claim) when company_domain
+ * is absent or blank — a company-level identity that cannot itself be
+ * resolved must not manufacture binding evidence either; see
+ * ../services/rb2bIdentity.ts's identical "no domain -> unresolved,
+ * nothing guessed" behavior on the account-resolution side. identityValue
+ * is the RAW provider domain string, unnormalized — normalization happens
+ * uniformly at bind time (../services/observationSubjectBinding.ts's
+ * computeIdentityAliasLookup), exactly like every other identity
+ * observation in this repo.
+ */
+export function mapRb2bSignalToIdentityObservation(
+  dto: Rb2bSignalBridgeRequest,
+): IdentityObservationV1 | null {
+  const domain = dto.company_domain?.trim();
+  if (!domain) return null;
+
+  return {
+    schemaVersion: "v1",
+    provider: "rb2b",
+    sourceRecordId: dto.source_record_id,
+    observationClass: "identity",
+    subjectType: "account",
+    identityKey: "domain",
+    identityValue: domain,
     observedAt: dto.provider_observed_at ?? null,
     importedAt: dto.ingestion_attempt_at,
     confidence: null,

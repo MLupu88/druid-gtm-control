@@ -13,6 +13,13 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
 import { getAccountRecentActivity, AccountNotFoundError } from "./accountActivity.js";
+import {
+  mapRb2bSignalToIdentityObservation,
+  mapRb2bSignalToObservation,
+  type Rb2bSignalBridgeRequest,
+} from "./rb2bObservationMapping.js";
+import { recordObservation } from "./observations.js";
+import { resolveRb2bPersonAccount } from "./rb2bIdentity.js";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const skip = !DATABASE_URL;
@@ -196,6 +203,122 @@ test("rawValue is returned exactly as stored, and occurredAt falls back to impor
   assert.deepEqual(item?.rawValue, { page_visited: "/pricing", contact_email: "jane@acme.example" });
   assert.equal(item?.occurredAt, importedAt.toISOString());
 });
+
+// ---------------------------------------------------------------------
+// M3.5 — end-to-end regression for the account-binding gap fixed in
+// ../services/rb2bObservationMapping.ts (mapRb2bSignalToIdentityObservation)
+// and ../routes/rb2bSignalBridge.ts. Exercises the real writer
+// (mapRb2bSignalToObservation + mapRb2bSignalToIdentityObservation +
+// recordObservation — exactly what the route does, not a fake), the
+// real resolver (resolveRb2bPersonAccount), and the real reader
+// (getAccountRecentActivity) together against one real Postgres
+// instance — never a pre-bound observation seeded by hand.
+// ---------------------------------------------------------------------
+
+function rb2bEvent(overrides: Partial<Rb2bSignalBridgeRequest> = {}): Rb2bSignalBridgeRequest {
+  return {
+    source: "rb2b",
+    signal_type: "page_view",
+    source_record_id: crypto.randomUUID(),
+    ingestion_attempt_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+/** Exactly what ../routes/rb2bSignalBridge.ts's handler does, in order: record the behavioral observation, record the companion identity observation (when a domain exists), then resolve identity. */
+async function ingestRb2bEvent(event: Rb2bSignalBridgeRequest) {
+  const behavioralResult = await recordObservation({
+    db: db!,
+    observation: mapRb2bSignalToObservation(event),
+  });
+  if (behavioralResult.outcome === "conflict") {
+    throw new Error("unexpected observation conflict in test fixture");
+  }
+
+  const identityCandidate = mapRb2bSignalToIdentityObservation(event);
+  if (identityCandidate !== null) {
+    await recordObservation({ db: db!, observation: identityCandidate });
+  }
+
+  const binding = await resolveRb2bPersonAccount({ db: db!, event });
+  return { observationId: behavioralResult.observation.id, binding };
+}
+
+test(
+  "an RB2B payload ingested through the real writer + resolver path is visible in getAccountRecentActivity() for the resolved account",
+  { skip },
+  async () => {
+    const domain = `rb2b-e2e-${crypto.randomUUID()}.example`;
+    const { observationId, binding } = await ingestRb2bEvent(
+      rb2bEvent({
+        company_domain: domain,
+        company_name: "RB2B E2E Co",
+        signal_type: "page_view",
+      }),
+    );
+
+    assert.equal(binding.accountResolution.outcome, "resolved");
+    if (binding.accountResolution.outcome !== "resolved") return;
+
+    const items = await getAccountRecentActivity(db!, binding.accountResolution.accountId);
+    assert.ok(
+      items.some((item) => item.id === observationId),
+      "expected the ingested behavioral observation to be selectable for its resolved account",
+    );
+  },
+);
+
+test(
+  "a second RB2B visit from the same account (same domain, new event) is also visible, alongside the first",
+  { skip },
+  async () => {
+    const domain = `rb2b-e2e-multi-${crypto.randomUUID()}.example`;
+    const first = await ingestRb2bEvent(rb2bEvent({ company_domain: domain }));
+    const second = await ingestRb2bEvent(rb2bEvent({ company_domain: domain }));
+
+    assert.equal(first.binding.accountResolution.outcome, "resolved");
+    assert.equal(second.binding.accountResolution.outcome, "resolved");
+    if (first.binding.accountResolution.outcome !== "resolved") return;
+    if (second.binding.accountResolution.outcome !== "resolved") return;
+    assert.equal(first.binding.accountResolution.accountId, second.binding.accountResolution.accountId);
+
+    const items = await getAccountRecentActivity(db!, first.binding.accountResolution.accountId);
+    const ids = items.map((item) => item.id);
+    assert.ok(ids.includes(first.observationId));
+    assert.ok(ids.includes(second.observationId));
+  },
+);
+
+test(
+  "an event with no usable domain resolves unresolved and its observation is not visible under any unrelated account's activity",
+  { skip },
+  async () => {
+    const { observationId, binding } = await ingestRb2bEvent(rb2bEvent({ company_domain: null }));
+    assert.equal(binding.accountResolution.outcome, "unresolved");
+
+    const unrelatedAccountId = await makeAccount();
+    const items = await getAccountRecentActivity(db!, unrelatedAccountId);
+    assert.equal(items.some((item) => item.id === observationId), false);
+  },
+);
+
+test(
+  "an RB2B event for one account never appears under a different, unrelated account's activity",
+  { skip },
+  async () => {
+    const domainA = `rb2b-e2e-isolation-a-${crypto.randomUUID()}.example`;
+    const domainB = `rb2b-e2e-isolation-b-${crypto.randomUUID()}.example`;
+    const eventA = await ingestRb2bEvent(rb2bEvent({ company_domain: domainA }));
+    await ingestRb2bEvent(rb2bEvent({ company_domain: domainB }));
+
+    assert.equal(eventA.binding.accountResolution.outcome, "resolved");
+    if (eventA.binding.accountResolution.outcome !== "resolved") return;
+
+    const unrelatedAccountId = await makeAccount();
+    const items = await getAccountRecentActivity(db!, unrelatedAccountId);
+    assert.equal(items.some((item) => item.id === eventA.observationId), false);
+  },
+);
 
 test.after(async () => {
   await pool?.end();

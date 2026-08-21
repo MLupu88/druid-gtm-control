@@ -1,8 +1,8 @@
 // Unit tests for the accounts read-model service. No database needed —
 // every db interaction is a fake queue-based query-chain object (see
 // makeFakeDb), same spirit as ../services/icpProfiles.test.ts's
-// makeQueueTx: each root select()/selectDistinctOn() call consumes the
-// next canned response in call order, and every chain method call is
+// makeQueueTx: each root select()/selectDistinctOn()/selectDistinct() call
+// consumes the next canned response in call order, and every chain method call is
 // recorded so tests can assert on call counts/shape without a real
 // Postgres connection.
 //
@@ -216,7 +216,7 @@ function expectedEvaluationDetail(
 
 // ---------------------------------------------------------------------
 // Fake db: a queue of canned responses, one per root select()/
-// selectDistinctOn() call, consumed in call order. Every chain method is
+// selectDistinctOn()/selectDistinct() call, consumed in call order. Every chain method is
 // recorded (with its arguments) onto a shared `calls` array.
 // ---------------------------------------------------------------------
 
@@ -253,6 +253,15 @@ function makeFakeDb(queue: unknown[]) {
     },
     selectDistinctOn: (...args: unknown[]) => {
       calls.push({ method: "selectDistinctOn", args });
+      return chain();
+    },
+    // GTM V2 Stage 4, Unit 2 — getAccountById's identityAliasTypes lookup
+    // (see ./accounts.ts) calls db.selectDistinct(...), a genuinely
+    // different drizzle root method from selectDistinctOn above (DISTINCT
+    // vs DISTINCT ON). Same queue-consuming chain() as every other root
+    // entry point here.
+    selectDistinct: (...args: unknown[]) => {
+      calls.push({ method: "selectDistinct", args });
       return chain();
     },
   };
@@ -859,7 +868,10 @@ test("getAccountById returns the account with its exact evaluation rows in deter
   // "production" (see syntheticEvaluationSummary) — newer is therefore the
   // latestProductionEvaluationRow (first in already-sorted-desc order), so
   // GTM V2 Stage 4, Unit 1's batched staleness lookup fires a 4th query.
-  const { db, calls } = makeFakeDb([[account], [newer, older], [snapshot], []]);
+  // 5th slot: getAccountById's identityAliasTypes lookup (db.selectDistinct)
+  // — [] means no strong aliases for this fixture, not exercised by this
+  // test's assertions.
+  const { db, calls } = makeFakeDb([[account], [newer, older], [snapshot], [], []]);
 
   const result = await getAccountById(db, account.id);
 
@@ -891,10 +903,11 @@ test("getAccountById: latestProductionEvaluationStaleness is null when the accou
     id: "eval-preview",
     evaluationMode: "preview",
   });
-  // Only 3 queue entries: account, evaluationRows, snapshot lookup — the
-  // staleness lookup must be skipped entirely (0 ids), never consuming a
-  // 4th slot, since no row here is completed+production.
-  const { db } = makeFakeDb([[account], [previewEval], []]);
+  // 4 queue entries: account, evaluationRows, snapshot lookup, then
+  // identityAliasTypes lookup (db.selectDistinct) — the staleness lookup
+  // must be skipped entirely (0 ids), never consuming a slot, since no
+  // row here is completed+production.
+  const { db } = makeFakeDb([[account], [previewEval], [], []]);
 
   const result = await getAccountById(db, account.id);
 
@@ -926,6 +939,9 @@ test("getAccountById: latestProductionEvaluationStaleness targets the newest com
     [newestPreview, newestProduction, olderProduction],
     [snapshot],
     [{ evaluationId: "eval-production-newest", id: "attn-1" }],
+    // identityAliasTypes lookup (db.selectDistinct) — not exercised by
+    // this test's assertions.
+    [],
   ]);
 
   const result = await getAccountById(db, account.id);

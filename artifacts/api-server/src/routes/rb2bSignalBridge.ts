@@ -44,6 +44,7 @@ import type * as schema from "@workspace/db/schema";
 import { ProviderObservationV1Schema } from "@workspace/observation";
 import {
   Rb2bSignalBridgeRequestSchema,
+  mapRb2bSignalToIdentityObservation,
   mapRb2bSignalToObservation,
   type Rb2bSignalBridgeRequest,
 } from "../services/rb2bObservationMapping.js";
@@ -170,6 +171,37 @@ export function createRb2bSignalBridgeRouter(
         },
         `POST /internal/rb2b/signals: ${result.outcome}`,
       );
+
+      // M3.5 real-data defect fix: a companion `identity`/`domain`
+      // observation, sharing this same event's sourceRecordId, is what
+      // lets ../services/observationSubjectBinding.ts (reused unmodified
+      // by ../services/accountActivity.ts) later select the behavioral
+      // observation above for the resolved account — see
+      // ../services/rb2bObservationMapping.ts's module comment for the
+      // full root cause. null when there is no usable company_domain
+      // (never fabricated). Best-effort: the behavioral observation
+      // above is already safely recorded regardless of this outcome.
+      const identityObservationCandidate = mapRb2bSignalToIdentityObservation(parsedRequest.data);
+      if (identityObservationCandidate !== null) {
+        const parsedIdentityObservation = ProviderObservationV1Schema.safeParse(
+          identityObservationCandidate,
+        );
+        if (parsedIdentityObservation.success) {
+          try {
+            await recordObservationFn({ observation: parsedIdentityObservation.data });
+          } catch (identityObservationError) {
+            req.log?.error(
+              { err: identityObservationError, observationId: observation.id },
+              "POST /internal/rb2b/signals: identity observation write failed; behavioral observation already recorded",
+            );
+          }
+        } else {
+          req.log?.error(
+            { observationId: observation.id },
+            "POST /internal/rb2b/signals: mapped identity observation failed schema validation",
+          );
+        }
+      }
 
       // The immutable observation is already safely recorded above.
       // Identity resolution runs next but never turns that success into

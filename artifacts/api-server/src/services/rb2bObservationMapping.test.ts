@@ -8,6 +8,7 @@ import test from "node:test";
 import { ProviderObservationV1Schema } from "@workspace/observation";
 import {
   Rb2bSignalBridgeRequestSchema,
+  mapRb2bSignalToIdentityObservation,
   mapRb2bSignalToObservation,
   type Rb2bSignalBridgeRequest,
 } from "./rb2bObservationMapping.js";
@@ -127,5 +128,57 @@ test("an invalid provider_observed_at (not a real timestamp) fails ProviderObser
 test("a request with no identity/context fields at all (unresolved identity) still maps to a valid observation", () => {
   const observation = mapRb2bSignalToObservation(validRequest());
   const parsed = ProviderObservationV1Schema.safeParse(observation);
+  assert.equal(parsed.success, true);
+});
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — mapRb2bSignalToIdentityObservation. See
+// this module's own header comment for the full root-cause explanation:
+// this is the observation ../services/observationSubjectBinding.ts needs
+// to later bind the behavioral_signal observation above to an account.
+// ---------------------------------------------------------------------
+
+test("a company_domain maps to an identity/domain observation sharing the exact same sourceRecordId/importedAt as the behavioral_signal observation", () => {
+  const dto = validRequest({ company_domain: "acme.com" });
+  const identity = mapRb2bSignalToIdentityObservation(dto);
+  const behavioral = mapRb2bSignalToObservation(dto);
+
+  assert.notEqual(identity, null);
+  assert.equal(identity?.provider, "rb2b");
+  assert.equal(identity?.observationClass, "identity");
+  assert.equal(identity?.subjectType, "account");
+  assert.equal(identity?.identityKey, "domain");
+  assert.equal(identity?.identityValue, "acme.com");
+  assert.equal(identity?.sourceRecordId, behavioral.sourceRecordId);
+  assert.equal(identity?.importedAt, behavioral.importedAt);
+});
+
+test("no company_domain (or a blank one) maps to null — never a fabricated identity claim", () => {
+  assert.equal(mapRb2bSignalToIdentityObservation(validRequest()), null);
+  assert.equal(
+    mapRb2bSignalToIdentityObservation(validRequest({ company_domain: null })),
+    null,
+  );
+  assert.equal(
+    mapRb2bSignalToIdentityObservation(validRequest({ company_domain: "   " })),
+    null,
+  );
+});
+
+test("identityValue is the raw provider domain string, never pre-normalized here", () => {
+  const identity = mapRb2bSignalToIdentityObservation(
+    validRequest({ company_domain: "HTTPS://WWW.Acme.Example/" }),
+  );
+  assert.equal(identity?.identityValue, "HTTPS://WWW.Acme.Example/");
+});
+
+test("never emits an external_id identity observation — RB2B supplies no stable company external id", () => {
+  const identity = mapRb2bSignalToIdentityObservation(validRequest({ company_domain: "acme.com" }));
+  assert.equal(identity?.identityKey, "domain");
+});
+
+test("the mapped identity candidate satisfies ProviderObservationV1Schema", () => {
+  const identity = mapRb2bSignalToIdentityObservation(validRequest({ company_domain: "acme.com" }));
+  const parsed = ProviderObservationV1Schema.safeParse(identity);
   assert.equal(parsed.success, true);
 });

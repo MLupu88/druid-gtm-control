@@ -203,3 +203,76 @@ test("an invalid request body is rejected with 400 before either function is cal
     assert.equal(recordObservationFn.mock.calls.length, 0);
   });
 });
+
+// ---------------------------------------------------------------------
+// M3.5 real-data defect fix — a companion identity observation must also
+// be recorded when company_domain is present, so
+// ../services/observationSubjectBinding.ts can later bind the
+// behavioral observation to an account. See
+// ../services/rb2bObservationMapping.ts's module comment.
+// ---------------------------------------------------------------------
+
+const BODY_WITH_DOMAIN = { ...VALID_BODY, company_domain: "acme.com" };
+
+test("when company_domain is present, a second recordObservationFn call records a companion identity/domain observation", async () => {
+  const recordObservationFn = mock.fn<RecordObservationFn>(async () => ({
+    outcome: "created",
+    observation: syntheticObservation(),
+  }));
+  const resolvePersonAccountFn = mock.fn<ResolvePersonAccountFn>(async () => syntheticBinding());
+  const app = buildTestApp({ recordObservationFn, resolvePersonAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postSignal(baseUrl, BODY_WITH_DOMAIN);
+    assert.equal(res.status, 201);
+    assert.equal(recordObservationFn.mock.calls.length, 2);
+
+    const identityCall = recordObservationFn.mock.calls[1]?.arguments[0];
+    assert.equal(identityCall?.observation.observationClass, "identity");
+    if (identityCall?.observation.observationClass === "identity") {
+      assert.equal(identityCall.observation.identityKey, "domain");
+      assert.equal(identityCall.observation.identityValue, "acme.com");
+      assert.equal(identityCall.observation.sourceRecordId, BODY_WITH_DOMAIN.source_record_id);
+    }
+  });
+});
+
+test("without company_domain, only the behavioral observation is recorded — no fabricated identity observation", async () => {
+  const recordObservationFn = mock.fn<RecordObservationFn>(async () => ({
+    outcome: "created",
+    observation: syntheticObservation(),
+  }));
+  const resolvePersonAccountFn = mock.fn<ResolvePersonAccountFn>(async () => syntheticBinding());
+  const app = buildTestApp({ recordObservationFn, resolvePersonAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postSignal(baseUrl, VALID_BODY);
+    assert.equal(res.status, 201);
+    assert.equal(recordObservationFn.mock.calls.length, 1);
+  });
+});
+
+test("a failure recording the companion identity observation never fails the request — the behavioral observation already succeeded", async () => {
+  let calls = 0;
+  const recordObservationFn = mock.fn<RecordObservationFn>(async () => {
+    calls += 1;
+    if (calls === 1) {
+      return { outcome: "created", observation: syntheticObservation() };
+    }
+    throw new Error("identity observation write boom");
+  });
+  const resolvePersonAccountFn = mock.fn<ResolvePersonAccountFn>(async () => syntheticBinding());
+  const app = buildTestApp({ recordObservationFn, resolvePersonAccountFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await postSignal(baseUrl, BODY_WITH_DOMAIN);
+    const body = await readJson(res, "identity-observation-failure response");
+
+    assert.equal(res.status, 201);
+    assert.equal(body.observationId, syntheticObservation().id);
+    assert.equal(calls, 2);
+    // Identity resolution still ran — the identity-observation failure
+    // is isolated from it entirely.
+    assert.equal(resolvePersonAccountFn.mock.calls.length, 1);
+  });
+});
