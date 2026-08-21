@@ -96,3 +96,13 @@ test("Recent Activity has honest loading, error, and empty states — no sample 
   assert.ok(!SOURCE.includes("MOCK_ACCOUNT_QUEUE"));
   assert.ok(!SOURCE.includes("SAMPLE_ROWS"));
 });
+
+test("Overview's charts are backed by the canonical Overview charts endpoint", () => {
+  assert.ok(SOURCE.includes("fetchOverviewCharts"));
+  assert.ok(SOURCE.includes("overviewChartsQueryKey"));
+  assert.ok(SOURCE.includes("OverviewChartsSection"));
+  assert.ok(SOURCE.includes("overviewChartsQ.isLoading"));
+  assert.ok(SOURCE.includes("overviewChartsQ.isError"));
+  // Never a second, hand-rolled chart data source.
+  assert.ok(!SOURCE.includes('fetch("/api/sheets/'));
+});

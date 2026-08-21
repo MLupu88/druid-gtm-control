@@ -7,6 +7,15 @@
 // ../lib/overview-metrics-api.ts and
 // ../../api-server/src/services/overviewMetrics.ts for the exact
 // definitions.
+//
+// LS5 terminology correction: the "Observations captured" chip label
+// below reads from `metrics.signalsCaptured` — the API field name is
+// deliberately left unchanged (no API churn), but the count is a raw
+// canonical `observations` ROW count (every provider, every
+// observationClass), not a count of distinct external events. "Signals
+// captured" was retired as user-facing copy because it implied one row
+// = one meaningful external occurrence, which is not true across every
+// provider (see overviewMetrics.ts's own comment for why).
 
 import { InlineNotice } from "@/components/inline-notice";
 import { Button } from "@/components/ui/button";
@@ -62,7 +71,7 @@ export function OverviewMetricsStrip({
           <div className="flex items-center gap-2 flex-wrap">
             <MetricChip
               value={metrics.signalsCaptured}
-              label={`Signals captured — last ${metrics.timeframe.days} days`}
+              label={`Observations captured — last ${metrics.timeframe.days} calendar days`}
             />
             <MetricChip
               value={metrics.accountsNeedingAttention}

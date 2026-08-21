@@ -11,22 +11,31 @@
 // Every number here is a direct, deterministic canonical aggregate — no
 // scoring, no intent, no research-intelligence inference, no sample
 // fallback. A zero-data account always returns real zeros, never null.
+//
+// LS5 correction — signalsCaptured's window is no longer defined here.
+// It now derives from ./overviewTimeframe.ts's overviewWindowFor, the
+// single canonical "last N UTC calendar days" definition also used by
+// ./overviewCharts.ts's two charts, so the KPI and the charts can never
+// silently disagree about what "last 7 days" means. timeframeFor below
+// is kept as this module's own name for that shared function (never a
+// second, independent definition) so existing call sites/tests don't
+// need to change their import path.
 
-import { count, gte } from "drizzle-orm";
+import { and, count, gte, lte } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { accounts, observations } from "@workspace/db/schema";
 import type * as schema from "@workspace/db/schema";
 import { listAccounts } from "./accounts.js";
+import {
+  overviewWindowFor,
+  DEFAULT_OVERVIEW_TIMEFRAME_DAYS,
+  type OverviewTimeframe,
+} from "./overviewTimeframe.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
-const DEFAULT_TIMEFRAME_DAYS = 7;
-
-export interface OverviewMetricsTimeframe {
-  days: number;
-  from: string;
-  to: string;
-}
+/** @deprecated kept only so existing imports keep working — this is exactly OverviewTimeframe from ./overviewTimeframe.ts. */
+export type OverviewMetricsTimeframe = OverviewTimeframe;
 
 export interface OverviewMetrics {
   timeframe: OverviewMetricsTimeframe;
@@ -39,7 +48,19 @@ export interface OverviewMetrics {
    * claimed observed_at) is the correct field for "captured BY Mission
    * Control" — see observations.ts's own module comment: imported_at is
    * the caller-supplied ingestion-boundary timestamp, never server-
-   * defaulted, always present.
+   * defaulted, always present. The window itself is the last 7 UTC
+   * CALENDAR days including today (see ./overviewTimeframe.ts) — the
+   * same window ./overviewCharts.ts's signalsOverTime buckets sum to.
+   *
+   * LS5 terminology correction: rendered on Overview as "Observations
+   * captured", not "Signals captured" — a raw observation-ROW count is
+   * NOT the same thing as a count of distinct external events. One RB2B
+   * visit, one HubSpot refresh, or one Client Radar research run can
+   * each legitimately emit multiple observation rows (HubSpot alone: up
+   * to 9 per refresh — see hubSpotObservationMapping.ts), so this field
+   * intentionally does not claim to count "signals" in that sense. The
+   * field name itself (signalsCaptured) is left unchanged to avoid API
+   * churn — only the user-facing label changed.
    */
   signalsCaptured: number;
   /**
@@ -65,11 +86,8 @@ export interface OverviewMetrics {
   totalAccounts: number;
 }
 
-export function timeframeFor(days: number, now: Date): { from: Date; to: Date } {
-  const to = now;
-  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
-  return { from, to };
-}
+/** The single canonical Overview timeframe, re-exported under this module's established name — see ./overviewTimeframe.ts for the actual definition. Never redefine "last N days" independently here. */
+export const timeframeFor = overviewWindowFor;
 
 export interface GetOverviewMetricsArgs {
   db: Db;
@@ -83,14 +101,14 @@ export async function getOverviewMetrics(
   args: GetOverviewMetricsArgs,
 ): Promise<OverviewMetrics> {
   const { db } = args;
-  const days = args.days ?? DEFAULT_TIMEFRAME_DAYS;
+  const days = args.days ?? DEFAULT_OVERVIEW_TIMEFRAME_DAYS;
   const { from, to } = timeframeFor(days, args.now ?? new Date());
 
   const [signalsCapturedRow, totalAccountsRow, attentionResult] = await Promise.all([
     db
       .select({ value: count() })
       .from(observations)
-      .where(gte(observations.importedAt, from)),
+      .where(and(gte(observations.importedAt, from), lte(observations.importedAt, to))),
     db.select({ value: count() }).from(accounts),
     listAccounts({ db, limit: 1, offset: 0, needsAttention: true }),
   ]);

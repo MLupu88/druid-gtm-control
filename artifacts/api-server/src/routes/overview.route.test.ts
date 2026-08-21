@@ -14,9 +14,11 @@ import {
   createOverviewRouter,
   type GetOverviewMetricsFn,
   type GetGlobalActivityFn,
+  type GetOverviewChartsFn,
 } from "./overview.js";
 import type { OverviewMetrics } from "../services/overviewMetrics.js";
 import type { GlobalActivityItemDTO } from "../services/accountActivity.js";
+import type { OverviewCharts } from "../services/overviewCharts.js";
 
 function syntheticMetrics(overrides: Partial<OverviewMetrics> = {}): OverviewMetrics {
   return {
@@ -43,9 +45,22 @@ function syntheticActivityItem(overrides: Partial<GlobalActivityItemDTO> = {}): 
   };
 }
 
+function syntheticCharts(overrides: Partial<OverviewCharts> = {}): OverviewCharts {
+  return {
+    timeframe: { days: 7, from: "2026-08-08T00:00:00.000Z", to: "2026-08-15T00:00:00.000Z" },
+    signalsOverTime: [
+      { date: "2026-08-08", count: 2 },
+      { date: "2026-08-09", count: 0 },
+    ],
+    signalsByProvider: [{ provider: "rb2b", count: 2 }],
+    ...overrides,
+  };
+}
+
 function buildTestApp(
   getOverviewMetricsFn: GetOverviewMetricsFn,
   getGlobalActivityFn: GetGlobalActivityFn = async () => [],
+  getOverviewChartsFn: GetOverviewChartsFn = async () => syntheticCharts(),
 ): Express {
   const app = express();
   app.use((req, _res, next) => {
@@ -54,7 +69,7 @@ function buildTestApp(
   });
   app.use(
     "/internal/overview",
-    createOverviewRouter({ getOverviewMetricsFn, getGlobalActivityFn }),
+    createOverviewRouter({ getOverviewMetricsFn, getGlobalActivityFn, getOverviewChartsFn }),
   );
   return app;
 }
@@ -181,6 +196,76 @@ test("GET /internal/overview/activity maps an unexpected service error to a safe
 
   await withServer(app, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/internal/overview/activity`);
+    const body = (await res.json()) as { error: string; code: string };
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!body.error.includes("pg://internal"));
+  });
+});
+
+// ---------------------------------------------------------------------
+// LS5 — GET /internal/overview/charts
+// ---------------------------------------------------------------------
+
+test("GET /internal/overview/charts returns the service's charts verbatim, calling it exactly once", async () => {
+  const charts = syntheticCharts();
+  const getOverviewChartsFn = mock.fn<GetOverviewChartsFn>(async () => charts);
+  const app = buildTestApp(
+    mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+    undefined,
+    getOverviewChartsFn,
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/charts`);
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, charts);
+    assert.equal(getOverviewChartsFn.mock.calls.length, 1);
+  });
+});
+
+test("GET /internal/overview/charts: a zero-data result returns real zero-filled buckets and an empty provider list, not sample content", async () => {
+  const charts = syntheticCharts({
+    signalsOverTime: [
+      { date: "2026-08-08", count: 0 },
+      { date: "2026-08-09", count: 0 },
+    ],
+    signalsByProvider: [],
+  });
+  const getOverviewChartsFn = mock.fn<GetOverviewChartsFn>(async () => charts);
+  const app = buildTestApp(
+    mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+    undefined,
+    getOverviewChartsFn,
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/charts`);
+    const body = (await res.json()) as OverviewCharts;
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(
+      body.signalsOverTime.map((p) => p.count),
+      [0, 0],
+    );
+    assert.deepEqual(body.signalsByProvider, []);
+  });
+});
+
+test("GET /internal/overview/charts maps an unexpected service error to a safe 500 response, without leaking internal details", async () => {
+  const getOverviewChartsFn = mock.fn<GetOverviewChartsFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp(
+    mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()),
+    undefined,
+    getOverviewChartsFn,
+  );
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/charts`);
     const body = (await res.json()) as { error: string; code: string };
     assert.equal(res.status, 500);
     assert.equal(body.code, "internal_error");

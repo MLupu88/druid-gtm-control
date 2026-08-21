@@ -20,6 +20,10 @@ import {
   getGlobalRecentActivity,
   type GlobalActivityItemDTO,
 } from "../services/accountActivity.js";
+import {
+  getOverviewCharts,
+  type OverviewCharts,
+} from "../services/overviewCharts.js";
 
 const DEFAULT_ACTIVITY_LIMIT = 20;
 const MIN_ACTIVITY_LIMIT = 1;
@@ -45,17 +49,20 @@ function sendError(res: Response, status: number, code: string, message: string)
 
 export type GetOverviewMetricsFn = () => Promise<OverviewMetrics>;
 export type GetGlobalActivityFn = (limit: number) => Promise<GlobalActivityItemDTO[]>;
+export type GetOverviewChartsFn = () => Promise<OverviewCharts>;
 
 interface OverviewRouterDepsWithDb {
   db: NodePgDatabase<typeof schema>;
   getOverviewMetricsFn?: GetOverviewMetricsFn;
   getGlobalActivityFn?: GetGlobalActivityFn;
+  getOverviewChartsFn?: GetOverviewChartsFn;
 }
 
 interface OverviewRouterDepsInjected {
   db?: undefined;
   getOverviewMetricsFn: GetOverviewMetricsFn;
   getGlobalActivityFn: GetGlobalActivityFn;
+  getOverviewChartsFn: GetOverviewChartsFn;
 }
 
 export type OverviewRouterDeps = OverviewRouterDepsWithDb | OverviewRouterDepsInjected;
@@ -65,22 +72,25 @@ export type OverviewRouterDeps = OverviewRouterDepsWithDb | OverviewRouterDepsIn
  * or full service-function overrides, and tests can inject fake
  * implementations with no PostgreSQL connection at all. Production wiring
  * (../routes/index.ts) passes the real @workspace/db singleton. Declares
- * only "/metrics" and "/activity" — the caller mounts this router at the
- * full, specific "/internal/overview" prefix.
+ * only "/metrics", "/activity", and "/charts" — the caller mounts this
+ * router at the full, specific "/internal/overview" prefix.
  */
 export function createOverviewRouter(deps: OverviewRouterDeps): IRouter {
   const router: IRouter = Router();
 
   let getOverviewMetricsFn: GetOverviewMetricsFn;
   let getGlobalActivityFn: GetGlobalActivityFn;
+  let getOverviewChartsFn: GetOverviewChartsFn;
   if (deps.db) {
     const db = deps.db;
     getOverviewMetricsFn = deps.getOverviewMetricsFn ?? (() => getOverviewMetrics({ db }));
     getGlobalActivityFn =
       deps.getGlobalActivityFn ?? ((limit) => getGlobalRecentActivity(db, limit));
+    getOverviewChartsFn = deps.getOverviewChartsFn ?? (() => getOverviewCharts({ db }));
   } else {
     getOverviewMetricsFn = deps.getOverviewMetricsFn;
     getGlobalActivityFn = deps.getGlobalActivityFn;
+    getOverviewChartsFn = deps.getOverviewChartsFn;
   }
 
   router.get("/metrics", async (req: Request, res: Response) => {
@@ -109,6 +119,20 @@ export function createOverviewRouter(deps: OverviewRouterDeps): IRouter {
       res.status(200).json({ items });
     } catch (err) {
       req.log?.error({ err }, "GET /internal/overview/activity failed");
+      sendError(res, 500, "internal_error", "An unexpected error occurred.");
+    }
+  });
+
+  // GET /charts — LS5. The two canonical Overview charts (signals over
+  // time, signals by provider), both over the same 7-day/importedAt
+  // window ./services/overviewMetrics.ts's signalsCaptured uses. See
+  // ../services/overviewCharts.ts for exact semantics.
+  router.get("/charts", async (req: Request, res: Response) => {
+    try {
+      const charts = await getOverviewChartsFn();
+      res.status(200).json(charts);
+    } catch (err) {
+      req.log?.error({ err }, "GET /internal/overview/charts failed");
       sendError(res, 500, "internal_error", "An unexpected error occurred.");
     }
   });

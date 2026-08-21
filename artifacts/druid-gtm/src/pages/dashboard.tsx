@@ -36,6 +36,8 @@ import {
   describeActivityEvent,
   activityAccountLabel,
 } from "@/lib/global-activity-presentation";
+import { fetchOverviewCharts, overviewChartsQueryKey } from "@/lib/overview-charts-api";
+import { OverviewChartsSection } from "@/components/overview-charts-section";
 
 // A small, fixed preview — the full searchable/filterable/paginated
 // experience lives under Accounts (?view=attention); Overview is
@@ -80,6 +82,14 @@ export default function DashboardPage() {
     staleTime: 30_000,
   });
 
+  // LS5 — canonical Overview charts (Postgres-only, no Sheets). Same
+  // 7-day/importedAt window as signalsCaptured above.
+  const overviewChartsQ = useQuery({
+    queryKey: overviewChartsQueryKey(),
+    queryFn: fetchOverviewCharts,
+    staleTime: 30_000,
+  });
+
   return (
     <PageLayout className="space-y-6">
       <PageHeader
@@ -93,6 +103,14 @@ export default function DashboardPage() {
         isLoading={overviewMetricsQ.isLoading}
         isError={overviewMetricsQ.isError}
         onRetry={() => void overviewMetricsQ.refetch()}
+      />
+
+      {/* Signal trend charts — canonical, Postgres-only (LS5) */}
+      <OverviewChartsSection
+        charts={overviewChartsQ.data}
+        isLoading={overviewChartsQ.isLoading}
+        isError={overviewChartsQ.isError}
+        onRetry={() => void overviewChartsQ.refetch()}
       />
 
       {/* Needs your attention — canonical, Postgres-only (LS3) */}
