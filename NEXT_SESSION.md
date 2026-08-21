@@ -302,16 +302,18 @@ provider, not deferred; see §20):
   DONE.** Committed and pushed at `f435071` ("feat: add HubSpot observation
   adapter"). See §22 for the full checkpoint (mappings, known gaps, review
   corrections).
-- **3E.4 — Client Radar → `research_intelligence` adapter — DONE locally,
-  verified, uncommitted/unpushed.** See §24 for the full checkpoint
-  (topology, mapping, sourceRecordId strategy, test results).
-- **3F — NOT STARTED.** Ready to begin once 3E.4 is committed — no longer
-  blocked on 3E.2b (RB2B fan-out remains independently pending; it does
-  not gate 3E.3/3E.4/3F).
+- **3E.4 — Client Radar → `research_intelligence` adapter — DONE.**
+  Committed at `b33a12e` ("feat: add Client Radar observation adapter").
+- **3F — Agreement/conflict resolution + canonical selection — DONE
+  locally, verified, uncommitted/unpushed.** Unit 27/27, integration 5/5.
+  See §24 for the full checkpoint (architecture, subject binding, policy,
+  persistence, tests).
 
 ### 3F — Agreement/conflict and canonical selection
 
-Add deterministic resolution, human override, provenance, and conflict state.
+**DONE locally, verified, uncommitted/unpushed.** See §24 for the full
+checkpoint. Deterministic resolution + provenance is done and tested;
+human override and conflict-state UI remain 3H (not started).
 
 ### 3G — ICP/evaluator integration
 
@@ -1350,7 +1352,231 @@ resolution + canonical selection) — the first milestone that will need to
 read across multiple providers' observations for the same account/person
 and select a canonical value.
 
-## 24. New-session startup instruction
+## 24. Session checkpoint — Milestone 3F implementation (2026-08-21, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first.
+
+### Status
+
+- 3A–3E — DONE, committed/pushed (3E.4 at `b33a12e`). 3E.2b (n8n RB2B
+  fan-out) remains independently deferred — never gated 3F, still not
+  started.
+- **3F — Agreement/conflict resolution + canonical selection — DONE
+  locally, verified, uncommitted/unpushed.** Unit 27/27 pass
+  (`test:fact-resolution:unit`), integration 5/5 pass
+  (`test:fact-resolution`, disposable Postgres, full migration chain
+  including 0014+0015). Full workspace typecheck clean. Migration 0014
+  (resolved_facts table) + 0015 (immutability trigger) generated locally
+  via the real `drizzle-kit generate`/`generate --custom` commands (never
+  hand-authored) — local only, never applied to production.
+  One integration fixture bug was found and fixed during verification:
+  the "unjustified conflict" test originally used `hubspot` as one side,
+  but `hubspot` is explicitly authoritative for `crm.owner` under
+  `FACT_RECONCILIATION_POLICY_V1`, so it deterministically won — not a
+  resolver defect. Fixed by using two unranked synthetic providers
+  (`dealfront`/`cognism`); suite then passed 5/5.
+- 3G (evaluator/UI wiring), 3H (provenance/conflict UX) — NOT STARTED.
+  3F deliberately does not touch either.
+
+### Architecture implemented
+
+```
+current manual account_facts (via account_fact_current) ─┐
+                                                            ├─> FactCandidate[] ─> reconcileFactCandidates() ─> resolved_facts
+bound firmographic_fact / crm_state observations          ─┘
+```
+
+- **Subject binding** (`observationSubjectBinding.ts`, pure): derived,
+  never persisted. An `identity`-class observation's
+  (`identityKey`/`identityValue`) maps to the exact same
+  `aliasType`/`normalizedValue` convention
+  `canonicalAccountResolution.ts` already uses (`"domain"` via
+  `normalizeCompanyDomain`, or `` `external_id:${canonicalSourceKey(provider)}` ``
+  exact-match) — reused, not reinvented. Every observation sharing a
+  provider's `(provider, sourceRecordId)` with a successfully-bound
+  identity observation is transitively that account's. No fuzzy
+  matching; an unmatched observation is simply absent from the result,
+  never guessed.
+- **Reconciliation** (`factReconciliation.ts`, pure): takes
+  provider-neutral `FactCandidate[]` (see shape below), groups by
+  materially-equivalent value, and returns `single_source` / `agreement`
+  / `conflict` / `unresolved` plus full evidence provenance.
+- **Manual facts** (`factResolutionRun.ts`'s `loadManualCandidate`):
+  adapts the account's CURRENT `account_facts` row (via the existing
+  `account_fact_current` ⋈ `account_facts` join, same one
+  `icpEvaluationResolvers.ts` already uses) into a `FactCandidate` with
+  `isManual: true`. Never copied into `observations`. Only the 5 fields
+  `account_facts.ts` supports can ever produce one — the 6 `crm.*` fields
+  structurally never get a manual candidate.
+- **Persistence** (`factResolutionRun.ts`'s `resolveAccountCanonicalField`):
+  append-only insert into `resolved_facts`. No current-pointer table
+  (`resolved_fact_current` was deliberately removed — see below).
+  `getLatestResolvedFact` is a narrow read helper, wired into nothing.
+
+### Files changed
+
+New:
+- `lib/db/src/schema/resolvedFacts.ts` — `resolved_facts` table.
+- `lib/db/drizzle/0014_luxuriant_nuke.sql`,
+  `0015_resolved_facts_immutability.sql` (+ their `meta/*_snapshot.json`,
+  generated via the real `drizzle-kit` CLI, never hand-authored).
+- `artifacts/api-server/src/services/factResolutionPolicy.ts` — the one
+  explicit, versioned policy object.
+- `artifacts/api-server/src/services/factReconciliation.ts` — pure
+  resolver.
+- `artifacts/api-server/src/services/observationSubjectBinding.ts` —
+  pure subject binding.
+- `artifacts/api-server/src/services/factResolutionRun.ts` — DB
+  orchestrator (`resolveAccountCanonicalField`, `getLatestResolvedFact`).
+- `factReconciliation.test.ts`, `observationSubjectBinding.test.ts`
+  (pure unit), `factResolutionRun.integration.test.ts` (real Postgres).
+
+Modified:
+- `lib/db/src/schema/enums.ts` — `factResolutionState` pgEnum.
+- `lib/db/src/schema/index.ts` — new exports.
+- `artifacts/api-server/package.json` — `test:fact-resolution` /
+  `test:fact-resolution:unit`, and both added to the aggregate
+  `test`/`test:unit` scripts.
+
+Removed (per explicit architecture-review correction — see below):
+- `lib/db/src/schema/resolvedFactCurrent.ts` — built, then removed
+  before any migration referenced it.
+
+account_facts.ts / account_fact_current.ts / the evaluator / the UI —
+**untouched**, as required.
+
+### Architecture-review corrections applied mid-implementation
+
+Two required corrections were made before this design was approved, both
+already reflected in the current code — recorded here so a future
+session doesn't re-litigate them:
+
+1. **No `resolved_fact_current` pointer table.** Initially designed to
+   mirror `account_fact_current`, then removed: nothing reads
+   `resolved_facts` on a hot path yet (no route, no evaluator/UI wiring
+   — that's 3G), so a current-pointer table would be premature caching
+   of a relationship nothing consumes, and would be the one piece
+   visibly creating "two current-value pointer systems" in the schema.
+   `identity_resolution_events` already established this exact
+   no-pointer-until-a-reader-needs-one precedent in this repo.
+2. **Manual `account_facts` participates in reconciliation.** Initially
+   scoped to provider observations only; corrected because the only
+   real provider producing scalar `firmographic_fact`/`crm_state`
+   observations today is HubSpot — reconciling only provider evidence
+   while `account_fact_current` remained the value UI/evaluator actually
+   read would have created two disconnected truth systems. Manual facts
+   are now first-class `FactCandidate`s (see policy below), and
+   `resolved_facts`' evidence columns were changed from bare
+   `observations.id` arrays to provider-neutral
+   `{kind: "observation" | "manual_account_fact", id}` references so
+   provenance can name either kind without copying either into the
+   other.
+
+### Reconciliation candidate shape
+
+```ts
+type EvidenceReference =
+  | { kind: "observation"; id: string }
+  | { kind: "manual_account_fact"; id: string };
+
+interface FactCandidate {
+  evidence: EvidenceReference;
+  provider: string;        // "hubspot" | ... ; "manual" for account_facts
+  canonicalField: ResolvedFactCanonicalField;
+  value: unknown;           // observation.normalizedValue ?? rawValue; or account_facts.value
+  observedAt: Date | null;
+  importedAt: Date | null;  // always null for manual (account_facts has no ingestion boundary)
+  confidence: "low" | "medium" | "high" | null; // always null for manual — never fabricated
+  isManual: boolean;
+}
+```
+
+### Policy — `FACT_RECONCILIATION_POLICY_V1`
+
+One explicit, versioned object (`factResolutionPolicy.ts`), read as data
+by the resolver, never branched on inline:
+
+1. A current manual `account_facts` value is unconditionally
+   highest-authority for the 5 fields it covers — but ONLY applied when
+   the field's representations are provably comparable (see 6 below);
+   it never overrides a raw-vs-band pair it can't actually compare.
+2. Without a decisive manual candidate, `providerAuthority` (per-field
+   ranked provider list) decides — today every field lists only
+   `["hubspot"]` (the only real firmographic_fact/crm_state provider),
+   so the ranking logic itself is exercised by
+   `factReconciliation.test.ts` via synthetic provider names, not by
+   real data yet.
+3. Failing that, defensible `observedAt` recency breaks the tie — only
+   when EVERY candidate under consideration has a non-null `observedAt`
+   (never preferring a dated claim over an unknown-age one).
+4. `importedAt` is never used to decide which VALUE wins — only as a
+   last-resort tie-break for which specific duplicate row to cite once a
+   value has already won.
+5. `confidence` participates only as an additional (never fabricated)
+   tie-break dimension when picking a representative row — never a
+   conflict decider.
+6. `company.employeeRange`/`company.revenueRange` are marked
+   `nonComparableFields`: confirmed by inspecting
+   `accountFactValueValidation.ts` that no band taxonomy exists anywhere
+   in this repo. ≥2 candidates with DIFFERING raw representations for
+   these fields resolve `unresolved`, never a naive `"125"` vs `"50-200"`
+   comparison. Identical raw representations still agree normally
+   (literal equality needs no normalization to prove). A single
+   candidate for these fields still resolves `single_source`.
+7. If no rule justifies a winner, the conflict stays open with
+   `canonicalValue: null` — never a guessed winner.
+8. Every evidence array the resolver returns is sorted by a stable key
+   before returning, making the result provably independent of
+   candidate input order.
+
+### Known gaps
+
+- Identity observations are queried broadly (every `identity`/account-
+  subject row in the table) rather than narrowed by a dedicated index —
+  acceptable for this milestone's narrow internal scope, not optimized
+  for scale.
+- RB2B person-level subject binding is out of scope, structurally: no
+  `person_aliases` table exists (`people.ts`'s own header comment scopes
+  multi-source person matching as out of its unit's bounds), and RB2B
+  emits no `identity` observation at all today. `behavioral_signal` never
+  participates in scalar reconciliation regardless (see policy 3E.2's own
+  framing) — documented, not worked around.
+- Client Radar needs no binding work here: `research_intelligence` never
+  participates in scalar reconciliation; its existing
+  `client_radar_account_id` alias already serves whatever account-level
+  attachment it needs, entirely outside this module.
+- No route/evaluator/UI wiring — `resolved_facts` is computed and
+  persisted but has zero consumers today. Deciding how a manual
+  `account_facts` value and a `resolved_facts` value should combine for
+  any given UI/evaluator read is an explicit open question for 3G, not
+  decided by 3F.
+
+### Test results — VERIFIED
+
+Verified externally in regular Terminal (not by the coding agent):
+
+- `pnpm --filter @workspace/api-server run test:fact-resolution:unit`
+  (`factReconciliation.test.ts` — 14 pure cases + 2 structural;
+  `observationSubjectBinding.test.ts` — 4 binding cases +
+  fuzzy-matching/gap cases): **27/27 pass**.
+- `DATABASE_URL=... pnpm --filter @workspace/api-server run test:fact-resolution`
+  against a disposable Postgres instance with the full migration chain
+  applied (including 0014/0015): **5/5 pass**.
+- Full workspace `pnpm run typecheck` (rebuilds `lib/db`'s `dist/*.d.ts`
+  via `tsc --build` first, required for `@workspace/db/schema`'s new
+  exports to resolve downstream): clean.
+
+### Next exact action for the next session
+
+1. Get explicit approval to commit 3F.
+2. Begin 3G (evaluator/UI wiring decision: how a `resolved_facts` value
+   and a manual `account_facts` value combine for existing consumers) —
+   not started, not designed. 3E.2b (n8n RB2B fan-out / production
+   activation) remains an independently deferred, separate item — does
+   not block 3G.
+
+## 25. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository

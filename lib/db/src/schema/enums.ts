@@ -228,3 +228,26 @@ export const observationConfidence = pgEnum("observation_confidence", [
   "medium",
   "high",
 ]);
+
+// Milestone 3F — provider-neutral fact reconciliation.
+//
+// resolved_facts.resolution_state
+// The outcome of comparing every USABLE observation bound to one
+// (account, canonicalField) pair. "single_source" and "agreement" always
+// carry a canonical_value; "unresolved" never does (zero observations, or
+// values genuinely not safely comparable yet — e.g. raw vs. banded
+// employee/revenue strings). "conflict" means multiple observations
+// disagree on the value — canonical_value is EITHER populated (the
+// resolution policy found a deterministic, source-authority- or
+// recency-justified winner) OR null (policy could not justify a winner;
+// the conflict legitimately remains open) — see resolvedFacts.ts's own
+// comment and factReconciliation.ts for the full policy. A conflict is
+// never silently dropped to "unresolved" just because no winner was
+// found — the state itself still records that multiple sources
+// disagreed, which "unresolved" alone would lose.
+export const factResolutionState = pgEnum("fact_resolution_state", [
+  "single_source",
+  "agreement",
+  "conflict",
+  "unresolved",
+]);

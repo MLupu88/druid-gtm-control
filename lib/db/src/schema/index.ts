@@ -28,3 +28,6 @@ export * from "./attentionItems";
 
 // Milestone 3D — provider-neutral candidate observation persistence.
 export * from "./observations";
+
+// Milestone 3F — provider-neutral fact reconciliation.
+export * from "./resolvedFacts";
