@@ -12,7 +12,11 @@ import test from "node:test";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@workspace/db/schema";
-import { getAccountRecentActivity, AccountNotFoundError } from "./accountActivity.js";
+import {
+  getAccountRecentActivity,
+  getGlobalRecentActivity,
+  AccountNotFoundError,
+} from "./accountActivity.js";
 import {
   mapRb2bSignalToIdentityObservation,
   mapRb2bSignalToObservation,
@@ -317,6 +321,206 @@ test(
     const unrelatedAccountId = await makeAccount();
     const items = await getAccountRecentActivity(db!, unrelatedAccountId);
     assert.equal(items.some((item) => item.id === eventA.observationId), false);
+  },
+);
+
+// ---------------------------------------------------------------------
+// LS4 — integration tests for getGlobalRecentActivity(): the canonical
+// global cross-account Recent Activity read backing Overview. Reuses
+// every fixture helper above (makeAccount/bindRb2bIdentity/
+// addBehavioralObservation) — same writer path, just read back globally
+// instead of scoped to one account.
+//
+// This file's DB is shared across every test in this run (and, in a
+// real local/test Postgres, across other test files too), so these
+// tests never assert an exact total item count or an exact full list —
+// only relative ordering, presence/absence of THIS test's own fixture
+// ids, and correctness of THIS test's own accountId/context mapping.
+// ---------------------------------------------------------------------
+
+async function makeNamedAccount(label: string): Promise<{ accountId: string; domain: string; name: string }> {
+  const domain = `${label.toLowerCase()}-global-activity-${crypto.randomUUID()}.example`;
+  const [account] = await db!
+    .insert(schema.accounts)
+    .values({ accountKey: `dom:${domain}`, companyName: label, companyDomain: domain })
+    .returning();
+  return { accountId: account!.id, domain, name: label };
+}
+
+test("getGlobalRecentActivity returns activity from multiple accounts, newest first", { skip }, async () => {
+  const acme = await makeNamedAccount("Acme");
+  const globex = await makeNamedAccount("Globex");
+  const acmeRecordId = crypto.randomUUID();
+  const globexRecordId = crypto.randomUUID();
+  await bindRb2bIdentity(acme.accountId, acmeRecordId, acme.domain);
+  await bindRb2bIdentity(globex.accountId, globexRecordId, globex.domain);
+
+  const oldestId = await addBehavioralObservation({
+    provider: "rb2b",
+    sourceRecordId: acmeRecordId,
+    eventType: "page_view",
+    rawValue: { page_visited: "/pricing" },
+    importedAt: new Date(Date.now() - 120_000),
+  });
+  const middleId = await addBehavioralObservation({
+    provider: "rb2b",
+    sourceRecordId: globexRecordId,
+    eventType: "page_view",
+    rawValue: { page_visited: "/product" },
+    importedAt: new Date(Date.now() - 60_000),
+  });
+  const newestId = await addBehavioralObservation({
+    provider: "rb2b",
+    sourceRecordId: acmeRecordId,
+    eventType: "page_view",
+    rawValue: { page_visited: "/about" },
+    importedAt: new Date(),
+  });
+
+  const items = await getGlobalRecentActivity(db!, 100);
+  const ourIds = items.map((i) => i.id).filter((id) => [oldestId, middleId, newestId].includes(id));
+
+  assert.deepEqual(ourIds, [newestId, middleId, oldestId]);
+});
+
+test("getGlobalRecentActivity respects the limit argument", { skip }, async () => {
+  const account = await makeNamedAccount("LimitCo");
+  const sourceRecordId = crypto.randomUUID();
+  await bindRb2bIdentity(account.accountId, sourceRecordId, account.domain);
+
+  for (let i = 0; i < 5; i++) {
+    await addBehavioralObservation({
+      provider: "rb2b",
+      sourceRecordId,
+      eventType: "page_view",
+      rawValue: { page_visited: `/page-${i}` },
+      importedAt: new Date(Date.now() - i * 1_000),
+    });
+  }
+
+  const items = await getGlobalRecentActivity(db!, 3);
+  assert.equal(items.length <= 3, true);
+  assert.ok(items.length > 0);
+});
+
+test("getGlobalRecentActivity: each returned item's accountId maps to the correct account — one account's activity never appears under another", { skip }, async () => {
+  const acme = await makeNamedAccount("IsolationAcme");
+  const globex = await makeNamedAccount("IsolationGlobex");
+  const acmeRecordId = crypto.randomUUID();
+  const globexRecordId = crypto.randomUUID();
+  await bindRb2bIdentity(acme.accountId, acmeRecordId, acme.domain);
+  await bindRb2bIdentity(globex.accountId, globexRecordId, globex.domain);
+
+  const acmeObsId = await addBehavioralObservation({
+    provider: "rb2b",
+    sourceRecordId: acmeRecordId,
+    eventType: "page_view",
+    rawValue: { page_visited: "/isolation-acme" },
+  });
+  const globexObsId = await addBehavioralObservation({
+    provider: "rb2b",
+    sourceRecordId: globexRecordId,
+    eventType: "page_view",
+    rawValue: { page_visited: "/isolation-globex" },
+  });
+
+  const items = await getGlobalRecentActivity(db!, 100);
+  const acmeItem = items.find((i) => i.id === acmeObsId);
+  const globexItem = items.find((i) => i.id === globexObsId);
+
+  assert.equal(acmeItem?.accountId, acme.accountId);
+  assert.equal(globexItem?.accountId, globex.accountId);
+  assert.notEqual(acmeItem?.accountId, globexItem?.accountId);
+});
+
+test("getGlobalRecentActivity: an observation from an unbound (provider, sourceRecordId) never appears under any account", { skip }, async () => {
+  const orphanId = await addBehavioralObservation({
+    provider: "rb2b",
+    sourceRecordId: crypto.randomUUID(), // no identity observation ever recorded for this record
+    eventType: "page_view",
+    rawValue: { page_visited: "/unbound" },
+  });
+
+  const items = await getGlobalRecentActivity(db!, 100);
+  assert.equal(items.some((i) => i.id === orphanId), false);
+});
+
+test("getGlobalRecentActivity: provider, eventType, rawValue, accountId, accountName, and companyDomain all map correctly", { skip }, async () => {
+  const account = await makeNamedAccount("FieldMappingCo");
+  const sourceRecordId = crypto.randomUUID();
+  await bindRb2bIdentity(account.accountId, sourceRecordId, account.domain);
+
+  const rawValue = { page_visited: "/m3-6-country-proof", contact_name: "Jane Prospect" };
+  const obsId = await addBehavioralObservation({
+    provider: "rb2b",
+    sourceRecordId,
+    eventType: "page_view",
+    rawValue,
+  });
+
+  const items = await getGlobalRecentActivity(db!, 100);
+  const item = items.find((i) => i.id === obsId);
+
+  assert.ok(item);
+  assert.equal(item?.provider, "rb2b");
+  assert.equal(item?.eventType, "page_view");
+  assert.deepEqual(item?.rawValue, rawValue);
+  assert.equal(item?.accountId, account.accountId);
+  assert.equal(item?.accountName, "FieldMappingCo");
+  assert.equal(item?.companyDomain, account.domain);
+});
+
+test("getGlobalRecentActivity: a fresh account with no observations contributes zero items — never sample content", { skip }, async () => {
+  const account = await makeNamedAccount("EmptyCo");
+  const items = await getGlobalRecentActivity(db!, 100);
+  assert.equal(items.filter((i) => i.accountId === account.accountId).length, 0);
+});
+
+test(
+  "getGlobalRecentActivity deduplication rule: RB2B's companion identity observation is never itself a visible activity row alongside its behavioral_signal event",
+  { skip },
+  async () => {
+    const account = await makeNamedAccount("DedupCo");
+    const sourceRecordId = crypto.randomUUID();
+    // bindRb2bIdentity inserts exactly the companion identity observation
+    // (observationClass = 'identity') that real RB2B ingestion writes
+    // alongside every behavioral_signal event sharing the same
+    // sourceRecordId (see ../services/rb2bObservationMapping.ts's
+    // mapRb2bSignalToIdentityObservation). Capture its own row id to
+    // prove it never leaks into the activity feed as a second, spurious
+    // "visit".
+    await addAlias(account.accountId, "domain", account.domain);
+    const [identityRow] = await db!
+      .insert(schema.observations)
+      .values({
+        provider: "rb2b",
+        sourceRecordId,
+        observationClass: "identity",
+        semanticKey: "domain",
+        identitySubjectType: "account",
+        identityValue: account.domain,
+        rawValue: null,
+        normalizedValue: null,
+        observedAt: null,
+        importedAt: new Date(),
+        confidence: null,
+        evidenceRefs: [],
+        providerMetadata: null,
+      })
+      .returning();
+
+    const behavioralId = await addBehavioralObservation({
+      provider: "rb2b",
+      sourceRecordId,
+      eventType: "page_view",
+      rawValue: { page_visited: "/dedup-check" },
+    });
+
+    const items = await getGlobalRecentActivity(db!, 100);
+    const ourItems = items.filter((i) => i.accountId === account.accountId);
+
+    assert.deepEqual(ourItems.map((i) => i.id), [behavioralId]);
+    assert.equal(items.some((i) => i.id === identityRow!.id), false);
   },
 );
 

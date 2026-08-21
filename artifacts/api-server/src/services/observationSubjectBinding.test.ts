@@ -9,7 +9,10 @@ import {
   selectAccountRecordKeys,
   selectFieldObservationsBoundToAccount,
   selectObservationsBoundToAccount,
+  buildRecordKeyToAccountIndex,
+  lookupAccountForRecord,
   type AccountAliasRow,
+  type AccountAliasRowWithAccountId,
   type IdentityLinkObservation,
 } from "./observationSubjectBinding.js";
 
@@ -155,4 +158,71 @@ test("a research_intelligence-shaped observation with no identity counterpart is
     fieldObservations: [{ id: "obs-research", provider: "client_radar", sourceRecordId: "ev_1" }],
   });
   assert.deepEqual(bound, []);
+});
+
+// ---------------------------------------------------------------------
+// LS4 — buildRecordKeyToAccountIndex / lookupAccountForRecord: the
+// global (many-accounts-at-once) inverse of the per-account primitives
+// above, used by the global cross-account activity feed.
+// ---------------------------------------------------------------------
+
+test("buildRecordKeyToAccountIndex resolves a record key to the one account whose alias it matches", () => {
+  const aliases: AccountAliasRowWithAccountId[] = [
+    { accountId: "account-a", aliasType: "domain", normalizedValue: "acme.com" },
+  ];
+  const index = buildRecordKeyToAccountIndex([HUBSPOT_DOMAIN_IDENTITY], aliases);
+
+  assert.equal(
+    lookupAccountForRecord(index, { provider: "hubspot", sourceRecordId: "12345" }),
+    "account-a",
+  );
+});
+
+test("buildRecordKeyToAccountIndex separates two different accounts' record keys correctly — no cross-account leakage", () => {
+  const rb2bIdentityA: IdentityLinkObservation = {
+    provider: "rb2b",
+    sourceRecordId: "evt-a",
+    identityKey: "domain",
+    identityValue: "account-a.example",
+  };
+  const rb2bIdentityB: IdentityLinkObservation = {
+    provider: "rb2b",
+    sourceRecordId: "evt-b",
+    identityKey: "domain",
+    identityValue: "account-b.example",
+  };
+  const aliases: AccountAliasRowWithAccountId[] = [
+    { accountId: "account-a", aliasType: "domain", normalizedValue: "account-a.example" },
+    { accountId: "account-b", aliasType: "domain", normalizedValue: "account-b.example" },
+  ];
+  const index = buildRecordKeyToAccountIndex([rb2bIdentityA, rb2bIdentityB], aliases);
+
+  assert.equal(
+    lookupAccountForRecord(index, { provider: "rb2b", sourceRecordId: "evt-a" }),
+    "account-a",
+  );
+  assert.equal(
+    lookupAccountForRecord(index, { provider: "rb2b", sourceRecordId: "evt-b" }),
+    "account-b",
+  );
+});
+
+test("buildRecordKeyToAccountIndex leaves a record key with no matching alias unresolved", () => {
+  const index = buildRecordKeyToAccountIndex([HUBSPOT_DOMAIN_IDENTITY], []);
+  assert.equal(
+    lookupAccountForRecord(index, { provider: "hubspot", sourceRecordId: "12345" }),
+    undefined,
+  );
+});
+
+test("buildRecordKeyToAccountIndex excludes a record key whose alias value is ambiguously claimed by two accounts — never guessed", () => {
+  const aliases: AccountAliasRowWithAccountId[] = [
+    { accountId: "account-a", aliasType: "domain", normalizedValue: "acme.com" },
+    { accountId: "account-b", aliasType: "domain", normalizedValue: "acme.com" },
+  ];
+  const index = buildRecordKeyToAccountIndex([HUBSPOT_DOMAIN_IDENTITY], aliases);
+  assert.equal(
+    lookupAccountForRecord(index, { provider: "hubspot", sourceRecordId: "12345" }),
+    undefined,
+  );
 });

@@ -1,10 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import {
-  STATUS_LABELS_V3,
-  STATUS_FALLBACK_LABEL,
-  ACTION_LOG_QUERY_KEY,
-} from "@workspace/gtm-shared";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,16 +27,23 @@ import {
   fetchOverviewMetrics,
   overviewMetricsQueryKey,
 } from "@/lib/overview-metrics-api";
-
-interface ActionLogResponse {
-  rows: Record<string, string>[];
-  usingSampleData: boolean;
-}
+import {
+  fetchGlobalActivity,
+  globalActivityQueryKey,
+  type GlobalActivityItem,
+} from "@/lib/global-activity-api";
+import {
+  describeActivityEvent,
+  activityAccountLabel,
+} from "@/lib/global-activity-presentation";
 
 // A small, fixed preview — the full searchable/filterable/paginated
 // experience lives under Accounts (?view=attention); Overview is
 // deliberately not a second implementation of it.
 const NEEDS_ATTENTION_PREVIEW_LIMIT = 6;
+
+// Same "compact preview only" rationale as NEEDS_ATTENTION_PREVIEW_LIMIT.
+const RECENT_ACTIVITY_LIMIT = 6;
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
@@ -67,17 +69,16 @@ export default function DashboardPage() {
     staleTime: 30_000,
   });
 
-  const actionLogQ = useQuery<ActionLogResponse>({
-    queryKey: ACTION_LOG_QUERY_KEY,
-    queryFn: () =>
-      fetch("/api/sheets/action-log", { credentials: "include" }).then(
-        (r) => r.json(),
-      ) as Promise<ActionLogResponse>,
+  // LS4 — canonical, cross-account Recent Activity (Postgres-only, no
+  // Sheets). Reuses the exact same account-binding rule the Account
+  // Workspace's own Activity panel uses (see
+  // ../../api-server/src/services/accountActivity.ts's
+  // getGlobalRecentActivity), just across every account at once.
+  const globalActivityQ = useQuery({
+    queryKey: globalActivityQueryKey(RECENT_ACTIVITY_LIMIT),
+    queryFn: () => fetchGlobalActivity(RECENT_ACTIVITY_LIMIT),
     staleTime: 30_000,
   });
-
-  const activityRows = actionLogQ.data?.rows ?? [];
-  const activityLoading = actionLogQ.isLoading;
 
   return (
     <PageLayout className="space-y-6">
@@ -159,27 +160,45 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Recent activity */}
+      {/* Recent activity — canonical, Postgres-only (LS4) */}
       <div>
         <h2 className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
           Recent activity
         </h2>
-        {activityLoading ? (
+        {globalActivityQ.isLoading ? (
           <div className="space-y-2">
             {[...Array(3)].map((_, i) => (
               <Skeleton key={i} className="h-14 rounded-xl" />
             ))}
           </div>
-        ) : activityRows.length === 0 ? (
+        ) : globalActivityQ.isError ? (
+          <InlineNotice tone="danger">
+            <div className="space-y-1.5">
+              <p>
+                {globalActivityQ.error instanceof Error
+                  ? globalActivityQ.error.message
+                  : "Could not load recent activity."}
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => void globalActivityQ.refetch()}
+              >
+                Retry
+              </Button>
+            </div>
+          </InlineNotice>
+        ) : (globalActivityQ.data?.items.length ?? 0) === 0 ? (
           <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
             <p className="text-sm text-muted-foreground">
-              No recent actions yet.
+              No recent activity yet.
             </p>
           </div>
         ) : (
           <div className="space-y-2">
-            {activityRows.slice(0, 6).map((row, i) => (
-              <ActivityItem key={i} row={row} />
+            {globalActivityQ.data!.items.map((item) => (
+              <GlobalActivityRow key={item.id} item={item} />
             ))}
           </div>
         )}
@@ -188,7 +207,7 @@ export default function DashboardPage() {
   );
 }
 
-// ─── Activity item from action log ───────────────────────────────────────────
+// ─── Recent activity row — canonical global activity item, LS4 ──────────────
 function formatRelativeTime(ts: string): string {
   if (!ts) return "";
   try {
@@ -208,45 +227,25 @@ function formatRelativeTime(ts: string): string {
   }
 }
 
-function ActivityItem({ row }: { row: Record<string, string> }) {
-  const company = row.company_name || row.company_domain || "Unknown account";
-  const rawStatus =
-    row.final_status ||
-    row.action ||
-    row.action_type ||
-    row.status ||
-    "";
-  const statusLabel =
-    STATUS_LABELS_V3[rawStatus as keyof typeof STATUS_LABELS_V3];
-  // Never leak a raw technical enum (e.g. an unmapped final_status) to the operator —
-  // fall back to the same neutral wording the live action modal uses.
-  const displayText =
-    statusLabel ?? (rawStatus ? STATUS_FALLBACK_LABEL : "Action recorded");
-  const ts =
-    row.action_at ||
-    row.approved_at ||
-    row.timestamp ||
-    row.created_at ||
-    "";
-  const by = row.approved_by || row.operator || "";
+function GlobalActivityRow({ item }: { item: GlobalActivityItem }) {
+  const account = activityAccountLabel(item);
+  const description = describeActivityEvent(item);
+  const when = formatRelativeTime(item.occurredAt);
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card">
+    <Link
+      href={`/accounts/${item.accountId}?from=activity`}
+      className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card transition-colors hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-foreground truncate">{company}</p>
-        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed line-clamp-2">
-          {displayText}
+        <p className="text-sm font-medium text-foreground truncate">
+          {account}
+          <span className="text-muted-foreground font-normal"> — {description}</span>
         </p>
-        {(by || ts) && (
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-            {[by && `by ${by}`, ts && formatRelativeTime(ts)]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        )}
+        {when && <p className="text-[10px] text-muted-foreground/60 mt-0.5">{when}</p>}
       </div>
-    </div>
+    </Link>
   );
 }
 

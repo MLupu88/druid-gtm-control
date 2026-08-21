@@ -1,6 +1,6 @@
-// LS3 — Live Shell Closure: Overview no longer depends on the legacy
-// Google Sheets queue for its metrics or its Needs Attention preview.
-// Mirrors ../components/needs-attention-view.test.ts's and
+// LS3/LS4 — Live Shell Closure: Overview no longer depends on any legacy
+// Google Sheets endpoint for metrics, Needs Attention, or Recent
+// Activity. Mirrors ../components/needs-attention-view.test.ts's and
 // ../components/app-shell.test.ts's source-inspection convention — no
 // React rendering harness exists in this package, so structural markers
 // in the page's own source are what these tests assert on.
@@ -48,10 +48,13 @@ test("Overview no longer reads the legacy Sheets config — the 'What is live ri
   ]) {
     assert.ok(!SOURCE.includes(marker), `stale legacy-config marker still present: ${marker}`);
   }
-  // usingSampleData legitimately remains as a field on ActionLogResponse
-  // (Recent Activity's still-Sheets-backed shape, scheduled for LS4) — the
-  // config-badge usage (configQ.data?.usingSampleData) is what's retired.
-  assert.ok(!SOURCE.includes("configQ.data?.usingSampleData"));
+});
+
+test("Overview no longer reads the legacy Sheets action log for Recent Activity — LS4", () => {
+  assert.ok(!SOURCE.includes('fetch("/api/sheets/action-log"'));
+  for (const marker of ["ActionLogResponse", "ACTION_LOG_QUERY_KEY", "STATUS_LABELS_V3", "STATUS_FALLBACK_LABEL"]) {
+    assert.ok(!SOURCE.includes(marker), `stale legacy-action-log marker still present: ${marker}`);
+  }
 });
 
 test("Overview's metric strip is backed by the canonical Overview metrics endpoint", () => {
@@ -67,15 +70,29 @@ test("Overview's Needs Attention preview reuses the exact canonical accounts con
   assert.ok(!SOURCE.includes("filterCanonicalNeedsAttentionItems"));
 });
 
-test("Recent Activity intentionally still reads the legacy action log — scheduled for LS4, not LS3", () => {
-  assert.ok(SOURCE.includes('"/api/sheets/action-log"'));
-  assert.ok(SOURCE.includes("ACTION_LOG_QUERY_KEY"));
+test("Recent Activity is backed by the canonical global cross-account activity endpoint", () => {
+  assert.ok(SOURCE.includes("fetchGlobalActivity"));
+  assert.ok(SOURCE.includes("globalActivityQueryKey"));
+  assert.ok(SOURCE.includes("GlobalActivityRow"));
+  assert.ok(SOURCE.includes('/accounts/${item.accountId}?from=activity'));
+  // Row copy is derived from the canonical item, never hand-rolled Sheets
+  // field guessing (row.final_status/row.action/row.action_type/etc).
+  assert.ok(SOURCE.includes("describeActivityEvent"));
+  assert.ok(SOURCE.includes("activityAccountLabel"));
 });
 
 test("Needs Attention preview has honest loading, error, and empty states — no sample fallback", () => {
   assert.ok(SOURCE.includes("needsAttentionQ.isLoading"));
   assert.ok(SOURCE.includes("needsAttentionQ.isError"));
   assert.ok(SOURCE.includes("No accounts need attention right now."));
+  assert.ok(!SOURCE.includes("MOCK_ACCOUNT_QUEUE"));
+  assert.ok(!SOURCE.includes("SAMPLE_ROWS"));
+});
+
+test("Recent Activity has honest loading, error, and empty states — no sample fallback", () => {
+  assert.ok(SOURCE.includes("globalActivityQ.isLoading"));
+  assert.ok(SOURCE.includes("globalActivityQ.isError"));
+  assert.ok(SOURCE.includes("No recent activity yet."));
   assert.ok(!SOURCE.includes("MOCK_ACCOUNT_QUEUE"));
   assert.ok(!SOURCE.includes("SAMPLE_ROWS"));
 });

@@ -13,8 +13,10 @@ import express, { type Express } from "express";
 import {
   createOverviewRouter,
   type GetOverviewMetricsFn,
+  type GetGlobalActivityFn,
 } from "./overview.js";
 import type { OverviewMetrics } from "../services/overviewMetrics.js";
+import type { GlobalActivityItemDTO } from "../services/accountActivity.js";
 
 function syntheticMetrics(overrides: Partial<OverviewMetrics> = {}): OverviewMetrics {
   return {
@@ -26,13 +28,34 @@ function syntheticMetrics(overrides: Partial<OverviewMetrics> = {}): OverviewMet
   };
 }
 
-function buildTestApp(getOverviewMetricsFn: GetOverviewMetricsFn): Express {
+function syntheticActivityItem(overrides: Partial<GlobalActivityItemDTO> = {}): GlobalActivityItemDTO {
+  return {
+    id: "obs-1",
+    provider: "rb2b",
+    eventType: "page_view",
+    occurredAt: "2026-08-15T00:00:00.000Z",
+    importedAt: "2026-08-15T00:00:00.000Z",
+    rawValue: { page_visited: "/pricing" },
+    accountId: "account-1",
+    accountName: "Acme",
+    companyDomain: "acme.com",
+    ...overrides,
+  };
+}
+
+function buildTestApp(
+  getOverviewMetricsFn: GetOverviewMetricsFn,
+  getGlobalActivityFn: GetGlobalActivityFn = async () => [],
+): Express {
   const app = express();
   app.use((req, _res, next) => {
     req.log = { info() {}, warn() {}, error() {} } as never;
     next();
   });
-  app.use("/internal/overview", createOverviewRouter({ getOverviewMetricsFn }));
+  app.use(
+    "/internal/overview",
+    createOverviewRouter({ getOverviewMetricsFn, getGlobalActivityFn }),
+  );
   return app;
 }
 
@@ -90,6 +113,75 @@ test("maps an unexpected service error to a safe 500 response, without leaking i
     const res = await fetch(`${baseUrl}/internal/overview/metrics`);
     const body = (await res.json()) as { error: string; code: string };
 
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!body.error.includes("pg://internal"));
+  });
+});
+
+// ---------------------------------------------------------------------
+// LS4 — GET /internal/overview/activity
+// ---------------------------------------------------------------------
+
+test("GET /internal/overview/activity returns the service's items verbatim, passing the default limit", async () => {
+  const items = [syntheticActivityItem()];
+  const getGlobalActivityFn = mock.fn<GetGlobalActivityFn>(async () => items);
+  const app = buildTestApp(mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()), getGlobalActivityFn);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/activity`);
+    const body = await res.json();
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, { items });
+    assert.equal(getGlobalActivityFn.mock.calls.length, 1);
+    assert.equal(getGlobalActivityFn.mock.calls[0]?.arguments[0], 20);
+  });
+});
+
+test("GET /internal/overview/activity?limit=5 passes the parsed numeric limit through", async () => {
+  const getGlobalActivityFn = mock.fn<GetGlobalActivityFn>(async () => []);
+  const app = buildTestApp(mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()), getGlobalActivityFn);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/activity?limit=5`);
+    assert.equal(res.status, 200);
+    assert.equal(getGlobalActivityFn.mock.calls[0]?.arguments[0], 5);
+  });
+});
+
+test("GET /internal/overview/activity rejects an out-of-range limit with 400, never silently clamped", async () => {
+  const getGlobalActivityFn = mock.fn<GetGlobalActivityFn>(async () => []);
+  const app = buildTestApp(mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()), getGlobalActivityFn);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/activity?limit=0`);
+    assert.equal(res.status, 400);
+    assert.equal(getGlobalActivityFn.mock.calls.length, 0);
+  });
+});
+
+test("GET /internal/overview/activity: a zero-data result is an empty list, not sample content", async () => {
+  const getGlobalActivityFn = mock.fn<GetGlobalActivityFn>(async () => []);
+  const app = buildTestApp(mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()), getGlobalActivityFn);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/activity`);
+    const body = (await res.json()) as { items: unknown[] };
+    assert.equal(res.status, 200);
+    assert.deepEqual(body.items, []);
+  });
+});
+
+test("GET /internal/overview/activity maps an unexpected service error to a safe 500 response", async () => {
+  const getGlobalActivityFn = mock.fn<GetGlobalActivityFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp(mock.fn<GetOverviewMetricsFn>(async () => syntheticMetrics()), getGlobalActivityFn);
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/internal/overview/activity`);
+    const body = (await res.json()) as { error: string; code: string };
     assert.equal(res.status, 500);
     assert.equal(body.code, "internal_error");
     assert.ok(!body.error.includes("pg://internal"));
