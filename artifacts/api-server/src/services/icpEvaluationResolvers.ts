@@ -45,8 +45,15 @@ import {
   type RegionV1,
 } from "@workspace/evaluator";
 import { ProfileNotFoundError } from "./icpProfiles.js";
-import { buildAccountFactsSnapshotEvidence } from "./accountFactsSnapshotEvidence.js";
+import {
+  buildAccountFactsSnapshotEvidence,
+  buildResolvedFactEvidenceEntries,
+} from "./accountFactsSnapshotEvidence.js";
 import { ManualRegionValueSchema } from "./accountFactValueValidation.js";
+import {
+  applyResolvedFactsToNormalizedInput,
+  resolveEvaluatorCanonicalFacts,
+} from "./canonicalFactEvaluatorInput.js";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -58,14 +65,27 @@ type Db = NodePgDatabase<typeof schema>;
 // this source — see CURRENT_STATE_V2_SNAPSHOT_SOURCE.
 export const CURRENT_STATE_SNAPSHOT_SOURCE = "gtm-account-current-state-v1";
 
-// The source every NEW preview/official snapshot is created with,
-// unconditionally — no separate "evaluate with facts" action exists.
-// Adds real evidence for the five Slice 1 company fields (via
-// account_facts/account_fact_current) on top of everything
-// gtm-account-current-state-v1 already truthfully provided; still
-// genuinely sparse for engagement/contact/crm/consent, exactly as v1
-// was — Slice 1 introduces no evidence source for those.
+// v2 source constant, kept for the same two reasons as v1 above:
+// historical interpretability of any snapshot already persisted with
+// this source, and mqlDecisionReadiness.ts's v2 evidence resolver
+// remains registered and unchanged. createCurrentAccountSnapshot below
+// no longer creates snapshots with this source — see
+// CURRENT_STATE_V3_SNAPSHOT_SOURCE.
 export const CURRENT_STATE_V2_SNAPSHOT_SOURCE = "gtm-account-current-state-v2";
+
+// Milestone 3G — the source every NEW preview/official snapshot is
+// created with, unconditionally (same "no separate evaluate-with-facts
+// action" precedent v1 -> v2 already established). Sources
+// company.*/crm.* from Milestone 3F's resolved canonical facts — manual
+// account_facts AND bound provider (today: HubSpot) firmographic_fact/
+// crm_state observations, already reconciled — rather than reading
+// account_fact_current directly a second time (see
+// ../services/canonicalFactEvaluatorInput.ts, which never re-touches
+// account_facts itself; 3F's own resolver already gave manual facts
+// their authority). engagement/contact/consent/doNotContact remain
+// exactly as sparse as v1/v2 — 3G introduces no new evidence source for
+// those.
+export const CURRENT_STATE_V3_SNAPSHOT_SOURCE = "gtm-account-current-state-v3";
 
 // ---------------------------------------------------------------------
 // Errors
@@ -220,10 +240,32 @@ async function resolveCurrentAccountFacts(
 // ---------------------------------------------------------------------
 // 2. Persist a new, immutable snapshot of the account's current state.
 // No deduplication/reuse in this slice — every call inserts a new row.
-// Unconditionally uses CURRENT_STATE_V2_SNAPSHOT_SOURCE: every new
-// preview/official evaluation automatically gets real company-fact
-// evidence when it exists, with no separate "evaluate with facts" user
-// action.
+// Unconditionally uses CURRENT_STATE_V3_SNAPSHOT_SOURCE (Milestone 3G):
+// every new preview/official evaluation automatically gets 3F's
+// reconciled canonical facts when they exist, with no separate
+// "evaluate with facts" user action — the same precedent v1 -> v2
+// already established.
+//
+// Recomputes 3F resolution fresh on every call (via
+// resolveEvaluatorCanonicalFacts, which itself calls
+// ../services/factResolutionRun.ts's resolveAccountCanonicalField per
+// field) rather than reading a possibly-stale existing resolved_facts
+// row — an evaluation must never trust canonical truth older than the
+// evidence that produced it. This also means every snapshot creation
+// call durably appends new resolved_facts history rows (append-only,
+// immutable — see resolvedFacts.ts), which is intentional: a later
+// account_facts correction or a new provider observation is picked up by
+// the very next snapshot, with no background worker required.
+//
+// The legacy manual-facts-only identity/evidence arrays
+// (resolveCurrentAccountFacts/buildAccountFactsSnapshotEvidence) are
+// STILL computed and frozen unchanged, purely so
+// ../services/mqlDecisionReadiness.ts's existing v2 evidence-backedness
+// resolver keeps working byte-for-byte identically when reused for v3
+// (see EVIDENCE_BACKED_FIELDS_RESOLVER_BY_SNAPSHOT_SOURCE there) — this
+// is NOT a second truth path for the evaluator's own input, which now
+// comes exclusively from 3F's resolution via
+// applyResolvedFactsToNormalizedInput.
 // ---------------------------------------------------------------------
 
 export async function createCurrentAccountSnapshot(
@@ -239,20 +281,28 @@ export async function createCurrentAccountSnapshot(
     throw new AccountNotFoundError(accountId);
   }
 
-  const currentFactsByField = await resolveCurrentAccountFacts(db, accountId);
+  const [currentFactsByField, resolvedByField] = await Promise.all([
+    resolveCurrentAccountFacts(db, accountId),
+    resolveEvaluatorCanonicalFacts(db, accountId),
+  ]);
   const currentFacts = Array.from(currentFactsByField.values());
 
-  const normalizedInput = buildNormalizedAccountInputFromAccountAndFacts(
-    account,
-    currentFactsByField,
+  const sparseBase = buildNormalizedAccountInputFromAccount(account);
+  const normalizedInput = applyResolvedFactsToNormalizedInput(
+    sparseBase,
+    resolvedByField,
+    CURRENT_STATE_V3_SNAPSHOT_SOURCE,
   );
-  const rawInput = buildAccountFactsSnapshotEvidence(account, currentFacts);
+  const rawInput = {
+    ...buildAccountFactsSnapshotEvidence(account, currentFacts),
+    resolvedFacts: buildResolvedFactEvidenceEntries(resolvedByField),
+  };
 
   const [snapshot] = await db
     .insert(accountSnapshots)
     .values({
       accountId,
-      source: CURRENT_STATE_V2_SNAPSHOT_SOURCE,
+      source: CURRENT_STATE_V3_SNAPSHOT_SOURCE,
       rawInput,
       normalizedInput,
       schemaVersion: "v1",

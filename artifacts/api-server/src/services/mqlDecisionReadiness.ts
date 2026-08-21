@@ -32,6 +32,7 @@ import type { AccountEvaluation, AccountSnapshot } from "@workspace/db/schema";
 import {
   CURRENT_STATE_SNAPSHOT_SOURCE,
   CURRENT_STATE_V2_SNAPSHOT_SOURCE,
+  CURRENT_STATE_V3_SNAPSHOT_SOURCE,
 } from "./icpEvaluationResolvers.js";
 import { AccountFactsSnapshotEvidenceV1Schema } from "./accountFactsSnapshotEvidence.js";
 
@@ -171,6 +172,17 @@ const EVIDENCE_BACKED_FIELDS_RESOLVER_BY_SNAPSHOT_SOURCE: Readonly<
 > = {
   [CURRENT_STATE_SNAPSHOT_SOURCE]: evidenceBackedFieldsForCurrentStateSnapshot,
   [CURRENT_STATE_V2_SNAPSHOT_SOURCE]: evidenceBackedFieldsForCurrentStateV2Snapshot,
+  // Milestone 3G: v3's envelope still carries the exact same
+  // identity/evidence arrays v2's does (manual account_facts +
+  // account-record identity only — see
+  // ../services/icpEvaluationResolvers.ts's createCurrentAccountSnapshot
+  // module comment) — the new resolvedFacts array v3 additionally
+  // carries is not yet consulted here, so this reuses the v2 resolver
+  // verbatim rather than duplicating it. Known gap, not a regression:
+  // crm.*/provider-observation-only firmographic fields were never
+  // MQL-evidence-backed before 3G either (mqlDecisionReadiness has no
+  // crm.* concept at all) — see NEXT_SESSION.md's 3G checkpoint.
+  [CURRENT_STATE_V3_SNAPSHOT_SOURCE]: evidenceBackedFieldsForCurrentStateV2Snapshot,
 };
 
 /**

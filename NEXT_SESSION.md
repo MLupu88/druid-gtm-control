@@ -308,6 +308,10 @@ provider, not deferred; see §20):
   locally, verified, uncommitted/unpushed.** Unit 27/27, integration 5/5.
   See §24 for the full checkpoint (architecture, subject binding, policy,
   persistence, tests).
+- **3G — ICP/evaluator integration on canonical truth — DONE locally,
+  verified, uncommitted/unpushed.** Unit 33/33, integration 10/10.
+  See §25 for the full checkpoint (authoritative read path,
+  snapshot/evidence extension, backward compatibility, tests).
 
 ### 3F — Agreement/conflict and canonical selection
 
@@ -317,7 +321,12 @@ human override and conflict-state UI remain 3H (not started).
 
 ### 3G — ICP/evaluator integration
 
-ICP authoring and evaluation consume shared normalized values.
+**DONE locally, verified, uncommitted/unpushed.** See §25 for the full
+checkpoint. `createCurrentAccountSnapshot` now sources company/crm
+evaluator input from Milestone 3F's canonical resolution (recomputed at
+the evaluation boundary) instead of reading account_fact_current
+directly; ICP authoring/evaluation consume this through the existing,
+unchanged account_snapshots mechanism. Unit 33/33, integration 10/10.
 
 ### 3H — Provenance/conflict UX
 
@@ -1576,7 +1585,216 @@ Verified externally in regular Terminal (not by the coding agent):
    activation) remains an independently deferred, separate item — does
    not block 3G.
 
-## 25. New-session startup instruction
+## 25. Session checkpoint — Milestone 3G implementation (2026-08-21, uncommitted)
+
+This section is the precise resume point for a fresh session. Read this
+section first, then §24 for the 3F precedent this integrates with.
+
+### Status
+
+- 3A–3F — DONE, verified. 3F unit 27/27, integration 5/5 (see §24).
+- **3G — ICP/evaluator integration on canonical truth — DONE locally,
+  verified, uncommitted, unpushed, not migrated to production, not
+  deployed.** Unit 33/33 pass (`canonicalFactEvaluatorInput.test.ts` +
+  `accountFactsSnapshotEvidence.test.ts`), integration 10/10 pass
+  (`icpEvaluationResolvers.integration.test.ts`, disposable Postgres,
+  full migration chain). Full workspace typecheck clean.
+  One integration test fixture was corrected during verification: the
+  `behavioral_signal`-exclusion test originally asserted
+  `resolvedFacts.length === 0`, but `createCurrentAccountSnapshot`
+  intentionally resolves and freezes all 10
+  `EVALUATOR_CANONICAL_FIELDS` on every call, so a behavioral_signal-only
+  account legitimately produces 10 `unresolved` entries — not a
+  production defect. Corrected to assert exclusion semantics directly
+  (no evidence reference to the behavioral observation, every entry
+  unresolved/null); suite then passed 10/10.
+- 3E.2b (n8n RB2B fan-out / production activation) remains an
+  independently deferred, separate item — does not block 3H.
+- 3H (provenance/conflict UX) — NOT STARTED. 3G deliberately builds no
+  UI/route surface. **3H is next.**
+
+### Architecture implemented
+
+```
+account row + resolveEvaluatorCanonicalFacts(db, accountId)   [Milestone 3F, recomputed fresh]
+  -> applyResolvedFactsToNormalizedInput()  -> NormalizedAccountInputV1  -> account_snapshots.normalizedInput
+  -> buildResolvedFactEvidenceEntries()     -> frozen evidence array    -> account_snapshots.rawInput
+```
+
+`createCurrentAccountSnapshot` (icpEvaluationResolvers.ts) now creates
+`gtm-account-current-state-v3` snapshots unconditionally, exactly
+mirroring the precedent it already set switching v1 -> v2: v1's and v2's
+own builders/constants are untouched (historical snapshots stay exactly
+as interpretable as before); v3 is additive, not a rewrite.
+`accountEvaluations.ts` (the only caller of `createCurrentAccountSnapshot`,
+2 call sites) required **zero changes** — the whole integration is
+encapsulated behind that function's already-stable
+`(db, accountId) => Promise<AccountSnapshot>` contract.
+
+### B. Authoritative evaluator read path
+
+**Recompute at the evaluation boundary — never read a possibly-stale
+resolved_facts row, no background worker.** `resolveEvaluatorCanonicalFacts`
+(canonicalFactEvaluatorInput.ts) calls Milestone 3F's own
+`resolveAccountCanonicalField` once per evaluator-relevant field (10
+fields, parallel `Promise.all`), which durably appends a fresh
+`resolved_facts` row every time. Answers to the task's explicit
+questions:
+
+1. Recompute immediately before snapshot creation — yes, always.
+2. Never read latest-only; always fresh.
+3. No resolved_facts row for a field yet — `resolveAccountCanonicalField`
+   still runs (0 candidates -> `unresolved`), so this case is
+   indistinguishable from "ran and found nothing," never a special case.
+4. `conflict` + `canonicalValue: null` -> evaluator field stays
+   null/false/"unknown" (never guessed); the conflict is still frozen in
+   `rawInput.resolvedFacts`.
+5. `unresolved` -> same null/false/"unknown" handling.
+6. Manual-only field, no provider observations -> 3F's own resolver
+   already returns `single_source` from the manual candidate alone
+   (manual facts are first-class 3F candidates, per §24) — no special
+   case needed here at all.
+7. Staleness after a manual-fact change or new observation -> solved by
+   recomputation itself: the very next `createCurrentAccountSnapshot`
+   call sees it, with no cache/pointer to invalidate.
+
+**No double-layering:** this module never re-reads
+`account_fact_current`/`account_facts` to overlay manual truth a second
+time — 3F's resolver already gave manual facts their (highest, when
+present) authority. The ONLY place `account_facts`/`account_fact_current`
+are still read directly in this flow is the pre-existing
+`resolveCurrentAccountFacts` call, kept **unchanged** solely to populate
+the legacy `identity`/`evidence` evidence arrays for
+`mqlDecisionReadiness.ts`'s existing v2 resolver (see D below) — that is
+bookkeeping for an unrelated, untouched consumer, not a second truth
+input to the evaluator.
+
+### C. Single/agreement/conflict/unresolved handling
+
+- `single_source` / `agreement` -> `canonicalValue` used directly.
+- `conflict` WITH a policy-justified winner -> `canonicalValue` used;
+  losing evidence stays in `rawInput.resolvedFacts[].conflictingEvidence`
+  (never discarded).
+- `conflict` WITHOUT a winner (`canonicalValue: null`) -> evaluator field
+  null/false/"unknown"; conflict state itself still frozen in evidence.
+- `unresolved` (no candidates, or raw-vs-band employeeRange/revenueRange
+  incomparability) -> same null/false/"unknown"; never a naive
+  `"125"` vs `"50-200"` comparison — unchanged 3F semantics, no band
+  taxonomy invented in 3G either.
+- Boolean crm fields (`openOpportunity`/`existingCustomer`/
+  `competitorFlag`/`partnerFlag`) have no tri-state slot in
+  `NormalizedCrmV1Schema` (lib/evaluator, unmodified) — `true` only on a
+  positively-confirmed `canonicalValue === true`, `false` for every other
+  case (no evidence, unresolved, unjustified conflict). This is the exact
+  same conservative-default convention `buildNormalizedAccountInputFromAccount`
+  already documented pre-3G, not a new invention.
+
+### D. Snapshot/evidence changes
+
+`accountFactsSnapshotEvidence.ts`'s `AccountFactsSnapshotEvidenceV1Schema`
+gained ONE new **optional** field, `resolvedFacts` — additive only:
+- `identity`/`evidence` (manual-facts-only, pre-3G) are completely
+  untouched, so every existing test/consumer keeps working unmodified,
+  and old v1/v2 snapshot rows (which never carry this key) still parse.
+- Each `resolvedFacts` entry freezes: `canonicalField`, `resolutionState`,
+  `canonicalValue`, `policyVersion`, `selectedEvidence` (nullable
+  `EvidenceReference`, reused verbatim from `@workspace/db/schema` —
+  never redefined), `supportingEvidence`, `conflictingEvidence`,
+  `resolvedAt`. Built by `buildResolvedFactEvidenceEntries`, sorted by
+  `canonicalField` for determinism.
+- `mqlDecisionReadiness.ts` — ONE line added: registers
+  `CURRENT_STATE_V3_SNAPSHOT_SOURCE` against the EXISTING (unmodified) v2
+  evidence-backedness resolver function, since v3's `identity`/`evidence`
+  arrays are byte-identical in shape/semantics to v2's. Known gap, not a
+  regression: `resolvedFacts`/crm.* fields are not yet consulted for MQL
+  evidence-backedness — crm.* fields were never evidence-backed before
+  3G either.
+- No DB schema/migration changes — `account_snapshots.rawInput`/
+  `normalizedInput` are already generic `jsonb` columns.
+
+### E. Backward compatibility
+
+- Manual-only accounts (no observations, no resolved_facts history yet):
+  3F's resolver returns `single_source` from the manual candidate alone
+  — no special-casing, verified by test (see G).
+- Old v1/v2 snapshots: builders/constants untouched; not migrated (per
+  instruction — none needed, they remain independently interpretable).
+- `accountEvaluations.ts`, `accountFacts.ts`, `accounts.ts` routes/UI:
+  **zero changes.**
+- Existing integration test fixtures (accountEvaluations.integration.test.ts,
+  accountFacts.integration.test.ts) call `createCurrentAccountSnapshot` as
+  a black-box fixture builder and never assert a literal `.source` value
+  or specific company/crm content — confirmed by inspection, unaffected.
+
+### Files changed
+
+Modified: `icpEvaluationResolvers.ts` (`CURRENT_STATE_V3_SNAPSHOT_SOURCE`,
+`createCurrentAccountSnapshot` rewired; v1/v2 builders/constants
+untouched), `accountFactsSnapshotEvidence.ts` (additive `resolvedFacts`
+schema field + `buildResolvedFactEvidenceEntries`),
+`accountFactsSnapshotEvidence.test.ts` (new tests appended only),
+`mqlDecisionReadiness.ts` (one-line v3 resolver registration),
+`package.json` (`test:evaluator-canonical-facts[:unit]`, both added to
+aggregate `test`/`test:unit`).
+
+New: `canonicalFactEvaluatorInput.ts` (the 3F -> evaluator adapter:
+`EVALUATOR_CANONICAL_FIELDS`, `resolveEvaluatorCanonicalFacts`,
+`applyResolvedFactsToNormalizedInput`), `canonicalFactEvaluatorInput.test.ts`,
+`icpEvaluationResolvers.integration.test.ts`.
+
+Untouched: `lib/evaluator` (no scoring-model/schema change — `hubspotOwner`
+naming kept as-is), `account_facts.ts`/`account_fact_current.ts` schema,
+`factReconciliation.ts`/`factResolutionPolicy.ts`/
+`observationSubjectBinding.ts`/`factResolutionRun.ts` (3F itself, no
+redesign), all routes, all UI, RB2B/Client Radar adapters, `n8n`. No DB
+migration.
+
+### Known gaps
+
+- `crm.lifecycleStage` is never resolved or frozen in 3G — no evaluator
+  field exists for it (`NormalizedCrmV1Schema` has no slot, no
+  allowlist references it) — a future evaluator schema change would be
+  required first, out of this milestone's scope.
+- `crm.hubspotCompanyId`/`crm.hubspotContactId` remain always null —
+  these are `identity`-class data (subject binding), not `crm_state`
+  canonical facts; 3F produces no resolution for them.
+- `mqlDecisionReadiness.ts`'s v3 registration reuses v2's resolver
+  verbatim — the new `resolvedFacts` evidence is not yet consulted for
+  MQL evidence-backedness (pre-existing scope, not widened here).
+- No route/UI change — 3H still owns provenance/conflict UX.
+- `crm.owner` -> `hubspotOwner` remains a provider-prefixed evaluator
+  field name (pre-existing, not renamed — see canonicalFactEvaluatorInput.ts's
+  own comment on why renaming it is out of 3G's scope).
+
+### Test results — VERIFIED
+
+Verified externally in regular Terminal (not by the coding agent):
+
+- `pnpm --filter @workspace/api-server run test:evaluator-canonical-facts:unit`
+  (`canonicalFactEvaluatorInput.test.ts` + `accountFactsSnapshotEvidence.test.ts`
+  — the latter's pre-existing tests passed unmodified, proving backward
+  compatibility): **33/33 pass**.
+- `DATABASE_URL=... pnpm --filter @workspace/api-server run test:evaluator-canonical-facts`
+  against a disposable Postgres instance with the full migration chain
+  applied: **10/10 pass** (after the fixture correction below).
+- Full workspace `pnpm run typecheck`: clean.
+
+One integration fixture was corrected during verification (test-expectation
+bug, not a production defect): the `behavioral_signal`-exclusion test
+asserted `resolvedFacts.length === 0`, but `createCurrentAccountSnapshot`
+intentionally resolves and freezes all 10 `EVALUATOR_CANONICAL_FIELDS` on
+every call — a behavioral_signal-only account legitimately produces 10
+`unresolved` entries referencing no behavioral evidence. Corrected to
+assert exclusion semantics directly; suite then passed 10/10.
+
+### Next exact action for the next session
+
+1. Get explicit approval to commit 3G.
+2. Begin 3H (provenance/conflict UX) — not started, not designed.
+   3E.2b (n8n RB2B fan-out / production activation) remains an
+   independently deferred, separate item — does not block 3H.
+
+## 26. New-session startup instruction
 
 > Read this file first. Then inspect the referenced canonical docs and current
 > git state. Do not assume historical notes are still true if the repository

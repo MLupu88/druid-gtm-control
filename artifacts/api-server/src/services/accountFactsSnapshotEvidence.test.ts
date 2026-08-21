@@ -8,10 +8,11 @@ import test from "node:test";
 import {
   AccountFactsSnapshotEvidenceV1Schema,
   buildAccountFactsSnapshotEvidence,
+  buildResolvedFactEvidenceEntries,
   ACCOUNT_FACTS_SNAPSHOT_EVIDENCE_SCHEMA_VERSION,
   ACCOUNT_RECORD_IDENTITY_SOURCE,
 } from "./accountFactsSnapshotEvidence.js";
-import type { Account, AccountFact } from "@workspace/db/schema";
+import type { Account, AccountFact, ResolvedFact, ResolvedFactCanonicalField } from "@workspace/db/schema";
 
 const ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 const FACT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -256,4 +257,126 @@ test("buildAccountFactsSnapshotEvidence: a blank companyDomain/companyName is no
     [],
   );
   assert.deepEqual(envelope.identity, []);
+});
+
+// ---------------------------------------------------------------------
+// Milestone 3G — the additive resolvedFacts array. Backward compatibility
+// is already proven by "accepts a well-formed envelope" above (that
+// fixture carries no resolvedFacts key at all and still parses) — these
+// cases cover the new field itself.
+// ---------------------------------------------------------------------
+
+const RESOLVED_FACT_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const OBSERVATION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const MANUAL_FACT_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+function syntheticResolvedFact(overrides: Partial<ResolvedFact> = {}): ResolvedFact {
+  return {
+    id: RESOLVED_FACT_ID,
+    accountId: ACCOUNT_ID,
+    canonicalField: "company.industry",
+    resolutionState: "single_source",
+    canonicalValue: "Software",
+    selectedObservationId: OBSERVATION_ID,
+    selectedManualAccountFactId: null,
+    supportingEvidence: [{ kind: "observation", id: OBSERVATION_ID }],
+    conflictingEvidence: [],
+    consideredEvidence: [{ kind: "observation", id: OBSERVATION_ID }],
+    policyVersion: "fact-reconciliation-policy-v1",
+    rationale: "single hubspot observation available for company.industry",
+    resolvedAt: new Date("2026-08-21T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+function resolvedMap(rows: ResolvedFact[]): Map<ResolvedFactCanonicalField, ResolvedFact> {
+  return new Map(rows.map((row) => [row.canonicalField as ResolvedFactCanonicalField, row]));
+}
+
+test("a v1/v2 envelope with no resolvedFacts key still validates (backward compatibility)", () => {
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse(validEnvelope());
+  assert.equal(result.success, true);
+  assert.equal("resolvedFacts" in (result.success ? result.data : {}), false);
+});
+
+test("buildResolvedFactEvidenceEntries freezes canonicalField/resolutionState/policyVersion/evidence/resolvedAt", () => {
+  const entries = buildResolvedFactEvidenceEntries(
+    resolvedMap([syntheticResolvedFact()]),
+  );
+  assert.equal(entries.length, 1);
+  const entry = entries[0]!;
+  assert.equal(entry.canonicalField, "company.industry");
+  assert.equal(entry.resolutionState, "single_source");
+  assert.equal(entry.canonicalValue, "Software");
+  assert.equal(entry.policyVersion, "fact-reconciliation-policy-v1");
+  assert.deepEqual(entry.selectedEvidence, { kind: "observation", id: OBSERVATION_ID });
+  assert.deepEqual(entry.supportingEvidence, [{ kind: "observation", id: OBSERVATION_ID }]);
+  assert.deepEqual(entry.conflictingEvidence, []);
+  assert.equal(entry.resolvedAt, "2026-08-21T00:00:00.000Z");
+
+  const parsed = AccountFactsSnapshotEvidenceV1Schema.safeParse({
+    ...validEnvelope(),
+    resolvedFacts: entries,
+  });
+  assert.equal(parsed.success, true);
+});
+
+test("buildResolvedFactEvidenceEntries maps a manual-selected winner to a manual_account_fact evidence reference", () => {
+  const entries = buildResolvedFactEvidenceEntries(
+    resolvedMap([
+      syntheticResolvedFact({
+        selectedObservationId: null,
+        selectedManualAccountFactId: MANUAL_FACT_ID,
+      }),
+    ]),
+  );
+  assert.deepEqual(entries[0]?.selectedEvidence, { kind: "manual_account_fact", id: MANUAL_FACT_ID });
+});
+
+test("buildResolvedFactEvidenceEntries preserves a null canonicalValue/selectedEvidence for an unresolved conflict, never fabricating a winner", () => {
+  const entries = buildResolvedFactEvidenceEntries(
+    resolvedMap([
+      syntheticResolvedFact({
+        resolutionState: "conflict",
+        canonicalValue: null,
+        selectedObservationId: null,
+        selectedManualAccountFactId: null,
+        conflictingEvidence: [
+          { kind: "observation", id: OBSERVATION_ID },
+          { kind: "manual_account_fact", id: MANUAL_FACT_ID },
+        ],
+      }),
+    ]),
+  );
+  const entry = entries[0]!;
+  assert.equal(entry.resolutionState, "conflict");
+  assert.equal(entry.canonicalValue, null);
+  assert.equal(entry.selectedEvidence, null);
+  assert.equal(entry.conflictingEvidence.length, 2);
+});
+
+test("buildResolvedFactEvidenceEntries sorts entries by canonicalField regardless of Map insertion order", () => {
+  const industry = syntheticResolvedFact({ canonicalField: "company.industry" });
+  const country = syntheticResolvedFact({
+    id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    canonicalField: "company.country",
+    canonicalValue: "US",
+  });
+
+  const forward = buildResolvedFactEvidenceEntries(resolvedMap([industry, country]));
+  const reversed = buildResolvedFactEvidenceEntries(resolvedMap([country, industry]));
+  assert.deepEqual(
+    forward.map((e) => e.canonicalField),
+    ["company.country", "company.industry"],
+  );
+  assert.deepEqual(forward, reversed);
+});
+
+test("the schema rejects a resolvedFacts array with a duplicate canonicalField", () => {
+  const entries = buildResolvedFactEvidenceEntries(resolvedMap([syntheticResolvedFact()]));
+  const result = AccountFactsSnapshotEvidenceV1Schema.safeParse({
+    ...validEnvelope(),
+    resolvedFacts: [...entries, ...entries],
+  });
+  assert.equal(result.success, false);
 });

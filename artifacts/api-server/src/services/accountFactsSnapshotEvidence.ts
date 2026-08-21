@@ -22,9 +22,13 @@ import { z } from "zod/v4";
 import { NonBlankString } from "@workspace/evaluator";
 import {
   ACCOUNT_FACT_FIELDS,
+  EvidenceReferenceSchema,
   MANUAL_OPERATOR_FACT_SOURCE,
+  RESOLVED_FACT_CANONICAL_FIELDS,
   type Account,
   type AccountFact,
+  type ResolvedFact,
+  type ResolvedFactCanonicalField,
 } from "@workspace/db/schema";
 import { ManualRegionValueSchema } from "./accountFactValueValidation.js";
 
@@ -100,17 +104,94 @@ const ManualFactEvidenceListSchema = z
   .max(5)
   .refine(uniqueByField, { message: "manual fact evidence fields must be unique" });
 
+// Milestone 3G — the frozen Milestone 3F resolution result for ONE
+// canonical field, at the exact moment this snapshot was created. This
+// is ADDITIVE to the envelope (see AccountFactsSnapshotEvidenceV1Schema
+// below): `identity`/`evidence` above are untouched and keep meaning
+// exactly what they always have (manual account_facts + account-record
+// identity only) — this new array is where 3F's reconciliation result
+// (manual facts AND provider observations, already combined) is frozen,
+// for gtm-account-current-state-v3 snapshots only (see
+// ../services/canonicalFactEvaluatorInput.ts, the only builder).
+//
+// selectedEvidence/supportingEvidence/conflictingEvidence reuse
+// @workspace/db/schema's own EvidenceReference shape verbatim (never
+// redefined) — these are pointers into observations/account_facts, never
+// copies of the underlying evidence itself, matching resolved_facts.ts's
+// own provenance discipline. canonicalValue is nullable: a 'conflict'
+// row may carry one (a policy-justified winner) or not; 'unresolved'
+// never does — see factReconciliation.ts's own state contract, preserved
+// here unchanged so a historical snapshot can always answer "why did the
+// evaluator see this value" even when that value was null.
+const ResolvedFactEvidenceEntrySchema = z
+  .object({
+    canonicalField: z.enum(RESOLVED_FACT_CANONICAL_FIELDS),
+    resolutionState: z.enum(["single_source", "agreement", "conflict", "unresolved"]),
+    canonicalValue: z.unknown().nullable(),
+    policyVersion: NonBlankString,
+    selectedEvidence: EvidenceReferenceSchema.nullable(),
+    supportingEvidence: z.array(EvidenceReferenceSchema),
+    conflictingEvidence: z.array(EvidenceReferenceSchema),
+    resolvedAt: z.string(),
+  })
+  .strict();
+export type ResolvedFactEvidenceV1 = z.infer<typeof ResolvedFactEvidenceEntrySchema>;
+
+function uniqueByCanonicalField(entries: ResolvedFactEvidenceV1[]): boolean {
+  return new Set(entries.map((entry) => entry.canonicalField)).size === entries.length;
+}
+
+const ResolvedFactEvidenceListSchema = z
+  .array(ResolvedFactEvidenceEntrySchema)
+  .max(RESOLVED_FACT_CANONICAL_FIELDS.length)
+  .refine(uniqueByCanonicalField, {
+    message: "resolved fact evidence canonicalFields must be unique",
+  });
+
 export const AccountFactsSnapshotEvidenceV1Schema = z
   .object({
     schemaVersion: z.literal(ACCOUNT_FACTS_SNAPSHOT_EVIDENCE_SCHEMA_VERSION),
     account: z.object({ id: z.string().uuid() }).strict(),
     identity: IdentityEvidenceListSchema,
     evidence: ManualFactEvidenceListSchema,
+    // Optional: absent on every v1/v2 snapshot ever persisted (backward
+    // compatible re-parse — see ../services/mqlDecisionReadiness.ts,
+    // which never reads this field and therefore needs no change),
+    // always present (though possibly empty) on v3 snapshots.
+    resolvedFacts: ResolvedFactEvidenceListSchema.optional(),
   })
   .strict();
 export type AccountFactsSnapshotEvidenceV1 = z.infer<
   typeof AccountFactsSnapshotEvidenceV1Schema
 >;
+
+/**
+ * Pure: converts one canonicalField's resolveAccountCanonicalField()
+ * result into this envelope's frozen evidence shape. Sorted by
+ * canonicalField for a deterministic snapshot regardless of the
+ * Promise.all resolution order ../services/canonicalFactEvaluatorInput.ts
+ * computed them in.
+ */
+export function buildResolvedFactEvidenceEntries(
+  resolvedByField: ReadonlyMap<ResolvedFactCanonicalField, ResolvedFact>,
+): ResolvedFactEvidenceV1[] {
+  return [...resolvedByField.values()]
+    .map((row) => ({
+      canonicalField: row.canonicalField as ResolvedFactCanonicalField,
+      resolutionState: row.resolutionState,
+      canonicalValue: row.canonicalValue,
+      policyVersion: row.policyVersion,
+      selectedEvidence: row.selectedObservationId
+        ? ({ kind: "observation", id: row.selectedObservationId } as const)
+        : row.selectedManualAccountFactId
+          ? ({ kind: "manual_account_fact", id: row.selectedManualAccountFactId } as const)
+          : null,
+      supportingEvidence: row.supportingEvidence as ResolvedFactEvidenceV1["supportingEvidence"],
+      conflictingEvidence: row.conflictingEvidence as ResolvedFactEvidenceV1["conflictingEvidence"],
+      resolvedAt: row.resolvedAt.toISOString(),
+    }))
+    .sort((a, b) => a.canonicalField.localeCompare(b.canonicalField));
+}
 
 function isNonBlankString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
