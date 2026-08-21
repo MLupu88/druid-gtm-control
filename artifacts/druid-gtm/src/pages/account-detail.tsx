@@ -16,6 +16,7 @@ import { ClientRadarResearchPanel } from "@/components/client-radar-research-pan
 import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
 import { AccountFactsPanel } from "@/components/account-facts-panel";
 import { AccountTruthPanel } from "@/components/account-truth-panel";
+import { AccountRecentActivityPanel } from "@/components/account-recent-activity-panel";
 import { humanizeAliasType } from "@/lib/account-truth-presentation";
 import { EvaluationRunsList } from "@/components/evaluation-runs-list";
 import { InlineNotice } from "@/components/inline-notice";
@@ -133,7 +134,7 @@ function AccountDetailContent({
           </div>
           <OverviewWorkspaceCues onTabChange={onTabChange} />
         </TabsContent>
-        <TabsContent value="activity"><WorkspaceEmptyState title="No account activity yet" description="No account activity is available yet." /></TabsContent>
+        <TabsContent value="activity"><AccountRecentActivityPanel accountId={account.id} /></TabsContent>
         <TabsContent value="people"><WorkspaceEmptyState title="People data is not available" description="No canonical people or contact data is available for this account yet." /></TabsContent>
         <TabsContent value="intelligence"><ClientRadarResearchPanel accountId={account.id} /></TabsContent>
         <TabsContent value="icp"><AccountIcpPreviewPanel accountId={account.id} /></TabsContent>

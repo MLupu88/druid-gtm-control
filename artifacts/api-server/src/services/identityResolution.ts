@@ -84,8 +84,12 @@ type Db = NodePgDatabase<typeof schema>;
 // Extracts the exact transaction-handle type db.transaction()'s callback
 // receives — structurally the same query-builder surface as Db, but a
 // distinct drizzle-orm class, so helpers that accept either must use
-// this rather than Db itself.
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+// this rather than Db itself. Exported so other identity-bootstrap
+// callers (e.g. ./rb2bIdentity.ts) that reuse planPersonResolution/
+// applyPersonPlan/upsertAccountPerson directly can type their own
+// transaction handle compatibly, without a second definition drifting
+// from this one.
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export const RESOLVER_VERSION = "identity-resolver-v1";
 
@@ -164,7 +168,7 @@ const KNOWN_RACE_VIOLATION_CONSTRAINTS = new Set([
 // here too — never for any other SQLSTATE.
 const POSTGRES_DEADLOCK_DETECTED = "40P01";
 
-function isKnownRaceViolation(err: unknown): boolean {
+export function isKnownRaceViolation(err: unknown): boolean {
   const info = findPgConstraintErrorInfo(err);
   if (!info) return false;
   if (info.code === POSTGRES_DEADLOCK_DETECTED) return true;
@@ -416,7 +420,7 @@ export type PersonPlan =
       methodToken: "person_created";
     };
 
-async function planPersonResolution(tx: Tx, person: SignalPersonV1, signalSource: string): Promise<PersonPlan> {
+export async function planPersonResolution(tx: Tx, person: SignalPersonV1, signalSource: string): Promise<PersonPlan> {
   const workEmail = person.workEmail;
   const externalIdEntries = Object.entries(person.externalIds)
     .map(([rawSource, value]) => ({ source: canonicalSourceKey(rawSource), value }))
@@ -527,7 +531,7 @@ export interface ResolveSignalTestHooks {
 // APPLY (writes) — person
 // ---------------------------------------------------------------------
 
-async function applyPersonPlan(
+export async function applyPersonPlan(
   tx: Tx,
   plan: PersonPlan,
   hooks: ResolveSignalTestHooks,
@@ -568,7 +572,7 @@ async function applyPersonPlan(
 // account_people upsert
 // ---------------------------------------------------------------------
 
-async function upsertAccountPerson(
+export async function upsertAccountPerson(
   tx: Tx,
   args: { accountId: string; personId: string; title: string | null; source: string },
 ): Promise<void> {

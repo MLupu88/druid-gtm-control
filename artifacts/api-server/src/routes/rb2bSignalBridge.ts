@@ -21,6 +21,17 @@
 // insert-first/catch-23505 idempotent write path Milestone 3D built,
 // reused unmodified.
 //
+// M3.5 — RB2B live signal last-mile: once the immutable observation is
+// safely recorded (never gated on what follows, mirroring
+// ../services/hubSpotCompanySync.ts's own "observations are
+// pre-resolution evidence" principle), this route also resolves/creates
+// the canonical Account (and, when contact evidence exists, Person) via
+// ../services/rb2bIdentity.ts — the same provider-neutral identity
+// primitives every other identity path in this repo already shares, no
+// second account/person truth system. A failure or conflict in that
+// resolution step never turns a successful observation write into an
+// error response; see the route handler below.
+//
 // Only imports from ../services/*.js, @workspace/observation, and
 // @workspace/db/schema (types only) — never @workspace/db itself; the
 // database instance is a constructor argument (see
@@ -34,12 +45,17 @@ import { ProviderObservationV1Schema } from "@workspace/observation";
 import {
   Rb2bSignalBridgeRequestSchema,
   mapRb2bSignalToObservation,
+  type Rb2bSignalBridgeRequest,
 } from "../services/rb2bObservationMapping.js";
 import {
   recordObservation,
   type RecordObservationArgs,
   type RecordObservationResult,
 } from "../services/observations.js";
+import {
+  resolveRb2bPersonAccount,
+  type Rb2bPersonAccountBinding,
+} from "../services/rb2bIdentity.js";
 
 function sendError(
   res: Response,
@@ -54,14 +70,20 @@ export type RecordObservationFn = (
   args: Pick<RecordObservationArgs, "observation">,
 ) => Promise<RecordObservationResult>;
 
+export type ResolvePersonAccountFn = (
+  event: Rb2bSignalBridgeRequest,
+) => Promise<Rb2bPersonAccountBinding>;
+
 interface Rb2bSignalBridgeRouterDepsWithDb {
   db: NodePgDatabase<typeof schema>;
   recordObservationFn?: RecordObservationFn;
+  resolvePersonAccountFn?: ResolvePersonAccountFn;
 }
 
 interface Rb2bSignalBridgeRouterDepsInjected {
   db?: undefined;
   recordObservationFn: RecordObservationFn;
+  resolvePersonAccountFn: ResolvePersonAccountFn;
 }
 
 export type Rb2bSignalBridgeRouterDeps =
@@ -70,8 +92,9 @@ export type Rb2bSignalBridgeRouterDeps =
 
 /**
  * Factory (not a bare router) so callers must supply either a db instance
- * or a full recordObservationFn override, and tests can inject a fake
- * implementation with no PostgreSQL connection at all. Production wiring
+ * or full recordObservationFn/resolvePersonAccountFn overrides, and tests
+ * can inject fake implementations with no PostgreSQL connection at all.
+ * Production wiring
  * (../routes/index.ts) passes the real @workspace/db singleton. Declares
  * only "/" — the caller mounts this router at the full, specific
  * "/internal/rb2b/signals" prefix.
@@ -82,12 +105,16 @@ export function createRb2bSignalBridgeRouter(
   const router: IRouter = Router();
 
   let recordObservationFn: RecordObservationFn;
+  let resolvePersonAccountFn: ResolvePersonAccountFn;
   if (deps.db) {
     const db = deps.db;
     recordObservationFn =
       deps.recordObservationFn ?? ((args) => recordObservation({ db, ...args }));
+    resolvePersonAccountFn =
+      deps.resolvePersonAccountFn ?? ((event) => resolveRb2bPersonAccount({ db, event }));
   } else {
     recordObservationFn = deps.recordObservationFn;
+    resolvePersonAccountFn = deps.resolvePersonAccountFn;
   }
 
   router.post("/", async (req: Request, res: Response) => {
@@ -143,6 +170,36 @@ export function createRb2bSignalBridgeRouter(
         },
         `POST /internal/rb2b/signals: ${result.outcome}`,
       );
+
+      // The immutable observation is already safely recorded above.
+      // Identity resolution runs next but never turns that success into
+      // an error response — a failure here is logged and reported as
+      // identity: null, exactly like ../services/hubSpotCompanySync.ts's
+      // owner-lookup degrade-not-fail precedent.
+      let identity: {
+        account: Rb2bPersonAccountBinding["accountResolution"];
+        person: Rb2bPersonAccountBinding["personResolution"];
+      } | null = null;
+      try {
+        const binding = await resolvePersonAccountFn(parsedRequest.data);
+        identity = { account: binding.accountResolution, person: binding.personResolution };
+        req.log?.info(
+          {
+            observationId: observation.id,
+            accountOutcome: binding.accountResolution.outcome,
+            personOutcome: binding.personResolution.attempted
+              ? binding.personResolution.outcome
+              : "not_attempted",
+          },
+          "POST /internal/rb2b/signals: identity resolution complete",
+        );
+      } catch (identityError) {
+        req.log?.error(
+          { err: identityError, observationId: observation.id },
+          "POST /internal/rb2b/signals: identity resolution failed; observation already recorded",
+        );
+      }
+
       res.status(result.outcome === "created" ? 201 : 200).json({
         observationId: observation.id,
         status: result.outcome,
@@ -150,6 +207,7 @@ export function createRb2bSignalBridgeRouter(
         sourceRecordId: observation.sourceRecordId,
         semanticKey: observation.semanticKey,
         importedAt: observation.importedAt,
+        identity,
       });
     } catch (err) {
       req.log?.error({ err }, "POST /internal/rb2b/signals failed");

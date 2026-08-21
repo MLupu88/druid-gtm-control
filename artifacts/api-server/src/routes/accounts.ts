@@ -30,6 +30,11 @@ import {
   AccountNotFoundError as AccountTruthNotFoundError,
   type AccountTruthFieldDTO,
 } from "../services/accountTruth.js";
+import {
+  getAccountRecentActivity,
+  AccountNotFoundError as AccountActivityNotFoundError,
+  type AccountActivityItemDTO,
+} from "../services/accountActivity.js";
 
 const DEFAULT_LIMIT = 50;
 const MIN_LIMIT = 1;
@@ -99,6 +104,11 @@ export type GetAccountTruthFn = (
   accountId: string,
 ) => Promise<AccountTruthFieldDTO[]>;
 
+// M3.5 — mirrors GetAccountTruthFn's own AccountNotFoundError convention.
+export type GetAccountActivityFn = (
+  accountId: string,
+) => Promise<AccountActivityItemDTO[]>;
+
 // Two dependency shapes, chosen so a database is only ever required when
 // it would actually be used:
 //   - db supplied: the (optional) fn overrides fall back to the real
@@ -113,6 +123,7 @@ interface AccountsRouterDepsWithDb {
   listAccountsFn?: ListAccountsFn;
   getAccountByIdFn?: GetAccountByIdFn;
   getAccountTruthFn?: GetAccountTruthFn;
+  getAccountActivityFn?: GetAccountActivityFn;
 }
 
 interface AccountsRouterDepsInjected {
@@ -120,6 +131,7 @@ interface AccountsRouterDepsInjected {
   listAccountsFn: ListAccountsFn;
   getAccountByIdFn: GetAccountByIdFn;
   getAccountTruthFn: GetAccountTruthFn;
+  getAccountActivityFn: GetAccountActivityFn;
 }
 
 export type AccountsRouterDeps =
@@ -139,6 +151,7 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
   let listAccountsFn: ListAccountsFn;
   let getAccountByIdFn: GetAccountByIdFn;
   let getAccountTruthFn: GetAccountTruthFn;
+  let getAccountActivityFn: GetAccountActivityFn;
   if (deps.db) {
     const db = deps.db;
     listAccountsFn =
@@ -147,10 +160,13 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
       deps.getAccountByIdFn ?? ((accountId) => getAccountById(db, accountId));
     getAccountTruthFn =
       deps.getAccountTruthFn ?? ((accountId) => getAccountCanonicalTruth(db, accountId));
+    getAccountActivityFn =
+      deps.getAccountActivityFn ?? ((accountId) => getAccountRecentActivity(db, accountId));
   } else {
     listAccountsFn = deps.listAccountsFn;
     getAccountByIdFn = deps.getAccountByIdFn;
     getAccountTruthFn = deps.getAccountTruthFn;
+    getAccountActivityFn = deps.getAccountActivityFn;
   }
 
   // GET / — paginated canonical accounts, each with its latest and latest
@@ -233,6 +249,30 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
         return;
       }
       req.log?.error({ err }, "GET /internal/accounts/:accountId/truth failed");
+      sendError(res, 500, "internal_error", "An unexpected error occurred.");
+    }
+  });
+
+  // GET /:accountId/activity — M3.5. Minimum truthful Account Workspace
+  // Activity visibility: every behavioral_signal observation bound to
+  // this account, newest first. Not the final ZoomInfo-style Activity
+  // UX — see ../services/accountActivity.ts.
+  router.get("/:accountId/activity", async (req: Request, res: Response) => {
+    const parsed = AccountIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      sendError(res, 400, "invalid_request", "accountId must be a valid UUID.");
+      return;
+    }
+
+    try {
+      const items = await getAccountActivityFn(parsed.data.accountId);
+      res.status(200).json({ items });
+    } catch (err) {
+      if (err instanceof AccountActivityNotFoundError) {
+        sendError(res, 404, "account_not_found", "No account exists with that ID.");
+        return;
+      }
+      req.log?.error({ err }, "GET /internal/accounts/:accountId/activity failed");
       sendError(res, 500, "internal_error", "An unexpected error occurred.");
     }
   });
