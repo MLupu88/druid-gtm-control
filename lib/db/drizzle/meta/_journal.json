@@ -113,6 +113,20 @@
       "when": 1787285673024,
       "tag": "0015_resolved_facts_immutability",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1787408766161,
+      "tag": "0016_add_account_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787409109354,
+      "tag": "0017_account_claims_immutability",
+      "breakpoints": true
     }
   ]
 }

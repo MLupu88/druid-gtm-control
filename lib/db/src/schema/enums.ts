@@ -251,3 +251,62 @@ export const factResolutionState = pgEnum("fact_resolution_state", [
   "conflict",
   "unresolved",
 ]);
+
+// Milestone 4A — Account Brain claim ledger.
+//
+// account_claims.value_type
+// The runtime shape of the claim's jsonb `value` column — needed because
+// `value` itself is untyped jsonb (an open claimKey vocabulary means no
+// fixed per-key schema is possible at the DB layer). "rejected" claims
+// carry no value/valueType at all (see accountClaims.ts's own CHECK).
+export const claimValueType = pgEnum("claim_value_type", [
+  "boolean",
+  "number",
+  "string",
+  "list",
+  "object",
+]);
+
+// account_claims.origin
+// Where this claim came from, independent of its evidence. "observed" is
+// a direct read of a single piece of evidence (e.g. one behavioral
+// signal restated as a claim); "derived" is computed from multiple
+// pieces of evidence by Mission Control itself (requires
+// generated_by_version); "research" is a Client Radar / research-run
+// finding; "human_confirmed" / "human_corrected" are operator actions —
+// only these two ever move the account_claim_current pointer
+// unconditionally (see accountClaims.ts's service-level precedence
+// rules) and only these two may use status = 'rejected'.
+export const claimOrigin = pgEnum("claim_origin", [
+  "observed",
+  "derived",
+  "research",
+  "human_confirmed",
+  "human_corrected",
+]);
+
+// account_claims.status
+// Describes THIS row's own nature at the moment it was written — never
+// mutated afterward (the table is append-only/immutable, see
+// 0017_account_claims_immutability.sql). There is deliberately no
+// "superseded" value: whether a row is still "current" is entirely a
+// property of account_claim_current's pointer (or absence of one), never
+// a field on the row itself, mirroring account_facts/account_fact_current's
+// own current-value-is-never-derived-from-the-ledger-alone precedent.
+// "rejected" means a human explicitly said an existing claim is wrong
+// with no replacement value (reverts the key to Unknown) — distinct from
+// "human_corrected" with a real new value, which is status = 'active'.
+export const claimStatus = pgEnum("claim_status", ["active", "rejected"]);
+
+// account_claims.confidence
+// Deliberately a NEW, separate enum from observation_confidence and
+// identity_confidence above, despite the identical low/medium/high value
+// set — same discipline observation_confidence's own comment already
+// establishes: confidence in a claim (an assertion Mission Control is
+// making) is a different subject than confidence in an observation (a
+// single piece of evidence) or an identity resolution.
+export const claimConfidence = pgEnum("claim_confidence", [
+  "low",
+  "medium",
+  "high",
+]);

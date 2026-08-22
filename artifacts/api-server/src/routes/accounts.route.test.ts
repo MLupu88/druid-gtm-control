@@ -32,9 +32,14 @@ import {
   type AccountPersonDTO,
 } from "../services/people.js";
 import {
+  AccountNotFoundError as AccountClaimsNotFoundError,
+  type AccountClaimDTO,
+} from "../services/accountClaims.js";
+import {
   createAccountsRouter,
   type GetAccountActivityFn,
   type GetAccountByIdFn,
+  type GetAccountClaimsFn,
   type GetAccountPeopleFn,
   type GetAccountTruthFn,
   type ListAccountsFn,
@@ -162,6 +167,9 @@ const unusedGetAccountActivityFn: GetAccountActivityFn = async () => {
 const unusedGetAccountPeopleFn: GetAccountPeopleFn = async () => {
   throw new Error("getAccountPeopleFn should not have been called");
 };
+const unusedGetAccountClaimsFn: GetAccountClaimsFn = async () => {
+  throw new Error("getAccountClaimsFn should not have been called");
+};
 
 function buildTestApp(deps: {
   listAccountsFn?: ListAccountsFn;
@@ -169,6 +177,7 @@ function buildTestApp(deps: {
   getAccountTruthFn?: GetAccountTruthFn;
   getAccountActivityFn?: GetAccountActivityFn;
   getAccountPeopleFn?: GetAccountPeopleFn;
+  getAccountClaimsFn?: GetAccountClaimsFn;
 }): Express {
   const app = express();
   app.use(
@@ -179,6 +188,7 @@ function buildTestApp(deps: {
       getAccountTruthFn: deps.getAccountTruthFn ?? unusedGetAccountTruthFn,
       getAccountActivityFn: deps.getAccountActivityFn ?? unusedGetAccountActivityFn,
       getAccountPeopleFn: deps.getAccountPeopleFn ?? unusedGetAccountPeopleFn,
+      getAccountClaimsFn: deps.getAccountClaimsFn ?? unusedGetAccountClaimsFn,
     }),
   );
   return app;
@@ -893,6 +903,105 @@ test("GET /:accountId/people maps an unexpected service error to a safe 500 resp
   await withServer(app, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/people`);
     const body = await readJson(res, "GET /:accountId/people 500 response body");
+
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!String(body.error).includes("pg://internal"));
+  });
+});
+
+// ---------------------------------------------------------------------
+// GET /:accountId/claims — Milestone 4A
+// ---------------------------------------------------------------------
+
+function syntheticClaim(overrides: Partial<AccountClaimDTO> = {}): AccountClaimDTO {
+  return {
+    id: "bbbbbbbb-0000-4000-8000-000000000004",
+    claimKey: "cx.vendor",
+    status: "active",
+    valueType: "string",
+    value: "Genesys",
+    origin: "research",
+    confidence: "medium",
+    isCurrent: true,
+    supersedesClaimId: null,
+    correctionReason: null,
+    recordedBy: null,
+    generatedByVersion: null,
+    observedAt: null,
+    createdAt: "2026-08-21T20:33:27.397Z",
+    evidence: [],
+    ...overrides,
+  };
+}
+
+test("GET /:accountId/claims returns the items array from the service, calling it exactly once", async () => {
+  const getAccountClaimsFn = mock.fn<GetAccountClaimsFn>(async () => [syntheticClaim()]);
+  const app = buildTestApp({ getAccountClaimsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/claims`);
+    const body = await readJson(res, "GET /:accountId/claims response body");
+
+    assert.equal(res.status, 200);
+    assert.equal(Array.isArray(body.items), true);
+    assert.deepEqual(body.items, [syntheticClaim()]);
+    assert.equal(getAccountClaimsFn.mock.calls.length, 1);
+    assert.equal(getAccountClaimsFn.mock.calls[0]?.arguments[0], VALID_ACCOUNT_ID);
+  });
+});
+
+test("GET /:accountId/claims returns an empty array, never a fabricated placeholder, when no claims have been recorded", async () => {
+  const getAccountClaimsFn = mock.fn<GetAccountClaimsFn>(async () => []);
+  const app = buildTestApp({ getAccountClaimsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/claims`);
+    const body = await readJson(res, "GET /:accountId/claims empty response body");
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body.items, []);
+  });
+});
+
+test("GET /:accountId/claims rejects a non-UUID accountId with 400, without calling the service", async () => {
+  const getAccountClaimsFn = mock.fn<GetAccountClaimsFn>(async () => []);
+  const app = buildTestApp({ getAccountClaimsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/not-a-uuid/claims`);
+    const body = await readJson(res, "GET /:accountId/claims 400 response body");
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(getAccountClaimsFn.mock.calls.length, 0);
+  });
+});
+
+test("GET /:accountId/claims maps AccountNotFoundError to a 404 account_not_found response", async () => {
+  const getAccountClaimsFn = mock.fn<GetAccountClaimsFn>(async () => {
+    throw new AccountClaimsNotFoundError(VALID_ACCOUNT_ID);
+  });
+  const app = buildTestApp({ getAccountClaimsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/claims`);
+    const body = await readJson(res, "GET /:accountId/claims 404 response body");
+
+    assert.equal(res.status, 404);
+    assert.equal(body.code, "account_not_found");
+  });
+});
+
+test("GET /:accountId/claims maps an unexpected service error to a safe 500 response", async () => {
+  const getAccountClaimsFn = mock.fn<GetAccountClaimsFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp({ getAccountClaimsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/claims`);
+    const body = await readJson(res, "GET /:accountId/claims 500 response body");
 
     assert.equal(res.status, 500);
     assert.equal(body.code, "internal_error");

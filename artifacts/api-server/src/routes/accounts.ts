@@ -41,6 +41,11 @@ import {
   AccountNotFoundError as AccountPeopleNotFoundError,
   type AccountPersonDTO,
 } from "../services/people.js";
+import {
+  getAccountClaims,
+  AccountNotFoundError as AccountClaimsNotFoundError,
+  type AccountClaimDTO,
+} from "../services/accountClaims.js";
 
 const DEFAULT_LIMIT = 50;
 const MIN_LIMIT = 1;
@@ -134,6 +139,11 @@ export type GetAccountPeopleFn = (
   accountId: string,
 ) => Promise<AccountPersonDTO[]>;
 
+// Milestone 4A — mirrors GetAccountTruthFn's own AccountNotFoundError convention.
+export type GetAccountClaimsFn = (
+  accountId: string,
+) => Promise<AccountClaimDTO[]>;
+
 // Two dependency shapes, chosen so a database is only ever required when
 // it would actually be used:
 //   - db supplied: the (optional) fn overrides fall back to the real
@@ -150,6 +160,7 @@ interface AccountsRouterDepsWithDb {
   getAccountTruthFn?: GetAccountTruthFn;
   getAccountActivityFn?: GetAccountActivityFn;
   getAccountPeopleFn?: GetAccountPeopleFn;
+  getAccountClaimsFn?: GetAccountClaimsFn;
 }
 
 interface AccountsRouterDepsInjected {
@@ -159,6 +170,7 @@ interface AccountsRouterDepsInjected {
   getAccountTruthFn: GetAccountTruthFn;
   getAccountActivityFn: GetAccountActivityFn;
   getAccountPeopleFn: GetAccountPeopleFn;
+  getAccountClaimsFn: GetAccountClaimsFn;
 }
 
 export type AccountsRouterDeps =
@@ -180,6 +192,7 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
   let getAccountTruthFn: GetAccountTruthFn;
   let getAccountActivityFn: GetAccountActivityFn;
   let getAccountPeopleFn: GetAccountPeopleFn;
+  let getAccountClaimsFn: GetAccountClaimsFn;
   if (deps.db) {
     const db = deps.db;
     listAccountsFn =
@@ -192,12 +205,15 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
       deps.getAccountActivityFn ?? ((accountId) => getAccountRecentActivity(db, accountId));
     getAccountPeopleFn =
       deps.getAccountPeopleFn ?? ((accountId) => getAccountPeople(db, accountId));
+    getAccountClaimsFn =
+      deps.getAccountClaimsFn ?? ((accountId) => getAccountClaims(db, accountId));
   } else {
     listAccountsFn = deps.listAccountsFn;
     getAccountByIdFn = deps.getAccountByIdFn;
     getAccountTruthFn = deps.getAccountTruthFn;
     getAccountActivityFn = deps.getAccountActivityFn;
     getAccountPeopleFn = deps.getAccountPeopleFn;
+    getAccountClaimsFn = deps.getAccountClaimsFn;
   }
 
   // GET / — paginated canonical accounts, each with its latest and latest
@@ -327,6 +343,31 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
         return;
       }
       req.log?.error({ err }, "GET /internal/accounts/:accountId/people failed");
+      sendError(res, 500, "internal_error", "An unexpected error occurred.");
+    }
+  });
+
+  // GET /:accountId/claims — Milestone 4A. Every Account Brain claim ever
+  // recorded for this account (including superseded/contradicting rows),
+  // with resolved evidence. Read-only — 4A has no write HTTP route;
+  // recordClaim() is called directly by service-layer callers only. See
+  // ../services/accountClaims.ts.
+  router.get("/:accountId/claims", async (req: Request, res: Response) => {
+    const parsed = AccountIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      sendError(res, 400, "invalid_request", "accountId must be a valid UUID.");
+      return;
+    }
+
+    try {
+      const items = await getAccountClaimsFn(parsed.data.accountId);
+      res.status(200).json({ items });
+    } catch (err) {
+      if (err instanceof AccountClaimsNotFoundError) {
+        sendError(res, 404, "account_not_found", "No account exists with that ID.");
+        return;
+      }
+      req.log?.error({ err }, "GET /internal/accounts/:accountId/claims failed");
       sendError(res, 500, "internal_error", "An unexpected error occurred.");
     }
   });

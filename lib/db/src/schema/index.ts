@@ -37,3 +37,7 @@ export * from "./observations";
 
 // Milestone 3F — provider-neutral fact reconciliation.
 export * from "./resolvedFacts";
+
+// Milestone 4A — Account Brain claim ledger.
+export * from "./accountClaims";
+export * from "./accountClaimCurrent";
