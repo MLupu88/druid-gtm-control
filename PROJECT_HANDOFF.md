@@ -1,9 +1,15 @@
 # PROJECT_HANDOFF.md — DRUID GTM Mission Control
 
-> **⚠️ STALE — superseded by `NEXT_SESSION.md`, verified 2026-08-20.** This
-> document's HEAD (`4a34112`) is at least 14 commits behind `main`. Do not
-> treat this as current execution truth — see `NEXT_SESSION.md`. Retained for
-> historical/audit-trail value only.
+> **⚠️ STALE — superseded by `NEXT_SESSION.md`, verified 2026-08-22.** This
+> document's HEAD (`4a34112`) is many commits behind `main`. Do not treat
+> this as current execution truth. As of 2026-08-22, production is at
+> commit `6b0d28d`, **Live Shell Closure (LS1–LS8) is COMPLETE**, and the
+> current next milestone is **M4 — Account Brain** (see `NEXT_SESSION.md`
+> §30 for the execution handoff and `ROADMAP.md`'s "CURRENT MILESTONE
+> PLAN — 2026-08-22" section for the full M4–M9 milestone plan). This file
+> predates all of that — including the entire "GTM V2" track's completion,
+> HubSpot/RB2B going live, and the Account Workspace/People/Activity
+> pipeline — and is retained for historical/audit-trail value only.
 
 Durable, self-contained implementation-state reference. A fresh ChatGPT,
 Claude Code, or Codex session should be able to read this file (plus

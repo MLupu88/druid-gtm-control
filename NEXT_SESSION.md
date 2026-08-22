@@ -26,12 +26,19 @@ and inspect the implementation that actually exists.
 - Production server: `88.99.81.51`
 - Production repository: `/root/gtm-control`
 - Public app: `https://gtm.aiexperiments.eu`
-- Current deployed/main commit: `62d5fe6` (Milestone 3/3H — see §27, now
-  committed/pushed/deployed). Migrations 0012–0015 are live in production.
-  The first real HubSpot pilot sync has run against this deployment — see
-  §28.
+- Current deployed/main commit: **`6b0d28d`** — **Live Shell Closure
+  (LS1–LS8) is COMPLETE.** See §30 for the full checkpoint (scope,
+  production acceptance evidence, and the explicit M4 handoff). Migrations
+  0012–0015 are live in production; no new migration shipped in LS1–LS8.
 - Docker app service: `gtm-control`
-- Production health was verified internally and externally after deployment.
+- Production health was verified internally and externally after
+  deployment, including public+local HTTP 200, canonical Overview/
+  Accounts/Needs Attention/Reports, grounded AI Summary, and the People/
+  Activity pipeline (see §30).
+- **Design note:** the light/white theme and Overview density work in
+  LS8 is a real, material improvement, but it is **not** the intended
+  ZoomInfo-class product redesign — that is explicitly deferred to **M6**
+  and must not be treated as done. See §30 and `ROADMAP.md`'s M6 section.
 
 ## 4. Completed work
 
@@ -222,11 +229,12 @@ See §7 "HubSpot Capability Audit (3A.5)" above for full findings.
 
 ### 3B — Provider-neutral observation contract
 
-**CURRENT WORK.** Implemented, tested, and typechecked 2026-08-20 — **not
-yet reviewed/approved for commit, not committed, not pushed, not
-deployed.** See §18 "Session checkpoint — 3B implementation" below for the
-full precise resume point (exact files, final contract shape, test
-results, git status, next exact action).
+**DONE, committed, deployed.** (This section's earlier "CURRENT WORK"
+marker is stale — superseded by 3D/3E/3F/3G/3H and, beyond that, by the
+full Live Shell Closure completion in §30. **The current work marker for
+a fresh session is now M4 / 4A — see §30.**) See §18 "Session checkpoint —
+3B implementation" below for the original historical resume point (exact
+files, final contract shape, test results at the time).
 
 Define provider-neutral concepts and invariants:
 
@@ -427,40 +435,68 @@ During the later operating-interface redesign (M6, see below):
 
 ## 12. Later roadmap
 
+**Updated 2026-08-22 — see §30 and `ROADMAP.md` for the full current
+milestone plan.** The chain below is the historical record as of M3.5;
+it is superseded by the chain immediately after it.
+
 ```
 3H Provenance + conflict UX (DONE)
   ↓
-M3.5 Live Data Activation & Reality Check (NEXT)
+M3.5 Live Data Activation & Reality Check (DONE — executed as part of
+  Live Shell Closure, LS1–LS8)
   ↓
 M3 OPERATIONALLY COMPLETE
   ↓
-M4 Account Intelligence / Account Brain
-  ↓
-M5 Qualification + real Intent + multi-ICP
-  ↓
-M6 Operating UX redesign + People/Leads + sample-data cleanup
-  ↓
-M7 GTM cockpit / validation / Home + Reports + Settings
-  ↓
-M8 Action + feedback loop
-  ↓
-M9 Production hardening
+LIVE SHELL CLOSURE (LS1–LS8) — DONE, deployed at `6b0d28d`
 ```
 
-Multi-ICP runtime comparison and AI Account Summary / Account Brain remain
-planned for M4/M5. Do not implement them during M3.5 — M3.5 is activation
-and verification of what M3 already built, not new product surface.
+**Current chain (2026-08-22):**
+
+```
+LIVE SHELL CLOSURE — COMPLETE (production `6b0d28d`)
+  ↓
+M4 Account Brain — CURRENT NEXT MILESTONE
+  4A evidence-backed claims foundation → 4B grounded Account Brain →
+  4C known/unknown + Why Now → 4D Marketplace semantics →
+  4E small research-question library → 4F selective research →
+  4G unified Account Brain
+  ↓
+M5 Account Shadow / qualification / Intent / attribution
+  ↓
+M6 TRUE ZoomInfo-class account experience (a real product-design
+  milestone — NOT satisfied by LS7/LS8's theme/density work)
+  ↓
+M7 Cockpit / Reports / Settings (Marketplace demand view, account-change
+  view, portfolio/cockpit improvements)
+  ↓
+M8 Action + feedback + Clawd
+  ↓
+M9 Provenance / auditability / hardening
+```
+
+Full milestone definitions, required deliverables, and the M4 exit
+principle live in `ROADMAP.md`. Multi-ICP runtime comparison and AI
+Account Summary / Account Brain are M4/M5 scope — do not start them
+without reading §30's explicit "do not implement yet" instruction for the
+very next task.
 
 ## 13. Deferred / do not accidentally start
 
-- RB2B implementation
+**Updated 2026-08-22:** RB2B is no longer deferred — it is live in
+production and reconciled (see §30). Account Brain is no longer an
+arbitrarily-deferred item — it is the current M4 target milestone
+(§30/`ROADMAP.md`), but is still **not to be implemented yet**: the only
+authorized next task is the inspect-and-design step in §30. Everything
+else below remains deferred.
+
 - Dealfront implementation
 - Cognism implementation
-- Account Brain / AI summary
 - multi-ICP runtime comparison
-- new Intent model
-- People enrichment
-- Activity enrichment
+- new Intent/scoring model (M5 scope)
+- Account Shadow (M5 scope)
+- the true ZoomInfo-class product redesign (M6 scope — do not treat
+  LS7/LS8's theme/density work as satisfying this)
+- Clawd / action-and-feedback loop (M8 scope)
 - recommendation engine
 - outbound execution/orchestration changes
 - n8n integration changes
@@ -2265,3 +2301,100 @@ property name cannot be proven from the repo).
 > git state. Do not assume historical notes are still true if the repository
 > contradicts them. Do not start implementation until you can state the
 > current milestone, next slice, hard boundaries, and files likely involved.
+
+## 30. Session checkpoint — Live Shell Closure (LS1–LS8) complete, M4 handoff (2026-08-22)
+
+This section is the current resume point for a fresh session. Read this
+section first; everything above it (§1–§29) is historical record of how
+Milestone 3 and Live Shell Closure got here, preserved per this file's
+own append-only convention, not current-state truth on its own.
+
+### 1. What Live Shell Closure was
+
+LS1–LS8 is the execution of §11's M3.5 ("Live Data Activation & Reality
+Check") through to a fully truthful, deployed production shell — it
+supersedes §11 rather than sitting alongside it. It is a verification and
+correction pass on top of Milestone 3's canonical architecture, not a new
+product milestone and not M4.
+
+### 2. Production checkpoint
+
+- Deployed/main commit: **`6b0d28d`**.
+- Commits deployed after the prior checkpoint (`62d5fe6`/`6717ee2`):
+  - `0410681` — light theme restored as the default production appearance
+    (dark remains a user-selectable alternative), a real grounding defect
+    fix in the Overview AI Summary (DeepSeek) prompt/validator, and an
+    Overview density pass (Needs Attention preview + Recent Activity).
+  - `27f1e14` — Accounts moved from a single capped `limit=100` fetch
+    (client-side search/sort over that one page) to real server-side
+    search/sort/pagination across the full canonical population.
+  - `6b0d28d` — canonical Person pipeline wired into the Account Workspace
+    People tab (new `GET /:accountId/people` read API; the
+    resolution/association logic itself already existed and was already
+    correctly wired into the live RB2B ingest path — the actual gaps were
+    the missing read API/UI and richer Activity presentation of RB2B
+    person/visit facts).
+- Production acceptance confirmed at this checkpoint: public and local
+  app HTTP 200; light/white theme default; Accounts search/sort/
+  pagination works across the full population (243 canonical accounts at
+  checkpoint time; RSM findable via search regardless of default sort
+  position); RSM Activity surfaces RB2B person/visit facts without
+  requiring Raw Event Data; RSM People reads real canonical
+  people/account_people data; the DeepSeek Overview AI Summary renders
+  successfully in production; Needs Attention, Overview metrics/charts/
+  activity, and Reports remain canonical/available; the temporary LS8 SSH
+  key was removed from production `authorized_keys` and deleted locally;
+  `final-server`/`n8n` remain untouched throughout.
+- No new migration shipped in LS1–LS8. Migrations 0012–0015 (from
+  Milestone 3) remain the latest applied.
+
+### 3. Explicit design-scope correction — read before touching UI again
+
+The LS8 light theme + Overview density pass is a real, material
+improvement, but **it is not the intended ZoomInfo-class product
+redesign.** Do not claim LS7/LS8 achieved that experience anywhere (docs,
+commit messages, or product conversation). That transformation is a
+genuine information-architecture/product-design milestone, explicitly
+scoped as **M6** in `ROADMAP.md` — not another cosmetic density pass.
+
+### 4. Current milestone plan
+
+Superseded/consolidated per §12 above. Full milestone definitions
+(4A–4G, 5A–5G, M6's hard acceptance criterion, M7/M8/M9, and the Product
+Boundaries list of what Mission Control must never become) live in
+`ROADMAP.md`'s current milestone plan section (2026-08-22). Read that
+section, not this one, for the definitions themselves — this file only
+carries the execution handoff.
+
+### 5. CURRENT WORK for the next session
+
+**M4 — Account Brain, slice 4A — evidence-backed claims foundation.**
+
+**Do not implement 4A yet.** The authorized next task is narrower:
+
+> Inspect the current observation/provenance/account-truth schema
+> (`observations`, `account_facts`, Milestone 3F's resolution/provenance
+> model, `accountTruth.ts`, and related canonical-fact machinery) and
+> design the smallest provider-neutral persisted claim/evidence model
+> required for 4A (`claim → evidence → provider/source → timestamp →
+> confidence where appropriate`).
+
+This is a read/design task, not an implementation task. Do not invent
+schema, migrations, or API shapes before that inspection is done — 3F/3H
+already built a real provenance/resolution layer (§25/§27); 4A's job is
+to determine exactly what it does and does not already cover for
+*claims* generally (not just canonical facts), and design accordingly,
+not to assume a gap exists before checking.
+
+### 6. Hard boundaries for the next session
+
+- Do not start 4B–4G, M5, M6, M7, M8, or M9 work.
+- Do not build a generic research platform, a Clay-style enrichment tool,
+  or a generic workflow builder — see `ROADMAP.md`'s Product Boundaries
+  section.
+- Do not touch theme, Overview AI Summary, Accounts pagination/search, or
+  the People/Activity pipeline — LS8 already closed those; re-opening
+  them is out of scope unless a genuine new defect is reported.
+- Do not touch untracked `final-server` or `n8n`.
+- No production write/deploy without explicit approval, per §2's
+  standing rule.

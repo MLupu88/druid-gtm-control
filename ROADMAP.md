@@ -71,6 +71,201 @@ asserted.
 
 ---
 
+## CURRENT MILESTONE PLAN — 2026-08-22 (Post Live Shell Closure)
+
+> **This section is the authoritative forward milestone plan as of
+> 2026-08-22, production commit `6b0d28d`.** It supersedes every prior
+> "later roadmap"/milestone-chain fragment elsewhere in this document
+> (including in the still-stale sections below, which are retained for
+> historical/audit-trail value only, per this file's own existing
+> convention). For present-tense execution handoff (current work,
+> hard boundaries, files involved), read `NEXT_SESSION.md` §30 — this
+> section defines the milestones themselves, not the immediate task.
+
+### LIVE SHELL CLOSURE — COMPLETE
+
+Truthful production shell and canonical operating surfaces. Deployed at
+`6b0d28d`. See `NEXT_SESSION.md` §30 for the full production checkpoint
+and acceptance evidence.
+
+**Explicit correction:** the LS8 light-theme/Overview-density work is a
+real, material improvement, but it is **not** the intended ZoomInfo-class
+product redesign. Do not claim LS7/LS8 achieved that experience. That
+work is explicitly deferred to **M6** and must be treated there as a
+genuine information-architecture/product-design transformation, not
+another cosmetic density pass.
+
+### M4 — ACCOUNT BRAIN — CURRENT NEXT MILESTONE
+
+**4A. Evidence-backed claims foundation**
+Important derived assertions must be persisted/represented with
+traceability: claim → evidence → provider/source → timestamp →
+confidence where appropriate. Provenance primitives begin here, not M9.
+
+**4B. Grounded Account Brain**
+Reason over all available evidence around the SAME canonical Account:
+
+- RB2B / first-party behavior
+- Marketplace behavior
+- HubSpot CRM context
+- people/stakeholders
+- external research
+- human-confirmed facts
+
+Account Brain must not become an opaque AI paragraph generator.
+
+**4C. Known / Unknown + Why Now**
+Explicitly distinguish supported facts from missing information. "Why
+Now" explains factual change/relevance without introducing M5 scoring.
+
+**4D. Marketplace semantics**
+Map captured Marketplace behavior to: solution, category, business
+problem, publisher, integration/relevant metadata — and attach it as
+canonical behavioral evidence to the same Account.
+
+**4E. Small DRUID research-question library + typed answers**
+Maintain a deliberately small curated library of DRUID-relevant
+questions. Typed results where practical: boolean / number / list /
+short text / structured object / sources. Do NOT build a generic
+Saber-style research platform.
+
+**4F. Selective research**
+Research remains user-triggered or selectively triggered. Client Radar /
+Tavily / future providers remain evidence providers. Never put Client
+Radar into automatic RB2B ingestion.
+
+**4G. Unified Account Brain**
+Unify first-party, CRM, external and human evidence into one grounded
+account understanding.
+
+**M4 exit principle:** Mission Control can explain what we know about an
+account, what we do not know, why it may matter now, and show evidence
+for every important conclusion.
+
+### M5 — ACCOUNT SHADOW / QUALIFICATION / INTENT / ATTRIBUTION
+
+**5A.** Longitudinal Account Shadow attached to canonical Account. NOT a
+duplicate shadow-account object.
+
+**5B.** Proper occurrence/change model: recency, frequency, repeat
+visits, stakeholder changes, velocity, return after inactivity. Do not
+equate observation-row counts with real external occurrences.
+
+**5C.** Marketplace engagement history.
+
+**5D.** Transparent qualification / Fit / Intent / Eligibility /
+Actionability. Explain contributing factors, evidence, weights where
+applicable, recency and state changes.
+
+**5E.** Explainable state/score change history.
+
+**5F.** Attribution chronology before causality — e.g. Marketplace
+activity preceded CRM progression. Do not claim causation without
+supporting methodology.
+
+**5G.** Selective monitoring: watch account / watch question / watch
+material change.
+
+### M6 — TRUE ZOOMINFO-CLASS ACCOUNT EXPERIENCE
+
+This is a REAL product-design milestone. Required:
+
+- evidence-first presentation
+- dense but highly legible enterprise information architecture
+- strong account header and summary hierarchy
+- people/stakeholder hierarchy
+- Account Brain + Why Now
+- Account Shadow/change context
+- compact high-value tables
+- contextual side/detail surfaces
+- provenance drawers
+- score/state explanation
+- minimal dead space
+- rapid account scanning
+
+**Hard acceptance criterion:** a seller should be able to understand an
+unfamiliar account, what changed, who matters, why it matters, and the
+evidence behind it in under 30 seconds without opening Raw JSON.
+
+Do not consider cosmetic theme/density changes sufficient.
+
+### M7 — COCKPIT / REPORTS / SETTINGS
+
+- Marketplace demand view by solution across canonical accounts
+- Account-change view: "Which accounts changed most this week?"
+- portfolio/cockpit improvements
+- Reports/Settings operating-layer refinement
+
+Use real occurrence/change semantics, not misleading raw observation
+counts.
+
+### M8 — ACTION + FEEDBACK + CLAWD
+
+Mission Control = intelligence system. Clawd = distribution/action
+interface.
+
+```
+Mission Control
+  → Account Brain
+  → Account Shadow
+  → Needs Attention
+  → Clawd
+  → stakeholder
+```
+
+Clawd:
+
+- proactive grounded notifications
+- "Why are you flagging this?" explanation using the SAME Mission
+  Control evidence
+- safe initial actions: open account, research account, investigate
+  question, assign follow-up, dismiss attention item
+- later approved downstream CRM/campaign/workflow actions
+- role-aware notification architecture
+- no autonomous unsupervised outbound action by default
+- outcomes/feedback return to Mission Control
+
+### M9 — PROVENANCE / AUDITABILITY / HARDENING
+
+Harden provenance that begins in M4/M5. Distinguish: RB2B evidence,
+HubSpot evidence, Marketplace evidence, external research,
+human-confirmed facts, Account Brain conclusions, Account Shadow/scoring
+state, actions, outcomes.
+
+Retain: generation timestamp, evidence references, provider/source,
+confidence where appropriate.
+
+Preserve existing security, observability, recovery and
+production-hardening scope.
+
+### PRODUCT BOUNDARIES
+
+Mission Control must NOT become:
+
+- Clay-style enrichment spreadsheet
+- generic waterfall enrichment builder
+- Saber-style generic search/research engine
+- giant contact database
+- arbitrary research-signal builder
+- generic workflow builder
+- native general-purpose web research engine
+- outbound sequencing platform
+- unsupervised autonomous GTM agent
+- complex causal-attribution platform
+
+Mission Control's job remains:
+
+1. reconcile evidence around ONE canonical Account
+2. retain institutional account memory
+3. understand what changed
+4. explain why it matters
+5. show evidence
+6. decide what deserves attention
+7. coordinate action
+8. retain outcome/feedback
+
+---
+
 ## Current Verified State — 2026-08-18
 
 *This is the authoritative present-tense summary. Read this section, not the
