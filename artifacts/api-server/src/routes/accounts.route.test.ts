@@ -36,8 +36,14 @@ import {
   type AccountClaimDTO,
 } from "../services/accountClaims.js";
 import {
+  AccountNotFoundError as AccountBrainNotFoundError,
+  type AccountBrainSummary,
+} from "../services/accountBrainSummary.js";
+import {
   createAccountsRouter,
+  type AnalyzeAccountBrainFn,
   type GetAccountActivityFn,
+  type GetAccountBrainFn,
   type GetAccountByIdFn,
   type GetAccountClaimsFn,
   type GetAccountPeopleFn,
@@ -170,6 +176,12 @@ const unusedGetAccountPeopleFn: GetAccountPeopleFn = async () => {
 const unusedGetAccountClaimsFn: GetAccountClaimsFn = async () => {
   throw new Error("getAccountClaimsFn should not have been called");
 };
+const unusedGetAccountBrainFn: GetAccountBrainFn = async () => {
+  throw new Error("getAccountBrainFn should not have been called");
+};
+const unusedAnalyzeAccountBrainFn: AnalyzeAccountBrainFn = async () => {
+  throw new Error("analyzeAccountBrainFn should not have been called");
+};
 
 function buildTestApp(deps: {
   listAccountsFn?: ListAccountsFn;
@@ -178,6 +190,8 @@ function buildTestApp(deps: {
   getAccountActivityFn?: GetAccountActivityFn;
   getAccountPeopleFn?: GetAccountPeopleFn;
   getAccountClaimsFn?: GetAccountClaimsFn;
+  getAccountBrainFn?: GetAccountBrainFn;
+  analyzeAccountBrainFn?: AnalyzeAccountBrainFn;
 }): Express {
   const app = express();
   app.use(
@@ -189,6 +203,8 @@ function buildTestApp(deps: {
       getAccountActivityFn: deps.getAccountActivityFn ?? unusedGetAccountActivityFn,
       getAccountPeopleFn: deps.getAccountPeopleFn ?? unusedGetAccountPeopleFn,
       getAccountClaimsFn: deps.getAccountClaimsFn ?? unusedGetAccountClaimsFn,
+      getAccountBrainFn: deps.getAccountBrainFn ?? unusedGetAccountBrainFn,
+      analyzeAccountBrainFn: deps.analyzeAccountBrainFn ?? unusedAnalyzeAccountBrainFn,
     }),
   );
   return app;
@@ -1002,6 +1018,177 @@ test("GET /:accountId/claims maps an unexpected service error to a safe 500 resp
   await withServer(app, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/claims`);
     const body = await readJson(res, "GET /:accountId/claims 500 response body");
+
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!String(body.error).includes("pg://internal"));
+  });
+});
+
+// ---------------------------------------------------------------------
+// GET /:accountId/brain and POST /:accountId/brain/analyze — Milestone 4B
+// ---------------------------------------------------------------------
+
+function syntheticBrainSummary(overrides: Partial<AccountBrainSummary> = {}): AccountBrainSummary {
+  return {
+    accountTruth: [],
+    people: [],
+    activitySummary: {
+      totalEvents: 0,
+      firstObservedAt: null,
+      lastObservedAt: null,
+      distinctDaysObserved: 0,
+      providers: [],
+    },
+    claims: [],
+    narrative: null,
+    narrativeUnavailableReason: null,
+    ...overrides,
+  };
+}
+
+test("GET /:accountId/brain returns the summary from the service, calling it exactly once, and never calls analyze", async () => {
+  const getAccountBrainFn = mock.fn<GetAccountBrainFn>(async () => syntheticBrainSummary());
+  const app = buildTestApp({ getAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain`);
+    const body = await readJson(res, "GET /:accountId/brain response body");
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, syntheticBrainSummary());
+    assert.equal(getAccountBrainFn.mock.calls.length, 1);
+    assert.equal(getAccountBrainFn.mock.calls[0]?.arguments[0], VALID_ACCOUNT_ID);
+  });
+});
+
+test("GET /:accountId/brain always returns narrative: null — no LLM call happens on a GET", async () => {
+  const getAccountBrainFn = mock.fn<GetAccountBrainFn>(async () => syntheticBrainSummary());
+  const app = buildTestApp({ getAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain`);
+    const body = await readJson(res, "GET /:accountId/brain narrative body");
+    assert.equal(body.narrative, null);
+  });
+});
+
+test("GET /:accountId/brain rejects a non-UUID accountId with 400, without calling the service", async () => {
+  const getAccountBrainFn = mock.fn<GetAccountBrainFn>(async () => syntheticBrainSummary());
+  const app = buildTestApp({ getAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/not-a-uuid/brain`);
+    const body = await readJson(res, "GET /:accountId/brain 400 response body");
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(getAccountBrainFn.mock.calls.length, 0);
+  });
+});
+
+test("GET /:accountId/brain maps AccountNotFoundError to a 404 account_not_found response", async () => {
+  const getAccountBrainFn = mock.fn<GetAccountBrainFn>(async () => {
+    throw new AccountBrainNotFoundError(VALID_ACCOUNT_ID);
+  });
+  const app = buildTestApp({ getAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain`);
+    const body = await readJson(res, "GET /:accountId/brain 404 response body");
+
+    assert.equal(res.status, 404);
+    assert.equal(body.code, "account_not_found");
+  });
+});
+
+test("GET /:accountId/brain maps an unexpected service error to a safe 500 response", async () => {
+  const getAccountBrainFn = mock.fn<GetAccountBrainFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp({ getAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain`);
+    const body = await readJson(res, "GET /:accountId/brain 500 response body");
+
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!String(body.error).includes("pg://internal"));
+  });
+});
+
+test("POST /:accountId/brain/analyze returns the summary (including a narrative) from the service, calling it exactly once, and never calls the plain GET path", async () => {
+  const analyzeAccountBrainFn = mock.fn<AnalyzeAccountBrainFn>(async () =>
+    syntheticBrainSummary({ narrative: { text: "3 events observed.", generatedAt: "2026-08-22T00:00:00.000Z" } }),
+  );
+  const app = buildTestApp({ analyzeAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain/analyze`, { method: "POST" });
+    const body = await readJson(res, "POST /:accountId/brain/analyze response body");
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body.narrative, { text: "3 events observed.", generatedAt: "2026-08-22T00:00:00.000Z" });
+    assert.equal(analyzeAccountBrainFn.mock.calls.length, 1);
+    assert.equal(analyzeAccountBrainFn.mock.calls[0]?.arguments[0], VALID_ACCOUNT_ID);
+  });
+});
+
+test("POST /:accountId/brain/analyze surfaces narrativeUnavailableReason when the service returns narrative: null, without failing the request", async () => {
+  const analyzeAccountBrainFn = mock.fn<AnalyzeAccountBrainFn>(async () =>
+    syntheticBrainSummary({ narrativeUnavailableReason: "not_configured" }),
+  );
+  const app = buildTestApp({ analyzeAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain/analyze`, { method: "POST" });
+    const body = await readJson(res, "POST /:accountId/brain/analyze unavailable response body");
+
+    assert.equal(res.status, 200);
+    assert.equal(body.narrative, null);
+    assert.equal(body.narrativeUnavailableReason, "not_configured");
+  });
+});
+
+test("POST /:accountId/brain/analyze rejects a non-UUID accountId with 400, without calling the service", async () => {
+  const analyzeAccountBrainFn = mock.fn<AnalyzeAccountBrainFn>(async () => syntheticBrainSummary());
+  const app = buildTestApp({ analyzeAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/not-a-uuid/brain/analyze`, { method: "POST" });
+    const body = await readJson(res, "POST /:accountId/brain/analyze 400 response body");
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(analyzeAccountBrainFn.mock.calls.length, 0);
+  });
+});
+
+test("POST /:accountId/brain/analyze maps AccountNotFoundError to a 404 account_not_found response", async () => {
+  const analyzeAccountBrainFn = mock.fn<AnalyzeAccountBrainFn>(async () => {
+    throw new AccountBrainNotFoundError(VALID_ACCOUNT_ID);
+  });
+  const app = buildTestApp({ analyzeAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain/analyze`, { method: "POST" });
+    const body = await readJson(res, "POST /:accountId/brain/analyze 404 response body");
+
+    assert.equal(res.status, 404);
+    assert.equal(body.code, "account_not_found");
+  });
+});
+
+test("POST /:accountId/brain/analyze maps an unexpected service error to a safe 500 response", async () => {
+  const analyzeAccountBrainFn = mock.fn<AnalyzeAccountBrainFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp({ analyzeAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain/analyze`, { method: "POST" });
+    const body = await readJson(res, "POST /:accountId/brain/analyze 500 response body");
 
     assert.equal(res.status, 500);
     assert.equal(body.code, "internal_error");

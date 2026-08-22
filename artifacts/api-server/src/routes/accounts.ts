@@ -46,6 +46,12 @@ import {
   AccountNotFoundError as AccountClaimsNotFoundError,
   type AccountClaimDTO,
 } from "../services/accountClaims.js";
+import {
+  getAccountBrainSummary,
+  analyzeAccountBrain,
+  AccountNotFoundError as AccountBrainNotFoundError,
+  type AccountBrainSummary,
+} from "../services/accountBrainSummary.js";
 
 const DEFAULT_LIMIT = 50;
 const MIN_LIMIT = 1;
@@ -144,6 +150,13 @@ export type GetAccountClaimsFn = (
   accountId: string,
 ) => Promise<AccountClaimDTO[]>;
 
+// Milestone 4B — mirrors GetAccountTruthFn's own AccountNotFoundError
+// convention. Two distinct fns (not one with an "analyze" flag) so route
+// tests can inject different behavior for the cheap GET and the
+// explicit, LLM-calling POST independently.
+export type GetAccountBrainFn = (accountId: string) => Promise<AccountBrainSummary>;
+export type AnalyzeAccountBrainFn = (accountId: string) => Promise<AccountBrainSummary>;
+
 // Two dependency shapes, chosen so a database is only ever required when
 // it would actually be used:
 //   - db supplied: the (optional) fn overrides fall back to the real
@@ -161,6 +174,8 @@ interface AccountsRouterDepsWithDb {
   getAccountActivityFn?: GetAccountActivityFn;
   getAccountPeopleFn?: GetAccountPeopleFn;
   getAccountClaimsFn?: GetAccountClaimsFn;
+  getAccountBrainFn?: GetAccountBrainFn;
+  analyzeAccountBrainFn?: AnalyzeAccountBrainFn;
 }
 
 interface AccountsRouterDepsInjected {
@@ -171,6 +186,8 @@ interface AccountsRouterDepsInjected {
   getAccountActivityFn: GetAccountActivityFn;
   getAccountPeopleFn: GetAccountPeopleFn;
   getAccountClaimsFn: GetAccountClaimsFn;
+  getAccountBrainFn: GetAccountBrainFn;
+  analyzeAccountBrainFn: AnalyzeAccountBrainFn;
 }
 
 export type AccountsRouterDeps =
@@ -193,6 +210,8 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
   let getAccountActivityFn: GetAccountActivityFn;
   let getAccountPeopleFn: GetAccountPeopleFn;
   let getAccountClaimsFn: GetAccountClaimsFn;
+  let getAccountBrainFn: GetAccountBrainFn;
+  let analyzeAccountBrainFn: AnalyzeAccountBrainFn;
   if (deps.db) {
     const db = deps.db;
     listAccountsFn =
@@ -207,6 +226,10 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
       deps.getAccountPeopleFn ?? ((accountId) => getAccountPeople(db, accountId));
     getAccountClaimsFn =
       deps.getAccountClaimsFn ?? ((accountId) => getAccountClaims(db, accountId));
+    getAccountBrainFn =
+      deps.getAccountBrainFn ?? ((accountId) => getAccountBrainSummary(db, accountId));
+    analyzeAccountBrainFn =
+      deps.analyzeAccountBrainFn ?? ((accountId) => analyzeAccountBrain(db, accountId));
   } else {
     listAccountsFn = deps.listAccountsFn;
     getAccountByIdFn = deps.getAccountByIdFn;
@@ -214,6 +237,8 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
     getAccountActivityFn = deps.getAccountActivityFn;
     getAccountPeopleFn = deps.getAccountPeopleFn;
     getAccountClaimsFn = deps.getAccountClaimsFn;
+    getAccountBrainFn = deps.getAccountBrainFn;
+    analyzeAccountBrainFn = deps.analyzeAccountBrainFn;
   }
 
   // GET / — paginated canonical accounts, each with its latest and latest
@@ -368,6 +393,63 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
         return;
       }
       req.log?.error({ err }, "GET /internal/accounts/:accountId/claims failed");
+      sendError(res, 500, "internal_error", "An unexpected error occurred.");
+    }
+  });
+
+  // GET /:accountId/brain — Milestone 4B. The Grounded Account Brain read
+  // model: canonical Account Truth + People + a computed factual activity
+  // summary + existing genuine account_claims. No LLM call, no writes —
+  // safe to call on every Intelligence-tab load. narrative is always null
+  // here; see POST /:accountId/brain/analyze for the explicit,
+  // LLM-generated synthesis. See ../services/accountBrainSummary.ts.
+  router.get("/:accountId/brain", async (req: Request, res: Response) => {
+    const parsed = AccountIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      sendError(res, 400, "invalid_request", "accountId must be a valid UUID.");
+      return;
+    }
+
+    try {
+      const summary = await getAccountBrainFn(parsed.data.accountId);
+      res.status(200).json(summary);
+    } catch (err) {
+      if (err instanceof AccountBrainNotFoundError) {
+        sendError(res, 404, "account_not_found", "No account exists with that ID.");
+        return;
+      }
+      req.log?.error({ err }, "GET /internal/accounts/:accountId/brain failed");
+      sendError(res, 500, "internal_error", "An unexpected error occurred.");
+    }
+  });
+
+  // POST /:accountId/brain/analyze — Milestone 4B. The explicit,
+  // user-triggered "Analyze this account" action: same read model as GET
+  // /brain, plus an attempted grounded narrative (one DeepSeek call).
+  // Never called automatically — only ever in response to a deliberate
+  // click, so a tab load never silently spends a paid model call. Writes
+  // nothing: the 4B claim registry is empty and the narrative itself is
+  // never persisted — generatedAt describes only the analysis this
+  // response returns, never a durable "last analyzed" state. A narrative
+  // failure never fails the whole request; narrativeUnavailableReason
+  // explains why when narrative is null. See
+  // ../services/accountBrainSummary.ts.
+  router.post("/:accountId/brain/analyze", async (req: Request, res: Response) => {
+    const parsed = AccountIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) {
+      sendError(res, 400, "invalid_request", "accountId must be a valid UUID.");
+      return;
+    }
+
+    try {
+      const summary = await analyzeAccountBrainFn(parsed.data.accountId);
+      res.status(200).json(summary);
+    } catch (err) {
+      if (err instanceof AccountBrainNotFoundError) {
+        sendError(res, 404, "account_not_found", "No account exists with that ID.");
+        return;
+      }
+      req.log?.error({ err }, "POST /internal/accounts/:accountId/brain/analyze failed");
       sendError(res, 500, "internal_error", "An unexpected error occurred.");
     }
   });

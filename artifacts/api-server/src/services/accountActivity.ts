@@ -52,20 +52,20 @@ export interface AccountActivityItemDTO {
 
 /**
  * Every behavioral_signal observation bound to this account's strong
- * aliases, newest first. Bound the same way 3F/3H bind firmographic_fact/
- * crm_state evidence: via the account's identity observations resolving
- * to a (provider, sourceRecordId) this account's aliases actually match
- * — never a fuzzy match, never guessed. Throws AccountNotFoundError for
- * an unknown account, mirroring ../services/accountTruth.ts's identical
+ * aliases, newest first, UNBOUNDED (no limit) — the shared primitive
+ * behind both getAccountRecentActivity (below, which slices it) and
+ * Milestone 4B's ./accountActivitySummary.ts (which aggregates the full
+ * set). Bound the same way 3F/3H bind firmographic_fact/crm_state
+ * evidence: via the account's identity observations resolving to a
+ * (provider, sourceRecordId) this account's aliases actually match —
+ * never a fuzzy match, never guessed. Throws AccountNotFoundError for an
+ * unknown account, mirroring ../services/accountTruth.ts's identical
  * convention.
  */
-export async function getAccountRecentActivity(
+export async function getAccountBoundActivity(
   db: Db,
   accountId: string,
-  limit: number = DEFAULT_LIMIT,
 ): Promise<AccountActivityItemDTO[]> {
-  const boundedLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
-
   const [account] = await db
     .select({ id: accounts.id })
     .from(accounts)
@@ -133,8 +133,23 @@ export async function getAccountRecentActivity(
         rawValue: row.rawValue,
       }),
     )
-    .sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0))
-    .slice(0, boundedLimit);
+    .sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : a.occurredAt > b.occurredAt ? -1 : 0));
+}
+
+/**
+ * getAccountBoundActivity, capped to the caller's requested page size —
+ * the existing Account Workspace Activity tab's read model. See
+ * getAccountBoundActivity for the full binding rule; this adds only the
+ * limit/slice concern.
+ */
+export async function getAccountRecentActivity(
+  db: Db,
+  accountId: string,
+  limit: number = DEFAULT_LIMIT,
+): Promise<AccountActivityItemDTO[]> {
+  const boundedLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
+  const all = await getAccountBoundActivity(db, accountId);
+  return all.slice(0, boundedLimit);
 }
 
 // ---------------------------------------------------------------------

@@ -19,6 +19,7 @@ import { AccountTruthPanel } from "@/components/account-truth-panel";
 import { AccountRecentActivityPanel } from "@/components/account-recent-activity-panel";
 import { AccountPeoplePanel } from "@/components/account-people-panel";
 import { AccountClaimsPanel } from "@/components/account-claims-panel";
+import { AccountBrainPanel } from "@/components/account-brain-panel";
 import { humanizeAliasType } from "@/lib/account-truth-presentation";
 import { EvaluationRunsList } from "@/components/evaluation-runs-list";
 import { InlineNotice } from "@/components/inline-notice";
@@ -141,6 +142,7 @@ function AccountDetailContent({
         <TabsContent value="activity"><AccountRecentActivityPanel accountId={account.id} /></TabsContent>
         <TabsContent value="people"><AccountPeoplePanel accountId={account.id} /></TabsContent>
         <TabsContent value="intelligence" className="space-y-4">
+          <AccountBrainPanel accountId={account.id} />
           <AccountClaimsPanel accountId={account.id} />
           <ClientRadarResearchPanel accountId={account.id} />
         </TabsContent>
