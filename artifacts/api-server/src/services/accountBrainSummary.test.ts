@@ -102,10 +102,57 @@ test("buildAccountBrainNarrativeFacts includes only resolved truth fields (non-n
     people: [],
     activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
     claims: [],
+    whyNow: [],
   });
   assert.equal(facts.truth.length, 1);
   assert.equal(facts.truth[0]?.field, "company.industry");
   assert.equal(facts.truth[0]?.value, "Banking");
+});
+
+test("buildAccountBrainNarrativeFacts separates conflicting (evidence disagrees, no safe answer) from unknown (unresolved) fields", () => {
+  const facts = buildAccountBrainNarrativeFacts({
+    accountName: "Acme",
+    companyDomain: null,
+    truth: [
+      syntheticTruthField({ canonicalField: "crm.owner", canonicalValue: null, resolutionState: "conflict" }),
+      syntheticTruthField({ canonicalField: "company.region", canonicalValue: null, resolutionState: "unresolved" }),
+    ],
+    people: [],
+    activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
+    claims: [],
+    whyNow: [],
+  });
+  assert.deepEqual(facts.truth, []);
+  assert.deepEqual(facts.conflictingFields, ["crm.owner"]);
+  assert.deepEqual(facts.unknownFields, ["company.region"]);
+});
+
+test("buildAccountBrainNarrativeFacts keeps a conflict-with-a-safe-winner field in truth, not conflictingFields", () => {
+  const facts = buildAccountBrainNarrativeFacts({
+    accountName: "Acme",
+    companyDomain: null,
+    truth: [syntheticTruthField({ canonicalField: "crm.owner", canonicalValue: "Alex Savin", resolutionState: "conflict" })],
+    people: [],
+    activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
+    claims: [],
+    whyNow: [],
+  });
+  assert.equal(facts.truth[0]?.value, "Alex Savin");
+  assert.deepEqual(facts.conflictingFields, []);
+});
+
+test("buildAccountBrainNarrativeFacts passes whyNow events through unchanged", () => {
+  const whyNow = [{ kind: "person_first_identified" as const, occurredAt: "2026-08-21T00:00:00.000Z" }];
+  const facts = buildAccountBrainNarrativeFacts({
+    accountName: "Acme",
+    companyDomain: null,
+    truth: [],
+    people: [],
+    activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
+    claims: [],
+    whyNow,
+  });
+  assert.deepEqual(facts.whyNow, whyNow);
 });
 
 test("buildAccountBrainNarrativeFacts prefers canonicalDisplayValue over the raw canonicalValue", () => {
@@ -116,6 +163,7 @@ test("buildAccountBrainNarrativeFacts prefers canonicalDisplayValue over the raw
     people: [],
     activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
     claims: [],
+    whyNow: [],
   });
   assert.equal(facts.truth[0]?.value, "Mark van der Ree");
 });
@@ -133,6 +181,7 @@ test("buildAccountBrainNarrativeFacts deduplicates and caps peopleTitles, and re
     people,
     activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
     claims: [],
+    whyNow: [],
   });
   assert.equal(facts.peopleCount, 3);
   assert.deepEqual(facts.peopleTitles, ["VP Sales", "Marketing Manager"]);
@@ -146,6 +195,7 @@ test("buildAccountBrainNarrativeFacts never includes workEmail/linkedinUrl/fullN
     people: [syntheticPerson({ fullName: "Laura Berkey", workEmail: "laura@example.test" })],
     activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
     claims: [],
+    whyNow: [],
   });
   const serialized = JSON.stringify(facts);
   assert.ok(!serialized.includes("Laura Berkey"));
@@ -161,6 +211,7 @@ test("buildAccountBrainNarrativeFacts maps activitySummary through unchanged", (
     people: [],
     activitySummary,
     claims: [],
+    whyNow: [],
   });
   assert.deepEqual(facts.activity, {
     totalEvents: 12,
@@ -180,6 +231,7 @@ test("buildAccountBrainNarrativeFacts describes claims with claimsCount separate
     people: [],
     activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
     claims,
+    whyNow: [],
   });
   assert.equal(facts.claimsCount, 1);
   assert.deepEqual(facts.claims, [{ claimKey: "account.example", value: "example value" }]);
@@ -194,6 +246,7 @@ test("buildAccountBrainNarrativeFacts falls back to 'Unknown account' and strips
     people: [],
     activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
     claims: [],
+    whyNow: [],
   });
   assert.ok(!facts.accountName.includes("\n"));
   assert.ok(facts.accountName.length <= 83);
@@ -205,6 +258,7 @@ test("buildAccountBrainNarrativeFacts falls back to 'Unknown account' and strips
     people: [],
     activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
     claims: [],
+    whyNow: [],
   });
   assert.equal(emptyName.accountName, "Unknown account");
 });
@@ -236,6 +290,7 @@ function baseFacts(): AccountBrainNarrativeFacts {
     people: [syntheticPerson({ title: "VP Sales" })],
     activitySummary: syntheticActivitySummary(),
     claims: [],
+    whyNow: [],
   });
 }
 
@@ -350,6 +405,7 @@ test("validateNarrativeOutput handles a genuinely empty account truthfully", () 
     people: [],
     activitySummary: syntheticActivitySummary({ totalEvents: 0, firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0, providers: [] }),
     claims: [],
+    whyNow: [],
   });
   const raw = JSON.stringify({
     summary: "No activity has been observed for Acme, and no people have been identified.",
@@ -357,6 +413,83 @@ test("validateNarrativeOutput handles a genuinely empty account truthfully", () 
   });
   const result = validateNarrativeOutput(raw, facts);
   assert.ok(result.summary.includes("No activity"));
+});
+
+test("validateNarrativeOutput accepts a grounded restatement of a whyNow activity_returned event, including its quietDays count", () => {
+  const facts = buildAccountBrainNarrativeFacts({
+    accountName: "Acme",
+    companyDomain: null,
+    truth: [],
+    people: [],
+    activitySummary: syntheticActivitySummary(),
+    claims: [],
+    whyNow: [{ kind: "activity_returned", occurredAt: "2026-08-21T10:00:00.000Z", isWebsite: true, quietDays: 18 }],
+  });
+  const raw = JSON.stringify({
+    summary: "Website activity was recorded again on August 21 after 18 days with none recorded.",
+    factsUsed: ["whyNow"],
+  });
+  const result = validateNarrativeOutput(raw, facts);
+  assert.ok(result.summary.includes("18 days"));
+});
+
+test("validateNarrativeOutput rejects a whyNow restatement that adds significance/urgency language not licensed by rule 8", () => {
+  const facts = buildAccountBrainNarrativeFacts({
+    accountName: "Acme",
+    companyDomain: null,
+    truth: [],
+    people: [],
+    activitySummary: syntheticActivitySummary(),
+    claims: [],
+    whyNow: [{ kind: "person_first_identified", occurredAt: "2026-08-21T00:00:00.000Z" }],
+  });
+  const raw = JSON.stringify({
+    summary: "A new person was identified, which is a hot lead signal worth urgent follow-up.",
+    factsUsed: ["whyNow"],
+  });
+  assert.throws(
+    () => validateNarrativeOutput(raw, facts),
+    (err: unknown) => err instanceof AccountBrainNarrativeUnavailableError && err.reason === "forbidden_language",
+  );
+});
+
+test("validateNarrativeOutput rejects a whyNow restatement citing an unsupported quietDays number", () => {
+  const facts = buildAccountBrainNarrativeFacts({
+    accountName: "Acme",
+    companyDomain: null,
+    truth: [],
+    people: [],
+    activitySummary: syntheticActivitySummary(),
+    claims: [],
+    whyNow: [{ kind: "activity_returned", occurredAt: "2026-08-21T10:00:00.000Z", isWebsite: true, quietDays: 18 }],
+  });
+  const raw = JSON.stringify({
+    summary: "Activity was recorded again after 45 days with none recorded.",
+    factsUsed: ["whyNow"],
+  });
+  assert.throws(
+    () => validateNarrativeOutput(raw, facts),
+    (err: unknown) => err instanceof AccountBrainNarrativeUnavailableError && err.reason === "ungrounded",
+  );
+});
+
+test("validateNarrativeOutput accepts an honest restatement that sources disagree on owner, without guessing an answer", () => {
+  const facts = buildAccountBrainNarrativeFacts({
+    accountName: "Acme",
+    companyDomain: null,
+    truth: [syntheticTruthField({ canonicalField: "crm.owner", canonicalValue: null, resolutionState: "conflict" })],
+    people: [],
+    activitySummary: syntheticActivitySummary({ totalEvents: 0, providers: [], firstObservedAt: null, lastObservedAt: null, distinctDaysObserved: 0 }),
+    claims: [],
+    whyNow: [],
+  });
+  assert.deepEqual(facts.conflictingFields, ["crm.owner"]);
+  const raw = JSON.stringify({
+    summary: "Sources disagree on the account's owner, so no confirmed owner is recorded.",
+    factsUsed: ["conflictingFields"],
+  });
+  const result = validateNarrativeOutput(raw, facts);
+  assert.ok(result.summary.includes("disagree"));
 });
 
 // ---------------------------------------------------------------------
@@ -386,5 +519,14 @@ test("findForbiddenLanguage returns null for a clean, factual sentence", () => {
 });
 
 test("ACCOUNT_BRAIN_NARRATIVE_FACT_KEYS is the exact closed set the schema/prompt both reference", () => {
-  assert.deepEqual(ACCOUNT_BRAIN_NARRATIVE_FACT_KEYS, ["accountIdentity", "truth", "people", "activity", "claims"]);
+  assert.deepEqual(ACCOUNT_BRAIN_NARRATIVE_FACT_KEYS, [
+    "accountIdentity",
+    "truth",
+    "conflictingFields",
+    "unknownFields",
+    "people",
+    "activity",
+    "claims",
+    "whyNow",
+  ]);
 });

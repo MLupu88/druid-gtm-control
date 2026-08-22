@@ -38,9 +38,35 @@ test("has real loading and error states for the read model, not just a happy pat
 });
 
 test("shows only resolved truth (never an unresolved field), a factual activity line, and people — the What we know section", () => {
-  assert.ok(SOURCE.includes("resolvedTruthLines"));
+  assert.ok(SOURCE.includes("classifyAccountTruthFields"));
   assert.ok(SOURCE.includes("activitySummaryLine"));
   assert.ok(SOURCE.includes("personDisplayName"));
+});
+
+test("surfaces conflicting evidence rather than silently erasing it when a safe canonical winner still exists", () => {
+  assert.ok(SOURCE.includes("hasConflictingEvidence"));
+  assert.ok(SOURCE.includes("Conflicting source information"));
+});
+
+test("What we don't know yet is scoped to classification.unknown only — never People/Activity absence", () => {
+  assert.ok(SOURCE.includes("What we don't know yet"));
+  assert.ok(SOURCE.includes("classification.unknown"));
+  assert.ok(SOURCE.includes("unknownFieldLine"));
+  // People/Activity absence must never be rendered inside the Unknown section's own list.
+  assert.ok(!SOURCE.includes("No people identified yet"));
+});
+
+test("Why Now renders factual reason cards with an explicit empty state, never a score/hot-warm-cold label", () => {
+  assert.ok(SOURCE.includes("Why now"));
+  assert.ok(SOURCE.includes("whyNowCard"));
+  assert.ok(SOURCE.includes("Nothing new to report"));
+  // Strip // line comments so the module's own explanatory prose (which
+  // legitimately names these forbidden concepts to say they're excluded)
+  // doesn't false-positive this check against actual rendered JSX/code.
+  const withoutComments = SOURCE.replace(/^\s*\/\/.*$/gm, "");
+  for (const forbidden of ["hot", "warm", "cold", "score", "intent"]) {
+    assert.ok(!withoutComments.toLowerCase().includes(forbidden), `must not reference "${forbidden}"`);
+  }
 });
 
 test("never renders account_claims a second time — existing claims are pointed at, not re-rendered, since account-claims-panel.tsx already owns that", () => {

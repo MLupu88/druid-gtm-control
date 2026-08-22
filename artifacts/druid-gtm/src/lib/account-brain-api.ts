@@ -12,7 +12,7 @@
 // automatically, only from a deliberate user click (see
 // ../components/account-brain-panel.tsx).
 
-import type { AccountTruthField } from "@/lib/account-truth-api";
+import type { AccountTruthField, CanonicalTruthField } from "@/lib/account-truth-api";
 import type { AccountPerson } from "@/lib/account-people-api";
 import type { AccountClaim } from "@/lib/account-claims-api";
 
@@ -23,6 +23,23 @@ export interface AccountActivitySummary {
   distinctDaysObserved: number;
   providers: string[];
 }
+
+// Milestone 4C — deterministic, factual "why now" change events. No
+// score, no LLM involvement in producing these — see
+// artifacts/api-server/src/services/accountWhyNow.ts, the source of
+// truth this type is verified against.
+export type WhyNowEvent =
+  | { kind: "person_first_identified"; occurredAt: string }
+  | { kind: "first_activity"; occurredAt: string; isWebsite: boolean }
+  | { kind: "activity_returned"; occurredAt: string; isWebsite: boolean; quietDays: number }
+  | { kind: "truth_field_learned"; occurredAt: string; canonicalField: CanonicalTruthField }
+  | {
+      kind: "truth_field_changed";
+      occurredAt: string;
+      canonicalField: CanonicalTruthField;
+      fromValue: string | number | boolean | null;
+      toValue: string | number | boolean | null;
+    };
 
 export type AccountBrainNarrativeUnavailableReason =
   | "not_configured"
@@ -42,6 +59,7 @@ export interface AccountBrainSummary {
   people: AccountPerson[];
   activitySummary: AccountActivitySummary;
   claims: AccountClaim[];
+  whyNow: WhyNowEvent[];
   narrative: AccountBrainNarrative | null;
   narrativeUnavailableReason: AccountBrainNarrativeUnavailableReason | null;
 }

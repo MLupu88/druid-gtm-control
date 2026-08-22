@@ -1,31 +1,14 @@
-// Milestone 4B — pure, DOM-free logic for
+// Milestone 4B/4C — pure, DOM-free logic for
 // ../components/account-brain-panel.tsx. Mirrors
 // ./account-truth-presentation.ts's own module comment discipline (no
 // jsdom/testing-library in this package).
 //
-// This module deliberately does NOT invent a second "condensed truth"
-// label map or duplicate account-truth-presentation.ts's own field
-// labels/value formatting — it reuses fieldLabel/displayCanonicalValue
-// directly (same functions the Overview/Intelligence "Account Truth"
-// display already uses), so "What we know" never drifts out of sync
-// with how Account Truth is labeled everywhere else in the app.
+// Truth field classification (Known/Conflicting/Unknown) lives in
+// ./account-known-unknown-presentation.ts, not here — this module keeps
+// only what isn't specific to that classification: activity copy and
+// narrative-unavailable copy.
 
-import { fieldLabel, sortFieldsForDisplay, displayCanonicalValue } from "@/lib/account-truth-presentation";
-import type { AccountTruthField } from "@/lib/account-truth-api";
 import type { AccountActivitySummary } from "@/lib/account-brain-api";
-
-export interface KnownTruthLine {
-  label: string;
-  value: string;
-}
-
-/** Only fields Account Truth has actually resolved (a real canonicalValue) — an unresolved field is simply absent, never shown as "Unknown". */
-export function resolvedTruthLines(fields: readonly AccountTruthField[]): KnownTruthLine[] {
-  return sortFieldsForDisplay(fields.filter((f) => f.canonicalValue !== null)).map((f) => ({
-    label: fieldLabel(f.canonicalField),
-    value: f.canonicalDisplayValue ?? displayCanonicalValue(f.canonicalField, f.canonicalValue),
-  }));
-}
 
 function formatCalendarDate(iso: string | null): string | null {
   if (!iso) return null;

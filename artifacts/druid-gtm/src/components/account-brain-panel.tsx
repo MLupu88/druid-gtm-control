@@ -1,10 +1,25 @@
-// Milestone 4B — Account Workspace Intelligence tab: the Grounded
+// Milestone 4B/4C — Account Workspace Intelligence tab: the Grounded
 // Account Brain "Account Understanding" panel. Composes already-
 // canonical Account Truth + People + a computed factual activity
-// summary (via ../lib/account-brain-api.ts's GET /brain — cheap, no
-// LLM, safe on every tab load) with an explicit "Analyze this account"
-// action (POST /brain/analyze — one DeepSeek call, only ever fired by a
-// deliberate click, never automatically).
+// summary + deterministic Why Now change events (via
+// ../lib/account-brain-api.ts's GET /brain — cheap, no LLM, safe on
+// every tab load) with an explicit "Analyze this account" action (POST
+// /brain/analyze — one DeepSeek call, only ever fired by a deliberate
+// click, never automatically).
+//
+// KNOWN/CONFLICTING/UNKNOWN: classification is re-derived client-side
+// from the raw accountTruth already fetched (see
+// ../lib/account-known-unknown-presentation.ts) — never a separate wire
+// field. Per the M4/4C product correction, "What we don't know yet" is
+// scoped to ONLY the canonical Account Truth vocabulary — People/
+// Activity absence is a factual state of Mission Control's own
+// evidence, shown under What We Know instead, never listed as an
+// Unknown.
+//
+// WHY NOW: purely factual, deterministic reason cards (see
+// ../lib/account-why-now-presentation.ts) — no score, no "hot/warm/
+// cold", never rendered with interpretive framing. An empty Why Now
+// section is shown explicitly as empty, never omitted or padded.
 //
 // The narrative is a DISPLAY-ONLY generated synthesis, never a stored
 // fact: there is no persisted "last analyzed" state (4B has no analysis-
@@ -21,12 +36,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InlineNotice } from "@/components/inline-notice";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { fetchAccountBrain, analyzeAccountBrain, accountBrainQueryKey } from "@/lib/account-brain-api";
-import { resolvedTruthLines, activitySummaryLine, narrativeUnavailableCopy } from "@/lib/account-brain-presentation";
+import { activitySummaryLine, narrativeUnavailableCopy } from "@/lib/account-brain-presentation";
+import { classifyAccountTruthFields, unknownFieldLine } from "@/lib/account-known-unknown-presentation";
+import { whyNowCard } from "@/lib/account-why-now-presentation";
 import { personDisplayName } from "@/lib/account-people-presentation";
 import { formatEvidenceTimestamp } from "@/lib/account-truth-presentation";
 
@@ -51,7 +69,7 @@ export function AccountBrainPanel({ accountId }: AccountBrainPanelProps) {
   });
 
   const brain = analyzeMutation.data ?? brainQ.data ?? null;
-  const truthLines = brain ? resolvedTruthLines(brain.accountTruth) : [];
+  const classification = brain ? classifyAccountTruthFields(brain.accountTruth) : null;
 
   return (
     <Card className="border-border bg-card">
@@ -79,14 +97,16 @@ export function AccountBrainPanel({ accountId }: AccountBrainPanelProps) {
           </InlineNotice>
         )}
 
-        {brain && (
+        {brain && classification && (
           <>
             <section className="space-y-2">
               <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 What we know
               </h4>
 
-              {truthLines.length === 0 && brain.people.length === 0 && brain.activitySummary.totalEvents === 0 ? (
+              {classification.known.length === 0 &&
+              brain.people.length === 0 &&
+              brain.activitySummary.totalEvents === 0 ? (
                 <Empty className="min-h-24 rounded-lg border border-dashed border-border bg-card/30">
                   <EmptyHeader>
                     <EmptyTitle>Nothing known yet</EmptyTitle>
@@ -97,15 +117,33 @@ export function AccountBrainPanel({ accountId }: AccountBrainPanelProps) {
                 </Empty>
               ) : (
                 <div className="space-y-2">
-                  {truthLines.length > 0 && (
+                  {classification.known.length > 0 && (
                     <ul className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-                      {truthLines.map((line) => (
-                        <li key={line.label} className="flex justify-between gap-2 rounded-md border border-border/40 bg-background/40 px-2 py-1">
-                          <span className="text-muted-foreground">{line.label}</span>
-                          <span className="text-right font-medium text-foreground">{line.value}</span>
+                      {classification.known.map((line) => (
+                        <li
+                          key={line.canonicalField}
+                          className="flex flex-col gap-0.5 rounded-md border border-border/40 bg-background/40 px-2 py-1"
+                        >
+                          <span className="flex justify-between gap-2">
+                            <span className="text-muted-foreground">{line.label}</span>
+                            <span className="text-right font-medium text-foreground">{line.value}</span>
+                          </span>
+                          {line.hasConflictingEvidence && (
+                            <Badge variant="outline" className="w-fit text-[9px] font-normal text-muted-foreground">
+                              Conflicting source information
+                            </Badge>
+                          )}
                         </li>
                       ))}
                     </ul>
+                  )}
+
+                  {classification.conflicting.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Sources disagree on{" "}
+                      {classification.conflicting.map((c) => c.label.toLowerCase()).join(", ")} — no confirmed
+                      answer yet.
+                    </p>
                   )}
 
                   <p className="text-xs text-muted-foreground">{activitySummaryLine(brain.activitySummary)}</p>
@@ -123,6 +161,40 @@ export function AccountBrainPanel({ accountId }: AccountBrainPanelProps) {
                     </p>
                   )}
                 </div>
+              )}
+            </section>
+
+            <section className="space-y-2 border-t border-border/40 pt-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                What we don't know yet
+              </h4>
+              {classification.unknown.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nothing outstanding — every tracked detail is known or in conflict.</p>
+              ) : (
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {classification.unknown.map((field) => (
+                    <li key={field}>{unknownFieldLine(field)}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="space-y-2 border-t border-border/40 pt-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Why now</h4>
+              {brain.whyNow.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nothing new to report in the last 7 days.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {brain.whyNow.map((event, i) => {
+                    const card = whyNowCard(event);
+                    return (
+                      <li key={`${event.kind}-${event.occurredAt}-${i}`} className="flex items-baseline justify-between gap-2 text-xs">
+                        <span className="text-foreground">• {card.text}</span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">{card.date}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </section>
 

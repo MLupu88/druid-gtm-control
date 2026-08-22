@@ -1041,6 +1041,7 @@ function syntheticBrainSummary(overrides: Partial<AccountBrainSummary> = {}): Ac
       providers: [],
     },
     claims: [],
+    whyNow: [],
     narrative: null,
     narrativeUnavailableReason: null,
     ...overrides,
@@ -1070,6 +1071,21 @@ test("GET /:accountId/brain always returns narrative: null — no LLM call happe
     const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain`);
     const body = await readJson(res, "GET /:accountId/brain narrative body");
     assert.equal(body.narrative, null);
+  });
+});
+
+test("GET /:accountId/brain passes through real whyNow events from the service, unmodified", async () => {
+  const whyNow = [
+    { kind: "person_first_identified" as const, occurredAt: "2026-08-21T00:00:00.000Z" },
+    { kind: "activity_returned" as const, occurredAt: "2026-08-20T00:00:00.000Z", isWebsite: true, quietDays: 18 },
+  ];
+  const getAccountBrainFn = mock.fn<GetAccountBrainFn>(async () => syntheticBrainSummary({ whyNow }));
+  const app = buildTestApp({ getAccountBrainFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/brain`);
+    const body = await readJson(res, "GET /:accountId/brain whyNow body");
+    assert.deepEqual(body.whyNow, whyNow);
   });
 });
 

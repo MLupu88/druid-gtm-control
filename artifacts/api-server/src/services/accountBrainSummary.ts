@@ -29,7 +29,11 @@ import { accounts } from "@workspace/db/schema";
 import { getAccountCanonicalTruth, type AccountTruthFieldDTO } from "./accountTruth.js";
 import { getAccountPeople, type AccountPersonDTO } from "./people.js";
 import { getAccountActivitySummary, type AccountActivitySummary } from "./accountActivitySummary.js";
+import { getAccountBoundActivity } from "./accountActivity.js";
 import { getAccountClaims, type AccountClaimDTO } from "./accountClaims.js";
+import { getResolvedFactHistory } from "./accountTruthHistory.js";
+import { classifyAccountTruth } from "./accountKnownUnknown.js";
+import { buildWhyNowEvents, type WhyNowEvent } from "./accountWhyNow.js";
 import {
   requestDeepSeekChatCompletion,
   DeepSeekNotConfiguredError,
@@ -84,27 +88,45 @@ export interface AccountBrainSummary {
   people: AccountPersonDTO[];
   activitySummary: AccountActivitySummary;
   claims: AccountClaimDTO[];
+  /**
+   * Milestone 4C — deterministic, factual "why now" reason events (see
+   * ./accountWhyNow.ts). Empty is a real, expected outcome — never
+   * padded with a fabricated entry. No score, no LLM involvement.
+   */
+  whyNow: WhyNowEvent[];
   narrative: AccountBrainNarrative | null;
   narrativeUnavailableReason: AccountBrainNarrativeUnavailableReason | null;
 }
 
-async function gatherAccountBrainParts(db: Db, accountId: string) {
-  const [accountTruth, people, activitySummary, claims] = await Promise.all([
+async function gatherAccountBrainParts(db: Db, accountId: string, now: Date) {
+  const [accountTruth, people, activitySummary, claims, activityItems, truthHistory] = await Promise.all([
     getAccountCanonicalTruth(db, accountId),
     getAccountPeople(db, accountId),
     getAccountActivitySummary(db, accountId),
     getAccountClaims(db, accountId),
+    getAccountBoundActivity(db, accountId),
+    getResolvedFactHistory(db, accountId),
   ]);
-  return { accountTruth, people, activitySummary, claims };
+  const whyNow = buildWhyNowEvents({ people, activityItems, truthHistory, now });
+  return { accountTruth, people, activitySummary, claims, whyNow };
+}
+
+export interface GetAccountBrainSummaryArgs {
+  /** Test-only override for "now" (drives the Why Now window); defaults to the real current time. */
+  now?: Date;
 }
 
 /**
  * Cheap, no LLM, no writes — safe to call on every Intelligence-tab
  * load. Throws AccountNotFoundError for an unknown account.
  */
-export async function getAccountBrainSummary(db: Db, accountId: string): Promise<AccountBrainSummary> {
+export async function getAccountBrainSummary(
+  db: Db,
+  accountId: string,
+  args: GetAccountBrainSummaryArgs = {},
+): Promise<AccountBrainSummary> {
   await loadAccountOrThrow(db, accountId);
-  const parts = await gatherAccountBrainParts(db, accountId);
+  const parts = await gatherAccountBrainParts(db, accountId, args.now ?? new Date());
   return { ...parts, narrative: null, narrativeUnavailableReason: null };
 }
 
@@ -179,11 +201,17 @@ export interface AccountBrainNarrativeFacts {
   accountName: string;
   companyDomain: string | null;
   truth: AccountBrainTruthFact[];
+  /** Milestone 4C — canonical fields where evidence exists but disagrees, with no safe answer (see ./accountKnownUnknown.ts). Raw field keys (e.g. "crm.owner"), not display labels — the model already handles that for `truth` above. */
+  conflictingFields: string[];
+  /** Milestone 4C — canonical fields with resolutionState 'unresolved'. Absence of a value here, never a negative assertion. */
+  unknownFields: string[];
   peopleCount: number;
   peopleTitles: string[];
   activity: AccountBrainActivityFact;
   claimsCount: number;
   claims: AccountBrainClaimFact[];
+  /** Milestone 4C — deterministic factual change events, already computed by ./accountWhyNow.ts. The model may only restate these, never add causal/interpretive framing. */
+  whyNow: WhyNowEvent[];
 }
 
 export interface BuildAccountBrainNarrativeFactsArgs {
@@ -193,22 +221,28 @@ export interface BuildAccountBrainNarrativeFactsArgs {
   people: AccountPersonDTO[];
   activitySummary: AccountActivitySummary;
   claims: AccountClaimDTO[];
+  whyNow: WhyNowEvent[];
 }
 
 /**
- * Pure shaping function — no DB, no network. Only resolved truth fields
- * (a non-null canonicalValue) are included; unresolved fields are simply
- * absent, never sent as "unknown" noise. Exported for direct unit
- * testing.
+ * Pure shaping function — no DB, no network. Only KNOWN truth fields (a
+ * non-null canonicalValue) populate `truth`; conflicting/unknown fields
+ * are surfaced separately (see ./accountKnownUnknown.ts's classification
+ * — never silently dropped, never sent as vague "unknown" noise).
+ * Exported for direct unit testing.
  */
 export function buildAccountBrainNarrativeFacts(
   args: BuildAccountBrainNarrativeFactsArgs,
 ): AccountBrainNarrativeFacts {
+  const classification = classifyAccountTruth(args.truth);
+
   const truth: AccountBrainTruthFact[] = [];
-  for (const field of args.truth) {
+  for (const field of classification.known) {
     const display = field.canonicalDisplayValue ?? displayScalar(field.canonicalValue);
     if (display !== null) truth.push({ field: field.canonicalField, value: display });
   }
+  const conflictingFields = classification.conflicting.map((f) => f.canonicalField);
+  const unknownFields = classification.unknown;
 
   const peopleTitles = [
     ...new Set(
@@ -228,6 +262,8 @@ export function buildAccountBrainNarrativeFacts(
     accountName: sanitizeText(args.accountName ?? "", "Unknown account"),
     companyDomain: args.companyDomain,
     truth,
+    conflictingFields,
+    unknownFields,
     peopleCount: args.people.length,
     peopleTitles,
     activity: {
@@ -239,6 +275,7 @@ export function buildAccountBrainNarrativeFacts(
     },
     claimsCount: args.claims.length,
     claims,
+    whyNow: args.whyNow,
   };
 }
 
@@ -249,9 +286,12 @@ export function buildAccountBrainNarrativeFacts(
 export const ACCOUNT_BRAIN_NARRATIVE_FACT_KEYS = [
   "accountIdentity",
   "truth",
+  "conflictingFields",
+  "unknownFields",
   "people",
   "activity",
   "claims",
+  "whyNow",
 ] as const;
 
 export type AccountBrainNarrativeFactKey = (typeof ACCOUNT_BRAIN_NARRATIVE_FACT_KEYS)[number];
@@ -266,8 +306,10 @@ STRICT RULES — follow every one exactly:
 3. No marketing language, no exclamation points, no recommendations, no "you should".
 4. If a count is zero or a list is empty, state that plainly — never omit a zero or reinterpret it as something else.
 5. Keep the summary to 2-4 short factual sentences. Do not write a long narrative.
-6. When referencing activity dates, describe them only in calendar-date terms (e.g. "August 20") — never state an exact clock time.
-7. Output MUST be valid JSON only, with exactly this shape and no other keys: {"summary": string, "factsUsed": string[]}. factsUsed must only contain values drawn from this exact list: ${ACCOUNT_BRAIN_NARRATIVE_FACT_KEYS.join(", ")}. Output nothing outside the JSON object.`;
+6. When referencing activity or whyNow dates, describe them only in calendar-date terms (e.g. "August 20") — never state an exact clock time.
+7. unknownFields lists things Mission Control has not yet recorded — never state or imply this means the answer is "no," "false," or that the underlying fact doesn't exist in reality. conflictingFields lists things where recorded evidence disagrees — state only that sources disagree, never guess which one is right.
+8. whyNow lists factual changes Mission Control has already detected. Restate them plainly (what changed, when) — never add why it matters, never call anything "significant," "notable," "hot," or a sign of anything. If whyNow is empty, do not invent a substitute — simply don't mention it.
+9. Output MUST be valid JSON only, with exactly this shape and no other keys: {"summary": string, "factsUsed": string[]}. factsUsed must only contain values drawn from this exact list: ${ACCOUNT_BRAIN_NARRATIVE_FACT_KEYS.join(", ")}. Output nothing outside the JSON object.`;
 
 export function buildAccountBrainNarrativePrompt(facts: AccountBrainNarrativeFacts): {
   systemPrompt: string;
@@ -388,6 +430,14 @@ function collectGroundedNumbers(facts: AccountBrainNarrativeFacts): Set<string> 
     const n = Number(t.value);
     if (Number.isFinite(n) && t.value.trim() !== "") add(n);
   }
+  for (const event of facts.whyNow) {
+    addDateNumberFragments(grounded, event.occurredAt);
+    if (event.kind === "activity_returned") add(event.quietDays);
+    if (event.kind === "truth_field_changed") {
+      if (typeof event.fromValue === "number") add(event.fromValue);
+      if (typeof event.toValue === "number") add(event.toValue);
+    }
+  }
 
   return grounded;
 }
@@ -416,6 +466,10 @@ const COMMON_WORDS = new Set([
   "distinct", "calendar", "date", "dates", "when", "what", "which", "field", "fields", "value",
   "values", "january", "february", "march", "april", "may", "june", "july", "august",
   "september", "october", "november", "december",
+  // 4C additions — Known/Unknown/Conflicting/Why Now restatement prose.
+  "conflicting", "conflict", "disagree", "disagreement", "unresolved", "changed", "change",
+  "confirmed", "learned", "sources", "source", "differs", "different", "previously", "before",
+  "returned", "quiet", "again", "week", "weeks", "understood", "safe", "answer", "website", "after",
 ]);
 
 function collectGroundedWords(facts: AccountBrainNarrativeFacts): Set<string> {
@@ -522,7 +576,8 @@ export async function analyzeAccountBrain(
   args: AnalyzeAccountBrainArgs = {},
 ): Promise<AccountBrainSummary> {
   const account = await loadAccountOrThrow(db, accountId);
-  const parts = await gatherAccountBrainParts(db, accountId);
+  const now = args.now ?? new Date();
+  const parts = await gatherAccountBrainParts(db, accountId, now);
 
   const facts = buildAccountBrainNarrativeFacts({
     accountName: account.companyName ?? account.accountKey,
@@ -531,10 +586,10 @@ export async function analyzeAccountBrain(
     people: parts.people,
     activitySummary: parts.activitySummary,
     claims: parts.claims,
+    whyNow: parts.whyNow,
   });
   const { systemPrompt, userPrompt } = buildAccountBrainNarrativePrompt(facts);
   const requestChatCompletionFn = args.requestChatCompletionFn ?? requestDeepSeekChatCompletion;
-  const now = args.now ?? new Date();
 
   let narrative: AccountBrainNarrative | null = null;
   let narrativeUnavailableReason: AccountBrainNarrativeUnavailableReason | null = null;

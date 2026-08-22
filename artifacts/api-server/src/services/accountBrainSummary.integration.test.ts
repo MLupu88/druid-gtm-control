@@ -86,7 +86,102 @@ test("getAccountBrainSummary composes real accountTruth/people/activitySummary/c
     providers: [],
   });
   assert.deepEqual(result.claims, []);
+  assert.ok(Array.isArray(result.whyNow));
   assert.equal(result.narrative, null);
+  assert.equal(result.narrativeUnavailableReason, null);
+});
+
+test("getAccountBrainSummary surfaces a real person_first_identified whyNow event when firstSeenAt falls in the 7-day window", { skip }, async () => {
+  const account = await makeAccount({ companyName: "Acme Why Now" });
+  const person = await makePerson({ fullName: "Laura Berkey" });
+  const inWindow = new Date(FIXED_NOW.getTime() - 2 * 24 * 60 * 60 * 1000);
+  await db!.insert(schema.accountPeople).values({
+    accountId: account.id,
+    personId: person.id,
+    title: "VP Sales",
+    source: "rb2b",
+    firstSeenAt: inWindow,
+    lastSeenAt: inWindow,
+  });
+
+  const result = await getAccountBrainSummary(db!, account.id, { now: FIXED_NOW });
+  assert.equal(result.whyNow.length, 1);
+  assert.equal(result.whyNow[0]?.kind, "person_first_identified");
+  assert.equal(result.whyNow[0]?.occurredAt, inWindow.toISOString());
+});
+
+test("getAccountBrainSummary does NOT surface a person_first_identified event when firstSeenAt is outside the 7-day window", { skip }, async () => {
+  const account = await makeAccount({ companyName: "Acme Old Person" });
+  const person = await makePerson({ fullName: "Old Contact" });
+  const outsideWindow = new Date(FIXED_NOW.getTime() - 30 * 24 * 60 * 60 * 1000);
+  await db!.insert(schema.accountPeople).values({
+    accountId: account.id,
+    personId: person.id,
+    title: "VP Sales",
+    source: "rb2b",
+    firstSeenAt: outsideWindow,
+    lastSeenAt: outsideWindow,
+  });
+
+  const result = await getAccountBrainSummary(db!, account.id, { now: FIXED_NOW });
+  assert.deepEqual(result.whyNow, []);
+});
+
+test("getAccountBrainSummary surfaces a real truth_field_learned whyNow event from real resolved_facts history, without touching account_evaluations", { skip }, async () => {
+  const account = await makeAccount({ companyName: "Acme Truth History" });
+  const [observation] = await db!
+    .insert(schema.observations)
+    .values({
+      provider: "hubspot",
+      sourceRecordId: crypto.randomUUID(),
+      observationClass: "firmographic_fact",
+      semanticKey: "company.industry",
+      rawValue: "Banking",
+      importedAt: FIXED_NOW,
+      evidenceRefs: [],
+    })
+    .returning();
+  const inWindow = new Date(FIXED_NOW.getTime() - 3 * 24 * 60 * 60 * 1000);
+  await db!.insert(schema.resolvedFacts).values({
+    accountId: account.id,
+    canonicalField: "company.industry",
+    resolutionState: "single_source",
+    canonicalValue: "Banking",
+    selectedObservationId: observation!.id,
+    policyVersion: "test-policy-v1",
+    rationale: "test fixture",
+    resolvedAt: inWindow,
+  });
+
+  const result = await getAccountBrainSummary(db!, account.id, { now: FIXED_NOW });
+  assert.equal(result.whyNow.length, 1);
+  assert.equal(result.whyNow[0]?.kind, "truth_field_learned");
+  if (result.whyNow[0]?.kind === "truth_field_learned") {
+    assert.equal(result.whyNow[0].canonicalField, "company.industry");
+  }
+});
+
+test("analyzeAccountBrain's narrative facts include whyNow, conflictingFields, and unknownFields, all reachable by the grounding validator", { skip }, async () => {
+  const account = await makeAccount({ companyName: "Acme Full Facts" });
+  const person = await makePerson({ fullName: "New Contact" });
+  const inWindow = new Date(FIXED_NOW.getTime() - 1 * 24 * 60 * 60 * 1000);
+  await db!.insert(schema.accountPeople).values({
+    accountId: account.id,
+    personId: person.id,
+    title: "VP Sales",
+    source: "rb2b",
+    firstSeenAt: inWindow,
+    lastSeenAt: inWindow,
+  });
+
+  const requestChatCompletionFn = mockChatCompletion({
+    summary: "A new person was identified recently at Acme Full Facts.",
+    factsUsed: ["whyNow", "people"],
+  });
+
+  const result = await analyzeAccountBrain(db!, account.id, { now: FIXED_NOW, requestChatCompletionFn });
+  assert.equal(result.whyNow.length, 1);
+  assert.equal(result.narrative?.text, "A new person was identified recently at Acme Full Facts.");
   assert.equal(result.narrativeUnavailableReason, null);
 });
 

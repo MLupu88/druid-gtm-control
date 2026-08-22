@@ -6,25 +6,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { AccountTruthField } from "@/lib/account-truth-api";
 import type { AccountActivitySummary } from "@/lib/account-brain-api";
-import { resolvedTruthLines, activitySummaryLine, narrativeUnavailableCopy } from "./account-brain-presentation.js";
-
-function truthField(overrides: Partial<AccountTruthField> = {}): AccountTruthField {
-  return {
-    canonicalField: "company.industry",
-    canonicalValue: null,
-    resolutionState: "unresolved",
-    policyVersion: "v1",
-    rationale: "no candidate evidence available",
-    computedAt: "2026-08-22T00:00:00.000Z",
-    selectedEvidence: null,
-    supportingEvidence: [],
-    conflictingEvidence: [],
-    canonicalDisplayValue: null,
-    ...overrides,
-  };
-}
+import { activitySummaryLine, narrativeUnavailableCopy } from "./account-brain-presentation.js";
 
 function activitySummary(overrides: Partial<AccountActivitySummary> = {}): AccountActivitySummary {
   return {
@@ -36,27 +19,6 @@ function activitySummary(overrides: Partial<AccountActivitySummary> = {}): Accou
     ...overrides,
   };
 }
-
-test("resolvedTruthLines excludes unresolved fields (canonicalValue: null)", () => {
-  const lines = resolvedTruthLines([
-    truthField({ canonicalField: "company.industry", canonicalValue: "Banking" }),
-    truthField({ canonicalField: "company.region", canonicalValue: null }),
-  ]);
-  assert.equal(lines.length, 1);
-  assert.equal(lines[0]?.label, "Industry");
-  assert.equal(lines[0]?.value, "Banking");
-});
-
-test("resolvedTruthLines prefers canonicalDisplayValue over the raw canonicalValue", () => {
-  const lines = resolvedTruthLines([
-    truthField({ canonicalField: "crm.owner", canonicalValue: "89684655", canonicalDisplayValue: "Mark van der Ree" }),
-  ]);
-  assert.equal(lines[0]?.value, "Mark van der Ree");
-});
-
-test("resolvedTruthLines returns an empty array (never a placeholder) when nothing is resolved", () => {
-  assert.deepEqual(resolvedTruthLines([truthField()]), []);
-});
 
 test("activitySummaryLine states a truthful zero when no activity has been observed", () => {
   assert.equal(activitySummaryLine(activitySummary()), "No activity has been observed for this account yet.");
