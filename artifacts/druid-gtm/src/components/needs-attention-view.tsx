@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { InlineNotice } from "@/components/inline-notice";
 import { PageToolbar } from "@/components/page-layout";
 import { StatusBadge } from "@/components/status-badge";
+import { DefinitionHint } from "@/components/definition-hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -140,7 +141,12 @@ function CanonicalNeedsAttentionView() {
             <TableHeader className="bg-muted/35">
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[28%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em]">Account</TableHead>
-                <TableHead className="w-[34%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em]">Why attention</TableHead>
+                <TableHead className="w-[34%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em]">
+                  <span className="inline-flex items-center gap-1">
+                    Why attention
+                    <DefinitionHint term="accounts_needing_attention" />
+                  </span>
+                </TableHead>
                 <TableHead className="hidden w-[20%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] md:table-cell">Current state</TableHead>
                 <TableHead className="w-[12%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:table-cell">Open</TableHead>
                 <TableHead className="hidden w-[16%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] lg:table-cell">Oldest open</TableHead>

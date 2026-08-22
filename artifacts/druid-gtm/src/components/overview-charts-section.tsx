@@ -29,9 +29,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { InlineNotice } from "@/components/inline-notice";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DefinitionHint } from "@/components/definition-hint";
 import { providerDisplayName } from "@/lib/account-truth-presentation";
 import type { OverviewCharts } from "@/lib/overview-charts-api";
 import { formatChartDayLabel } from "@/lib/overview-charts-presentation";
+import type { DefinitionKey } from "@/lib/definitions";
 
 export interface OverviewChartsSectionProps {
   charts: OverviewCharts | undefined;
@@ -79,10 +81,18 @@ export function OverviewChartsSection({ charts, isLoading, isError, onRetry }: O
 
       {!isError && !isLoading && charts && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <ChartCard title="Observations over time" subtitle={`Last ${charts.timeframe.days} calendar days, by day captured (UTC)`}>
+          <ChartCard
+            title="Observations over time"
+            hint="observations_captured"
+            subtitle={`Last ${charts.timeframe.days} calendar days, by day captured (UTC)`}
+          >
             <SignalsOverTimeChart points={charts.signalsOverTime} />
           </ChartCard>
-          <ChartCard title="Observations by source" subtitle={`Last ${charts.timeframe.days} calendar days`}>
+          <ChartCard
+            title="Observations by source"
+            hint="observations_by_source"
+            subtitle={`Last ${charts.timeframe.days} calendar days`}
+          >
             {charts.signalsByProvider.length === 0 ? (
               <p className="text-xs text-muted-foreground/70 py-8 text-center">
                 No observations recorded yet.
@@ -100,15 +110,20 @@ export function OverviewChartsSection({ charts, isLoading, isError, onRetry }: O
 function ChartCard({
   title,
   subtitle,
+  hint,
   children,
 }: {
   title: string;
   subtitle: string;
+  hint?: DefinitionKey;
   children: ReactNode;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card px-4 py-3">
-      <p className="text-xs font-medium text-foreground">{title}</p>
+      <p className="flex items-center gap-1 text-xs font-medium text-foreground">
+        {title}
+        {hint && <DefinitionHint term={hint} />}
+      </p>
       <p className="text-[10px] text-muted-foreground/70 mb-2">{subtitle}</p>
       {children}
     </div>

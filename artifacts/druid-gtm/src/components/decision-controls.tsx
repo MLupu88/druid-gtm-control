@@ -12,6 +12,7 @@ import {
 } from "@/lib/account-decisions-api";
 import { accountDetailQueryKey, type AccountEvaluation } from "@/lib/accounts-api";
 import { describeAccountDecisionError } from "@/lib/account-decisions-presentation";
+import { DefinitionHint } from "@/components/definition-hint";
 
 interface EffectiveSubmission {
   accountEvaluationId: string;
@@ -152,8 +153,9 @@ export function DecisionControls({
 
         {!mqlReadiness.ready && (
           <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2.5 space-y-1">
-            <p className="text-xs font-semibold text-amber-300">
+            <p className="flex items-center gap-1 text-xs font-semibold text-amber-300">
               Promote to MQL is unavailable
+              <DefinitionHint term="decision_readiness" className="text-amber-300/70 hover:text-amber-200" />
             </p>
             {mqlReadiness.reasons.length > 0 ? (
               <ul className="text-[11px] text-amber-200/90 leading-relaxed list-disc list-inside space-y-0.5">

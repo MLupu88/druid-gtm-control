@@ -67,6 +67,12 @@ test("chart subtitle wording is explicit about calendar days — matches the Obs
   assert.ok(calendarDaysMentions >= 2, "expected both chart subtitles to say 'calendar days'");
 });
 
+test("LS7 — both chart titles carry a DefinitionHint from the central registry", () => {
+  assert.ok(SOURCE.includes('hint="observations_captured"'));
+  assert.ok(SOURCE.includes('hint="observations_by_source"'));
+  assert.ok(SOURCE.includes('from "@/components/definition-hint"'));
+});
+
 test("underlying API fields (signalsOverTime/signalsByProvider) are untouched by the terminology correction — no API churn", () => {
   assert.ok(SOURCE.includes("charts.signalsOverTime"));
   assert.ok(SOURCE.includes("charts.signalsByProvider"));

@@ -40,6 +40,7 @@ import { fetchOverviewCharts, overviewChartsQueryKey } from "@/lib/overview-char
 import { OverviewChartsSection } from "@/components/overview-charts-section";
 import { fetchOverviewSummary, overviewSummaryQueryKey } from "@/lib/overview-summary-api";
 import { OverviewSummaryCard } from "@/components/overview-summary-card";
+import { DefinitionHint } from "@/components/definition-hint";
 
 // A small, fixed preview — the full searchable/filterable/paginated
 // experience lives under Accounts (?view=attention); Overview is
@@ -103,10 +104,10 @@ export default function DashboardPage() {
   });
 
   return (
-    <PageLayout className="space-y-6">
+    <PageLayout className="space-y-5">
       <PageHeader
-        title="DRUID Signals overview"
-        description="See what the GTM signal engine is finding, what needs attention, and what is only being logged for now."
+        title="Overview"
+        description="A factual snapshot of canonical observation activity, accounts needing attention, and recent account activity."
       />
 
       {/* AI Summary — grounded, factual digest (LS6) */}
@@ -125,7 +126,7 @@ export default function DashboardPage() {
         onRetry={() => void overviewMetricsQ.refetch()}
       />
 
-      {/* Signal trend charts — canonical, Postgres-only (LS5) */}
+      {/* Observation trend charts — canonical, Postgres-only (LS5) */}
       <OverviewChartsSection
         charts={overviewChartsQ.data}
         isLoading={overviewChartsQ.isLoading}
@@ -137,8 +138,9 @@ export default function DashboardPage() {
       <div>
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-primary">
+            <h2 className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-primary">
               Needs your attention
+              <DefinitionHint term="accounts_needing_attention" />
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
               Canonical accounts with open attention items, oldest first.

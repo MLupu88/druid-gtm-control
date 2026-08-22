@@ -130,3 +130,13 @@ test("AI Summary failure never blocks the rest of Overview — every section has
     assert.ok(SOURCE.includes(marker), `expected an independent query for: ${marker}`);
   }
 });
+
+test("LS7 — the page title matches the nav label ('Overview'), not the stale 'DRUID Signals overview' branding text", () => {
+  assert.ok(SOURCE.includes('title="Overview"'));
+  assert.ok(!SOURCE.includes("DRUID Signals overview"));
+});
+
+test("LS7 — the Needs your attention section carries a DefinitionHint from the central registry", () => {
+  assert.ok(SOURCE.includes('from "@/components/definition-hint"'));
+  assert.ok(SOURCE.includes('<DefinitionHint term="accounts_needing_attention"'));
+});

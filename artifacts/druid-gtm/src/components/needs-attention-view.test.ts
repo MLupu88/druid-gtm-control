@@ -102,3 +102,12 @@ test("Accounts and Needs Attention use dense canonical account tables without re
   assert.ok(!PAGE_SOURCE.includes("fetchLatestClientRadarResearchRun"));
   assert.ok(!COMPONENT_SOURCE.includes("fetchLatestClientRadarResearchRun"));
 });
+
+test("LS7 — Accounts and Needs Attention column headers carry DefinitionHints from the central registry, never a second hardcoded tooltip", () => {
+  assert.ok(PAGE_SOURCE.includes('from "@/components/definition-hint"'));
+  assert.ok(PAGE_SOURCE.includes('<DefinitionHint term="icp_fit"'));
+  assert.ok(PAGE_SOURCE.includes('<DefinitionHint term="accounts_needing_attention"'));
+
+  assert.ok(COMPONENT_SOURCE.includes('from "@/components/definition-hint"'));
+  assert.ok(COMPONENT_SOURCE.includes('<DefinitionHint term="accounts_needing_attention"'));
+});

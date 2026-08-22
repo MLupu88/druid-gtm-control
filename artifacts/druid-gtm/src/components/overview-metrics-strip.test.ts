@@ -41,3 +41,9 @@ test("the retired 'Signals captured' label is no longer rendered", () => {
 test("the underlying API field (metrics.signalsCaptured) is untouched by the terminology correction — no API churn", () => {
   assert.ok(SOURCE.includes("metrics.signalsCaptured"));
 });
+
+test("LS7 — Observations captured and Accounts needing attention carry a DefinitionHint; Total accounts does not need one", () => {
+  assert.ok(SOURCE.includes('hint="observations_captured"'));
+  assert.ok(SOURCE.includes('hint="accounts_needing_attention"'));
+});
+

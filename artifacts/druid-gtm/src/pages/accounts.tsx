@@ -32,6 +32,7 @@ import { NeedsAttentionView } from "@/components/needs-attention-view";
 import { InlineNotice } from "@/components/inline-notice";
 import { PageHeader, PageLayout, PageToolbar } from "@/components/page-layout";
 import { StatusBadge } from "@/components/status-badge";
+import { DefinitionHint } from "@/components/definition-hint";
 import {
   accountDecisionLabel,
   formatAccountListDate,
@@ -231,8 +232,18 @@ function AllAccountsList() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[30%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em]">Account</TableHead>
                 <TableHead className="hidden w-[16%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] lg:table-cell">Domain</TableHead>
-                <TableHead className="w-[38%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:w-[32%]">Current evaluation</TableHead>
-                <TableHead className="hidden w-[14%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:table-cell">Attention</TableHead>
+                <TableHead className="w-[38%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:w-[32%]">
+                  <span className="inline-flex items-center gap-1">
+                    Current evaluation
+                    <DefinitionHint term="icp_fit" />
+                  </span>
+                </TableHead>
+                <TableHead className="hidden w-[14%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] sm:table-cell">
+                  <span className="inline-flex items-center gap-1">
+                    Attention
+                    <DefinitionHint term="accounts_needing_attention" />
+                  </span>
+                </TableHead>
                 <TableHead className="hidden w-[18%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] xl:table-cell">Latest decision</TableHead>
                 <TableHead className="hidden w-[13%] px-3 text-[10px] font-semibold uppercase tracking-[0.08em] md:table-cell">Updated</TableHead>
                 <TableHead className="w-10 px-2"><span className="sr-only">Inspect account</span></TableHead>

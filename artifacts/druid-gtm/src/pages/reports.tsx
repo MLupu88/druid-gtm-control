@@ -23,6 +23,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { cn } from "@/lib/utils";
+import { DefinitionHint } from "@/components/definition-hint";
 import {
   Download,
   ExternalLink,
@@ -1779,7 +1780,14 @@ export default function ReportsPage() {
       </Section>
 
       {/* Attribution and data limitations */}
-      <Section title="Attribution and data limitations">
+      <Section
+        title={
+          <>
+            Attribution and data limitations
+            <DefinitionHint term="campaign_attribution" />
+          </>
+        }
+      >
         <div className="rounded-xl border border-border overflow-hidden mb-4">
           <Table>
             <TableHeader>
@@ -1825,11 +1833,13 @@ export default function ReportsPage() {
 }
 
 // ─── Section wrapper ──────────────────────────────────────────────────────────
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-primary">{title}</h2>
+        <h2 className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-primary">
+          {title}
+        </h2>
         <Separator className="mt-2 bg-border/60" />
       </div>
       {children}

@@ -23,6 +23,8 @@ import { InlineNotice } from "@/components/inline-notice";
 import { PageHeader, PageLayout } from "@/components/page-layout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { DefinitionHint } from "@/components/definition-hint";
+import type { DefinitionKey } from "@/lib/definitions";
 
 const ACCOUNT_TABS = [
   { value: "overview", label: "Overview" },
@@ -227,11 +229,11 @@ function LatestEvaluationPanel({ evaluation }: { evaluation: AccountEvaluation |
         {evaluation ? <div className="space-y-3">
           <EvaluationSummaryLine label="Result" summary={evaluation} />
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <MetaField label="Identity resolution" value={evaluation.identityResolutionLevel} />
-            <MetaField label="Identity confidence" value={evaluation.identityConfidence} />
-            <MetaField label="Fit score" value={evaluation.fitScore} />
-            <MetaField label="Intent score" value={evaluation.intentScore} />
-            <MetaField label="Actionability score" value={evaluation.actionabilityScore} />
+            <MetaField label="Identity resolution" value={evaluation.identityResolutionLevel} hint="identity_resolution" />
+            <MetaField label="Identity confidence" value={evaluation.identityConfidence} hint="identity_confidence" />
+            <MetaField label="Fit score" value={evaluation.fitScore} hint="icp_fit" />
+            <MetaField label="Intent score" value={evaluation.intentScore} hint="intent" />
+            <MetaField label="Actionability score" value={evaluation.actionabilityScore} hint="actionability" />
             <MetaField label="Created by" value={evaluation.createdBy} />
           </div>
           <p className="text-[11px] text-muted-foreground/60">{formatDateTime(evaluation.createdAt)}</p>
@@ -245,6 +247,24 @@ function WorkspaceEmptyState({ title, description }: { title: string; descriptio
   return <Empty className="min-h-48 rounded-lg border border-dashed border-border bg-card/30"><EmptyHeader><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader></Empty>;
 }
 
-function MetaField({ label, value }: { label: string; value: string | null }) {
-  return <div><p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{label}</p><p className="mt-0.5 font-medium text-foreground">{value ?? <span className="font-normal text-muted-foreground">Not available</span>}</p></div>;
+function MetaField({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | null;
+  hint?: DefinitionKey;
+}) {
+  return (
+    <div>
+      <p className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+        {label}
+        {hint && <DefinitionHint term={hint} />}
+      </p>
+      <p className="mt-0.5 font-medium text-foreground">
+        {value ?? <span className="font-normal text-muted-foreground">Not available</span>}
+      </p>
+    </div>
+  );
 }
