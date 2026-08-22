@@ -252,7 +252,7 @@ export default function SampleLeadPage() {
                     "w-full text-left px-4 py-3 rounded-lg border transition-all text-sm",
                     selectedPreset === preset.id
                       ? "border-primary/50 bg-primary/10 text-foreground"
-                      : "border-border bg-muted/20 text-foreground hover:bg-white/[0.04] hover:border-border/80",
+                      : "border-border bg-muted/20 text-foreground hover-elevate hover:border-border/80",
                   )}
                 >
                   <div className="flex items-center gap-3">

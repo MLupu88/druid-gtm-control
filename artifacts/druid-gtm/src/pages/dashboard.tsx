@@ -192,7 +192,7 @@ export default function DashboardPage() {
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="space-y-2">
+          <div className="overflow-hidden rounded-lg border border-border bg-card/30">
             {needsAttentionQ.data!.items.map((item) => (
               <NeedsAttentionPreviewRow key={item.account.id} item={item} />
             ))}
@@ -230,13 +230,13 @@ export default function DashboardPage() {
             </div>
           </InlineNotice>
         ) : (globalActivityQ.data?.items.length ?? 0) === 0 ? (
-          <div className="rounded-xl border border-border bg-card px-6 py-8 text-center">
+          <div className="rounded-lg border border-border bg-card px-6 py-8 text-center">
             <p className="text-sm text-muted-foreground">
               No recent activity yet.
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="overflow-hidden rounded-lg border border-border bg-card/30">
             {globalActivityQ.data!.items.map((item) => (
               <GlobalActivityRow key={item.id} item={item} />
             ))}
@@ -275,7 +275,7 @@ function GlobalActivityRow({ item }: { item: GlobalActivityItem }) {
   return (
     <Link
       href={`/accounts/${item.accountId}?from=activity`}
-      className="flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card transition-colors hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="flex items-start gap-3 border-b border-border px-3 py-2 transition-colors last:border-b-0 hover-elevate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
       <div className="min-w-0 flex-1">
@@ -297,7 +297,7 @@ function NeedsAttentionPreviewRow({ item }: { item: AccountListItem }) {
   return (
     <Link
       href={`/accounts/${item.account.id}?from=attention`}
-      className="group flex w-full items-start gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group flex w-full items-start gap-3 border-b border-border px-3 py-2 text-left transition-colors last:border-b-0 hover-elevate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background/60 text-muted-foreground">
         <Building2 className="size-3.5" />

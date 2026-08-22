@@ -107,7 +107,7 @@ function VersionHistoryList({
                 "w-full text-left rounded-lg px-3 py-2 transition-colors border",
                 isSelected
                   ? "bg-primary/10 border-primary/30"
-                  : "border-transparent hover:bg-white/[0.03]",
+                  : "border-transparent hover-elevate",
               )}
             >
               <div className="flex items-center gap-1.5 flex-wrap">

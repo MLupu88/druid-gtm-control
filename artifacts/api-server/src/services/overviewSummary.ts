@@ -188,7 +188,7 @@ Your job: write a short, factual digest of ONLY what these numbers directly show
 
 STRICT RULES -- follow every one exactly:
 1. Use the word "observations" for anything counted from observation rows. NEVER use the word "signal" or "signals" anywhere in your output, in any form.
-2. State ONLY facts directly computable from the supplied JSON. Every number you write must appear in, or be directly derivable by simple arithmetic from, the JSON. Never invent, estimate, or round to a number not grounded in the data.
+2. State ONLY facts that appear LITERALLY in the supplied JSON as a number, or as a component (year, month, day) of a date string in the JSON. Never state a computed sum, average, percentage, difference, or any other arithmetic result -- even if it is technically derivable -- unless that exact resulting number also appears literally somewhere in the JSON. Never invent, estimate, or round to a number not grounded in the data this way.
 3. NEVER infer, state, or imply any of the following, even softly: buying intent, account qualification, buying stage, purchase likelihood, urgency, propensity, deal probability, account health, "hot" accounts, engagement quality, pipeline impact, opportunity influence, recommendations about who sales should contact, inferred pain, inferred authority, inferred budget, or any Account Brain / Account Shadow / research-intelligence conclusion. If you are tempted to write something like that, omit it instead.
 4. No marketing language, no exclamation points, no recommendations, no "you should", no motivational framing.
 5. If a count is zero, state that plainly (e.g. "No observations were captured in the last 7 calendar days.") -- never omit a zero or reinterpret it as something else.
@@ -292,13 +292,32 @@ export function findForbiddenLanguage(text: string): string | null {
 }
 
 /**
+ * Every numeric component of an ISO-8601-ish date/timestamp string
+ * (year, month, day -- and, since occurredAt is a full timestamp, also
+ * hour/minute/second, harmlessly grounded but never useful given rule 7
+ * bans stating a time of day), each as a plain decimal with no leading
+ * zeros. Shared by observationsByDay (date-only) and recentActivity
+ * (full timestamp) below -- same extraction, different string shape.
+ */
+function addDateNumberFragments(grounded: Set<string>, dateLike: string): void {
+  for (const part of dateLike.split(/[^0-9]+/)) {
+    if (part === "") continue;
+    const n = Number(part);
+    if (Number.isFinite(n)) grounded.add(String(n));
+  }
+}
+
+/**
  * Every integer literal the model is allowed to use: every count in
- * the fact payload, the timeframe window size, and every numeric
- * component of every observationsByDay date (year/month/day, each as a
- * plain decimal with no leading zeros) -- grounds the task's own
- * accepted example ("Observation volume was highest on August 20")
- * without allowing an invented count to slip through as if it were a
- * date fragment.
+ * the fact payload, the timeframe window size, every numeric component
+ * of every observationsByDay date, and every numeric component of every
+ * recentActivity item's occurredAt timestamp -- grounds the task's own
+ * accepted example ("Observation volume was highest on August 20") AND
+ * rule 7's explicit invitation to state a calendar date drawn from
+ * recentActivity (which is not window-scoped the way observationsByDay
+ * is -- see getGlobalRecentActivity -- so its dates cannot be assumed to
+ * already be covered by the chart's own date range), without allowing
+ * an invented count to slip through as if it were a date fragment.
  */
 function collectGroundedNumbers(facts: OverviewSummaryFacts): Set<string> {
   const grounded = new Set<string>();
@@ -311,13 +330,13 @@ function collectGroundedNumbers(facts: OverviewSummaryFacts): Set<string> {
 
   for (const point of facts.observationsByDay) {
     add(point.count);
-    for (const part of point.date.split("-")) {
-      const n = Number(part);
-      if (Number.isFinite(n)) grounded.add(String(n));
-    }
+    addDateNumberFragments(grounded, point.date);
   }
   for (const slice of facts.observationsByProvider) {
     add(slice.count);
+  }
+  for (const item of facts.recentActivity) {
+    addDateNumberFragments(grounded, item.occurredAt);
   }
 
   return grounded;

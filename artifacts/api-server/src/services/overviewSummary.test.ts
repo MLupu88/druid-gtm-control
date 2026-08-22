@@ -314,6 +314,41 @@ test("summaryIsGrounded is true for zero mentions when zero is a real fact", () 
   assert.equal(summaryIsGrounded("0 observations were captured.", facts), true);
 });
 
+// LS8 defect fix -- getGlobalRecentActivity is NOT window-scoped the same
+// way observationsByDay is (see overviewSummary.ts's own module comment),
+// so a recentActivity item's date can legitimately fall outside every
+// observationsByDay bucket. Rule 7 explicitly invites the model to state
+// a calendar date drawn from recentActivity ("a calendar date ... is
+// fine"), so collectGroundedNumbers must ground those date components
+// too -- otherwise a truthful summary following that exact instruction is
+// wrongly rejected as "ungrounded".
+test("summaryIsGrounded is true for a calendar date drawn from recentActivity even when that date has no observationsByDay bucket", () => {
+  const facts = buildOverviewSummaryFacts({
+    metrics: syntheticMetrics(),
+    // Deliberately does NOT include August 22 as a bucket.
+    charts: syntheticCharts({
+      signalsOverTime: [
+        { date: "2026-08-15", count: 3 },
+        { date: "2026-08-16", count: 0 },
+      ],
+    }),
+    activity: [syntheticActivityItem({ occurredAt: "2026-08-22T09:00:00.000Z" })],
+  });
+  assert.equal(
+    summaryIsGrounded("The most recent activity was recorded on August 22.", facts),
+    true,
+  );
+});
+
+test("summaryIsGrounded is false for a percentage/derived number that is not itself a literal fact, even though rule 2 no longer invites arithmetic", () => {
+  const facts = baseFacts();
+  // 37 is nowhere in the facts (as a count, a day/month/year fragment, or
+  // any other literal) even though it might be "derivable" via some
+  // arithmetic on accountsNeedingAttention/totalAccounts -- the validator
+  // must not treat that derivation as grounding.
+  assert.equal(summaryIsGrounded("37% of accounts need attention.", facts), false);
+});
+
 test("findForbiddenLanguage detects 'signal'/'signals' case-insensitively", () => {
   assert.equal(findForbiddenLanguage("42 SIGNALS were captured."), "signal");
   assert.equal(findForbiddenLanguage("a strong signal this week"), "signal");

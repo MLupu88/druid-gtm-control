@@ -68,7 +68,7 @@ function ProfileRow({ profile }: { profile: IcpProfileListItem }) {
 
   return (
     <Link href={`/settings/icp-profiles/${profile.id}`}>
-      <Card className="border-border bg-card hover:bg-white/[0.03] transition-colors cursor-pointer">
+      <Card className="border-border bg-card hover-elevate transition-colors cursor-pointer">
         <div className="flex items-start gap-3 px-4 py-3.5">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap">

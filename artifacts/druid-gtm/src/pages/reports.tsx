@@ -1428,7 +1428,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {attentionAccounts.map((a, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm font-medium text-foreground">
                       {a.company_name}
                       {a.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{a.company_domain}</span>}
@@ -1468,7 +1468,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {recommendations.map((r, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm font-medium text-foreground">
                       {r.company_name}
                       {r.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{r.company_domain}</span>}
@@ -1506,7 +1506,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {decisions.map((d, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm font-medium text-foreground">
                       {d.company_name}
                       {d.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{d.company_domain}</span>}
@@ -1540,7 +1540,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {actions.map((a, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm font-medium text-foreground">
                       {a.company_name}
                       {a.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{a.company_domain}</span>}
@@ -1576,7 +1576,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {outcomes.map((o, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm font-medium text-foreground">
                       {o.company_name}
                       {o.company_domain && <span className="text-xs text-muted-foreground ml-1.5">{o.company_domain}</span>}
@@ -1610,7 +1610,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {costs.map((c, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm font-medium text-foreground">{c.company_name}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{actionTypeLabel(c.action_type) || "—"}</TableCell>
                     <TableCell className="text-xs text-right text-muted-foreground">{c.actual_cost || "—"}</TableCell>
@@ -1667,7 +1667,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {liveCsvRows.map((row, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm font-medium text-foreground">
                       {row.company_name}
                       {row.company_domain && (
@@ -1734,7 +1734,7 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {liveMomMetrics.map((m, i) => (
-                  <TableRow key={i} className="hover:bg-white/[0.02]">
+                  <TableRow key={i} className="hover-elevate">
                     <TableCell className="text-sm text-foreground">{m.label}</TableCell>
                     <TableCell className="text-sm font-semibold text-right tabular-nums text-foreground">{m.current}</TableCell>
                     <TableCell className="text-sm text-right tabular-nums text-muted-foreground">{m.previous}</TableCell>
@@ -1800,7 +1800,7 @@ export default function ReportsPage() {
             </TableHeader>
             <TableBody>
               {Object.entries(report.attribution).map(([key, value]) => (
-                <TableRow key={key} className="hover:bg-white/[0.02]">
+                <TableRow key={key} className="hover-elevate">
                   <TableCell className="text-sm text-foreground">{ATTRIBUTION_SOURCE_LABELS[key] ?? key}</TableCell>
                   <TableCell className="text-sm text-right tabular-nums text-foreground">{value.total}</TableCell>
                   <TableCell className="text-sm text-right tabular-nums text-muted-foreground">{value.attributed}</TableCell>

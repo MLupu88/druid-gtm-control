@@ -10,6 +10,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useTheme } from "@/lib/theme";
 import {
   activeAppNavigationLabel,
   isAppNavigationItemActive,
@@ -31,7 +32,9 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 import logoWhite from "@/assets/new_logo_white.png";
+import logoBlack from "@/assets/new-druid-logo-black.png";
 
 const ANALYTICS_URL: string =
   (import.meta.env.VITE_MARKETPLACE_ANALYTICS_URL as string | undefined) ||
@@ -94,6 +97,7 @@ function NavigationLink({ item }: { item: NavigationItem }) {
 
 function AppSidebar() {
   const { logout, operator } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   return (
     <Sidebar collapsible="icon" className="border-sidebar-border">
@@ -102,7 +106,12 @@ function AppSidebar() {
           <img
             src={logoWhite}
             alt="DRUID"
-            className="h-7 w-auto max-w-[116px] object-contain group-data-[collapsible=icon]:hidden"
+            className="hidden h-7 w-auto max-w-[116px] object-contain dark:block group-data-[collapsible=icon]:hidden"
+          />
+          <img
+            src={logoBlack}
+            alt="DRUID"
+            className="block h-7 w-auto max-w-[116px] object-contain dark:hidden group-data-[collapsible=icon]:hidden"
           />
           <span className="hidden size-7 items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-sm font-semibold text-primary group-data-[collapsible=icon]:flex">
             D
@@ -157,6 +166,30 @@ function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-2">
+        <div className="mb-1 rounded-md border border-sidebar-border p-1 group-data-[collapsible=icon]:hidden">
+          <p className="px-1.5 pb-1 text-[10px] font-medium uppercase tracking-[0.1em] text-sidebar-foreground/70">
+            Appearance
+          </p>
+          <div className="grid grid-cols-2 gap-1">
+            {(["light", "dark"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={theme === option}
+                onClick={() => setTheme(option)}
+                className={cn(
+                  "h-7 rounded px-2 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                  theme === option
+                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                    : "text-sidebar-foreground hover:text-sidebar-accent-foreground",
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {operator?.name && (
           <p className="truncate px-2 py-1 text-[10px] text-sidebar-foreground group-data-[collapsible=icon]:hidden">
             Acting as {operator.name}

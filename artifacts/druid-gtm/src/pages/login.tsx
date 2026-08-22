@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { InlineNotice } from "@/components/inline-notice";
 import logoWhite from "@/assets/new_logo_white.png";
+import logoBlack from "@/assets/new-druid-logo-black.png";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -27,7 +28,8 @@ export default function LoginPage() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.07),transparent_38%)]" />
       <div className="relative w-full max-w-sm">
         <div className="mb-6 flex items-center justify-center gap-3">
-          <img src={logoWhite} alt="DRUID" className="h-7 w-auto" />
+          <img src={logoWhite} alt="DRUID" className="hidden h-7 w-auto dark:block" />
+          <img src={logoBlack} alt="DRUID" className="block h-7 w-auto dark:hidden" />
           <div className="h-6 w-px bg-border" aria-hidden="true" />
           <p className="text-sm font-semibold text-foreground">Mission Control</p>
         </div>

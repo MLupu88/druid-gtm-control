@@ -351,7 +351,7 @@ export default function SettingsPage() {
           </div>
           <a
             href="/sample-lead"
-            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-white/5 text-xs font-medium text-foreground hover:bg-white/10 transition-colors"
+            className="hover-elevate shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border bg-muted/50 text-xs font-medium text-foreground transition-colors"
           >
             Open
           </a>
@@ -526,7 +526,7 @@ function EngineModeCards({
                 isActive
                   ? "border-primary/40 bg-primary/10"
                   : n8nConnected
-                  ? "border-border bg-card hover:bg-white/[0.04] hover:border-border/80 cursor-pointer"
+                  ? "border-border bg-card hover-elevate hover:border-border/80 cursor-pointer"
                   : "border-border bg-card opacity-60 cursor-not-allowed",
               )}
             >
@@ -686,7 +686,7 @@ function QueueWriteSection({
                 isActive
                   ? "border-primary/40 bg-primary/10"
                   : n8nConnected
-                  ? "border-border bg-card hover:bg-white/[0.04] hover:border-border/80 cursor-pointer"
+                  ? "border-border bg-card hover-elevate hover:border-border/80 cursor-pointer"
                   : "border-border bg-card opacity-60 cursor-not-allowed",
               )}
             >

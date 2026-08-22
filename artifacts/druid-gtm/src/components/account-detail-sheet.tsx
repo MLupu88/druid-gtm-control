@@ -770,7 +770,7 @@ function MetaRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between py-2 border-b border-white/5 last:border-0">
+    <div className="flex items-start justify-between py-2 border-b border-border/50 last:border-0">
       <span className="text-xs text-muted-foreground flex items-center gap-1.5">
         {icon}
         {label}

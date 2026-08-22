@@ -56,22 +56,18 @@ test("operator and shell utilities remain available", () => {
   assert.ok(source.includes("logout.mutate()"));
 });
 
-// LS2 — Live Shell Closure: dark is the only supported production
-// appearance. There is no appearance toggle, no theme state/persistence,
-// and no light-logo variant any more — the shell renders exactly one
-// logo image, unconditionally.
-test("no appearance toggle or theme-switching logic remains, and exactly one logo image is rendered", () => {
+// LS8 — Live Shell Closure: light is restored as the default production
+// appearance, with dark as a user-selectable alternative — the LS2
+// dark-lock is reversed. The shell exposes an Appearance toggle backed by
+// useTheme(), and renders both logo variants gated on the `dark:` variant
+// so the correct one shows for whichever theme is active.
+test("an appearance toggle backed by useTheme is present, defaulting to light, with both logo variants gated on the dark: variant", () => {
   const source = readFileSync(SOURCE_PATH, "utf8");
-  for (const marker of [
-    "useTheme",
-    "setTheme",
-    "Appearance",
-    "logoBlack",
-    "dark:block",
-    "dark:hidden",
-  ]) {
-    assert.ok(!source.includes(marker), `stale theme-toggle marker still present: ${marker}`);
+  for (const marker of ["useTheme", "setTheme", "Appearance", "logoBlack", "dark:block", "dark:hidden"]) {
+    assert.ok(source.includes(marker), `expected theme-toggle marker missing: ${marker}`);
   }
-  assert.equal((source.match(/<img\b/g) ?? []).length, 1);
+  assert.equal((source.match(/<img\b/g) ?? []).length, 2);
   assert.ok(source.includes("src={logoWhite}"));
+  assert.ok(source.includes("src={logoBlack}"));
+  assert.ok(source.includes('(["light", "dark"] as const)'));
 });
