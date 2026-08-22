@@ -141,6 +141,9 @@ export interface AccountListItem {
   attention: AccountAttentionSummary | null;
 }
 
+// Mirrors AccountListSortKey in artifacts/api-server/src/services/accounts.ts.
+export type AccountListSortKey = "updated" | "name";
+
 export interface AccountsListResponse {
   items: AccountListItem[];
   pagination: { limit: number; offset: number; total: number };
@@ -164,12 +167,21 @@ export interface AccountDetail {
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_OFFSET = 0;
+const DEFAULT_SORT: AccountListSortKey = "updated";
 
-// Mirrors MAX_LIMIT in artifacts/api-server/src/routes/accounts.ts. The API
-// rejects any `limit` above this with a 400 — every frontend call site that
-// wants "as many as we can get in one page" (no pagination UI exists yet)
-// must ask for exactly this, not some larger number.
+// Mirrors MAX_LIMIT in artifacts/api-server/src/routes/accounts.ts — the
+// hard per-PAGE cap the API enforces. This is NOT "the most accounts we
+// can ever show": callers that need the full canonical population (e.g.
+// Needs Attention, which is realistically far smaller than the total
+// account count) page/search through it via limit+offset, never by
+// asking for a number above this.
 export const ACCOUNTS_LIST_MAX_LIMIT = 100;
+
+// Default page size for the paginated "All accounts" list (accounts.tsx) —
+// deliberately smaller than ACCOUNTS_LIST_MAX_LIMIT so Prev/Next paging
+// through 242+ accounts is a normal, expected interaction, not an edge
+// case only reachable past the API's hard cap.
+export const ACCOUNTS_LIST_PAGE_SIZE = 50;
 
 // Mirrors the existing frontend convention for turning a non-2xx JSON
 // error body into a thrown Error — see ../hooks/use-auth.ts's
@@ -186,17 +198,31 @@ async function throwForResponse(
   throw new Error(body.error ?? fallback);
 }
 
+export interface FetchAccountsArgs {
+  limit?: number;
+  offset?: number;
+  needsAttention?: boolean;
+  /** Case-insensitive substring search against company name/domain, applied server-side across the FULL canonical population before pagination — see services/accounts.ts's listAccounts. Blank/omitted means no filter. */
+  search?: string;
+  /** Server-side sort applied to the full filtered population before pagination — never a client-side re-sort of one already-fetched page. */
+  sort?: AccountListSortKey;
+}
+
 export async function fetchAccounts(
-  args: { limit?: number; offset?: number; needsAttention?: boolean } = {},
+  args: FetchAccountsArgs = {},
 ): Promise<AccountsListResponse> {
   const limit = args.limit ?? DEFAULT_LIMIT;
   const offset = args.offset ?? DEFAULT_OFFSET;
   const params = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
+    sort: args.sort ?? DEFAULT_SORT,
   });
   if (args.needsAttention !== undefined) {
     params.set("needsAttention", String(args.needsAttention));
+  }
+  if (args.search && args.search.trim() !== "") {
+    params.set("search", args.search.trim());
   }
   const res = await fetch(`/api/internal/accounts?${params.toString()}`, {
     credentials: "include",
@@ -229,15 +255,15 @@ export async function fetchAccountDetail(
 // ACTION_LOG_QUERY_KEY in @workspace/gtm-shared's gtmContract.js: every
 // call site (and any future cache invalidation) agrees on the exact key
 // shape without duplicating the literal array per call site.
-export function accountsListQueryKey(
-  args: { limit?: number; offset?: number; needsAttention?: boolean } = {},
-) {
+export function accountsListQueryKey(args: FetchAccountsArgs = {}) {
   return [
     "accounts",
     "list",
     args.limit ?? DEFAULT_LIMIT,
     args.offset ?? DEFAULT_OFFSET,
     args.needsAttention ?? false,
+    args.search?.trim() ?? "",
+    args.sort ?? DEFAULT_SORT,
   ] as const;
 }
 

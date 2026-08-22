@@ -212,6 +212,8 @@ test("GET / with no query parameters uses the default pagination (limit 50, offs
       limit: 50,
       offset: 0,
       needsAttention: false,
+      search: undefined,
+      sort: "updated",
     });
   });
 });
@@ -236,6 +238,8 @@ test("GET / with an explicit valid limit and offset calls the service exactly on
       limit: 10,
       offset: 20,
       needsAttention: false,
+      search: undefined,
+      sort: "updated",
     });
   });
 });
@@ -293,7 +297,100 @@ test("GET / with needsAttention=true parses it as true and calls the service wit
       limit: 50,
       offset: 0,
       needsAttention: true,
+      search: undefined,
+      sort: "updated",
     });
+  });
+});
+
+// ---------------------------------------------------------------------
+// GET / — search / sort (LS8 — "Accounts is capped at 100" fix)
+// ---------------------------------------------------------------------
+
+test("GET / with no search/sort query parameters passes search: undefined and sort: 'updated' to the service", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/`);
+    assert.equal(res.status, 200);
+    assert.equal(listAccountsFn.mock.calls[0]?.arguments[0].search, undefined);
+    assert.equal(listAccountsFn.mock.calls[0]?.arguments[0].sort, "updated");
+  });
+});
+
+test("GET / trims and passes through a search query parameter", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?${new URLSearchParams({ search: "  RSM  " }).toString()}`);
+    assert.equal(res.status, 200);
+    assert.equal(listAccountsFn.mock.calls[0]?.arguments[0].search, "RSM");
+  });
+});
+
+test("GET / treats a blank search query parameter as absent (empty string, not undefined)", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?search=`);
+    assert.equal(res.status, 200);
+    assert.equal(listAccountsFn.mock.calls[0]?.arguments[0].search, "");
+  });
+});
+
+test("GET / rejects a search parameter over the max length with 400 and does not call the service", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(
+      `${baseUrl}/?${new URLSearchParams({ search: "x".repeat(201) }).toString()}`,
+    );
+    assert.equal(res.status, 400);
+    assert.equal(listAccountsFn.mock.calls.length, 0);
+  });
+});
+
+test("GET / accepts sort=name and passes it through", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?sort=name`);
+    assert.equal(res.status, 200);
+    assert.equal(listAccountsFn.mock.calls[0]?.arguments[0].sort, "name");
+  });
+});
+
+test("GET / rejects an unrecognized sort value with 400 and does not call the service", async () => {
+  const listAccountsFn = mock.fn<ListAccountsFn>(async () => ({
+    items: [],
+    total: 0,
+  }));
+  const app = buildTestApp({ listAccountsFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/?sort=fitScore`);
+    assert.equal(res.status, 400);
+    assert.equal(listAccountsFn.mock.calls.length, 0);
   });
 });
 

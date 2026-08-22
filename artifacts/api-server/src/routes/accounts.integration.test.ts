@@ -578,6 +578,97 @@ test(
   },
 );
 
+// LS8 — regression test for "Accounts is capped at 100": search must
+// operate over the FULL canonical population in the database, not just
+// whichever page a limit=100 request happens to return. Inserts 100
+// "filler" accounts with a newer updatedAt than the target account, so
+// under the API's own default ordering (updatedAt desc) the target sorts
+// strictly past position 100 -- confirmed directly below by asserting it
+// is genuinely absent from an unfiltered ?limit=100&offset=0 page -- and
+// then proves a search for a substring unique to the target's company
+// name finds it anyway, on the very first (default) page.
+test(
+  "GET / with a search query finds an account that sorts outside the first 100 under the default ordering",
+  { skip },
+  async () => {
+    const uniqueTerm = `RSM-${RUN_ID}`;
+    const target = await makeAccount({
+      companyName: `${uniqueTerm} US LLP`,
+      companyDomain: `rsm-${RUN_ID}.example`,
+      // Oldest updatedAt of every fixture in this test -- sorts last
+      // under the default updatedAt-desc ordering.
+      updatedAt: runTimestamp(0),
+    });
+    for (let i = 0; i < 100; i += 1) {
+      // Every filler account is strictly newer than the target, so it
+      // always sorts ahead of it under updatedAt desc.
+      await makeAccount({ updatedAt: runTimestamp(60_000 * (i + 1)) });
+    }
+
+    await withServer(async (baseUrl) => {
+      // First, confirm the target genuinely does NOT appear on an
+      // unfiltered first page -- proving it is actually beyond position
+      // 100, not merely assumed to be.
+      const unfilteredRes = await fetch(`${baseUrl}/?limit=100&offset=0`);
+      assert.equal(unfilteredRes.status, 200);
+      const unfilteredBody = await readRecord(
+        unfilteredRes,
+        "GET /?limit=100&offset=0 response body",
+      );
+      assertIsArray(unfilteredBody.items, "unfiltered response body.items");
+      const foundUnfiltered = unfilteredBody.items.some(
+        (item, idx) =>
+          extractListItemAccountId(item, `unfiltered response body.items[${idx}]`) ===
+          target.id,
+      );
+      assert.equal(
+        foundUnfiltered,
+        false,
+        "test setup invariant: the target account must NOT appear on an unfiltered first page of 100",
+      );
+
+      // Now search for it, on the same default limit=100&offset=0 page.
+      const searchRes = await fetch(
+        `${baseUrl}/?limit=100&offset=0&search=${encodeURIComponent(uniqueTerm)}`,
+      );
+      assert.equal(searchRes.status, 200);
+      const searchBody = await readRecord(
+        searchRes,
+        "GET /?search=... response body",
+      );
+      assertIsArray(searchBody.items, "search response body.items");
+      assertIsRecord(searchBody.pagination, "search response body.pagination");
+      assert.equal(searchBody.pagination.total, 1);
+
+      const foundBySearch = searchBody.items.find(
+        (item, idx) =>
+          extractListItemAccountId(item, `search response body.items[${idx}]`) ===
+          target.id,
+      );
+      assert.ok(
+        foundBySearch,
+        "searching for a substring of the target's company name must find it, regardless of default-sort position",
+      );
+
+      // Domain search must also work independently of the name match.
+      const domainSearchRes = await fetch(
+        `${baseUrl}/?search=${encodeURIComponent(`rsm-${RUN_ID}`)}`,
+      );
+      const domainSearchBody = await readRecord(
+        domainSearchRes,
+        "GET /?search=<domain> response body",
+      );
+      assertIsArray(domainSearchBody.items, "domain search response body.items");
+      const foundByDomain = domainSearchBody.items.some(
+        (item, idx) =>
+          extractListItemAccountId(item, `domain search response body.items[${idx}]`) ===
+          target.id,
+      );
+      assert.ok(foundByDomain, "searching by normalized domain must also find the account");
+    });
+  },
+);
+
 test(
   "GET / latestEvaluation picks the single newest evaluation, breaking createdAt ties by id desc",
   { skip },

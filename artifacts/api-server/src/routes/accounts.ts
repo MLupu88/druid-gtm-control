@@ -24,6 +24,7 @@ import {
   getAccountById,
   type AccountListResult,
   type AccountDetail,
+  type AccountListSortKey,
 } from "../services/accounts.js";
 import {
   getAccountCanonicalTruth,
@@ -38,9 +39,15 @@ import {
 
 const DEFAULT_LIMIT = 50;
 const MIN_LIMIT = 1;
+// Still a per-PAGE cap, not a population cap — the fix for "Accounts is
+// capped at 100" is real server-side pagination + search (see
+// ../services/accounts.ts), never raising this number. A caller that
+// wants "the 242nd account" asks for offset=200&limit=50 (or searches for
+// it directly), never limit=1000.
 const MAX_LIMIT = 100;
 const DEFAULT_OFFSET = 0;
 const MIN_OFFSET = 0;
+const MAX_SEARCH_LENGTH = 200;
 
 // Query params arrive as strings (or are absent) — z.coerce.number()
 // converts, then the usual int/min/max checks apply. Absent fields fall
@@ -65,6 +72,12 @@ const ListAccountsQuerySchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
+    // Optional free-text search against company name/domain — see
+    // ../services/accounts.ts's listAccounts. Trimmed to "" (treated as
+    // absent) rather than rejected, so a caller that clears a search box
+    // doesn't need to omit the param entirely.
+    search: z.coerce.string().trim().max(MAX_SEARCH_LENGTH).optional(),
+    sort: z.enum(["updated", "name"]).default("updated"),
   })
   .strict();
 
@@ -90,6 +103,8 @@ export type ListAccountsFn = (args: {
   limit: number;
   offset: number;
   needsAttention: boolean;
+  search?: string;
+  sort?: AccountListSortKey;
 }) => Promise<AccountListResult>;
 
 export type GetAccountByIdFn = (
@@ -187,10 +202,10 @@ export function createAccountsRouter(deps: AccountsRouterDeps): IRouter {
       return;
     }
 
-    const { limit, offset, needsAttention } = parsed.data;
+    const { limit, offset, needsAttention, search, sort } = parsed.data;
 
     try {
-      const result = await listAccountsFn({ limit, offset, needsAttention });
+      const result = await listAccountsFn({ limit, offset, needsAttention, search, sort });
       res.status(200).json({
         items: result.items,
         pagination: { limit, offset, total: result.total },

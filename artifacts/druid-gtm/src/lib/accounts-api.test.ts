@@ -53,11 +53,58 @@ test("fetchAccounts requests canonical Needs Attention membership and preserves 
 
     assert.equal(
       requestedUrl,
-      "/api/internal/accounts?limit=100&offset=0&needsAttention=true",
+      "/api/internal/accounts?limit=100&offset=0&sort=updated&needsAttention=true",
     );
     assert.equal(requestedCredentials, "include");
     assert.deepEqual(result, RESPONSE);
     assert.deepEqual(result.items[0]?.attention, RESPONSE.items[0]?.attention);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// LS8 — "Accounts is capped at 100": search/sort must reach the server as
+// real query params, not be applied client-side against an already-capped
+// page (see accounts.tsx).
+test("fetchAccounts sends search and sort as server-side query parameters", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+
+  globalThis.fetch = (async (input) => {
+    requestedUrl = String(input);
+    return new Response(
+      JSON.stringify({ items: [], pagination: { limit: 50, offset: 0, total: 0 } }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    await fetchAccounts({ limit: 50, offset: 100, search: "RSM", sort: "name" });
+    assert.equal(
+      requestedUrl,
+      "/api/internal/accounts?limit=50&offset=100&sort=name&search=RSM",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchAccounts omits the search parameter entirely for a blank/whitespace-only search", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+
+  globalThis.fetch = (async (input) => {
+    requestedUrl = String(input);
+    return new Response(
+      JSON.stringify({ items: [], pagination: { limit: 50, offset: 0, total: 0 } }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    await fetchAccounts({ limit: 50, offset: 0, search: "   " });
+    assert.equal(requestedUrl, "/api/internal/accounts?limit=50&offset=0&sort=updated");
+    assert.ok(!requestedUrl.includes("search="));
   } finally {
     globalThis.fetch = originalFetch;
   }

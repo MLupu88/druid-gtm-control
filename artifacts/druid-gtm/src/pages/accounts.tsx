@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "wouter";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,7 +11,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { ArrowRight, Building2, Search } from "lucide-react";
+import { ArrowRight, Building2, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -23,10 +23,11 @@ import {
 import {
   fetchAccounts,
   accountsListQueryKey,
-  ACCOUNTS_LIST_MAX_LIMIT,
+  ACCOUNTS_LIST_PAGE_SIZE,
   type Account,
   type AccountEvaluationSummary,
   type AccountListItem,
+  type AccountListSortKey,
 } from "@/lib/accounts-api";
 import { NeedsAttentionView } from "@/components/needs-attention-view";
 import { InlineNotice } from "@/components/inline-notice";
@@ -40,7 +41,6 @@ import {
 } from "@/lib/accounts-presentation";
 
 type View = "attention" | "all";
-type SortKey = "updated" | "name";
 
 // Company name first, then domain, then the always-present accountKey —
 // every account must render *some* identity, never a blank row.
@@ -98,54 +98,50 @@ export default function AccountsPage() {
 }
 
 // ─── All accounts ───────────────────────────────────────────────────────────
-function AllAccountsList() {
-  const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("updated");
+// Server-side search, sort, and pagination throughout — the API's
+// pagination.total is always the FULL canonical population matching the
+// current search/needsAttention filter, never just the current page's
+// length, and every filter/sort is applied in SQL before LIMIT/OFFSET
+// (see services/accounts.ts's listAccounts). There is no client-side
+// re-filtering or re-sorting of an already-fetched page anywhere here —
+// that would only ever operate on the 50 rows currently in view.
+const SEARCH_DEBOUNCE_MS = 300;
 
+function AllAccountsList() {
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<AccountListSortKey>("updated");
+  const [page, setPage] = useState(0);
+
+  // Debounce the search box so each keystroke doesn't fire its own
+  // request — the query itself always runs server-side, this only
+  // controls how often it's asked to.
+  useEffect(() => {
+    const handle = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  // A new search or sort invalidates whatever page offset was in view —
+  // always land back on page 1 rather than risk an out-of-range page
+  // silently returning zero rows against the new filtered population.
+  useEffect(() => {
+    setPage(0);
+  }, [search, sort]);
+
+  const offset = page * ACCOUNTS_LIST_PAGE_SIZE;
+  const queryArgs = { limit: ACCOUNTS_LIST_PAGE_SIZE, offset, search, sort } as const;
   const accountsQ = useQuery({
-    queryKey: accountsListQueryKey({ limit: ACCOUNTS_LIST_MAX_LIMIT }),
-    queryFn: () => fetchAccounts({ limit: ACCOUNTS_LIST_MAX_LIMIT }),
+    queryKey: accountsListQueryKey(queryArgs),
+    queryFn: () => fetchAccounts(queryArgs),
     staleTime: 30_000,
   });
 
   const items = accountsQ.data?.items ?? [];
-
-  const visibleItems = useMemo(() => {
-    let result = items;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      result = result.filter(
-        (item) =>
-          item.account.companyName?.toLowerCase().includes(q) ||
-          item.account.companyDomain?.toLowerCase().includes(q) ||
-          item.account.accountKey.toLowerCase().includes(q),
-      );
-    }
-
-    const sorted = [...result];
-    if (sortKey === "name") {
-      sorted.sort((a, b) => {
-        const nameA = (
-          a.account.companyName ||
-          a.account.companyDomain ||
-          a.account.accountKey
-        ).toLowerCase();
-        const nameB = (
-          b.account.companyName ||
-          b.account.companyDomain ||
-          b.account.accountKey
-        ).toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
-    } else {
-      sorted.sort(
-        (a, b) =>
-          new Date(b.account.updatedAt).getTime() -
-          new Date(a.account.updatedAt).getTime(),
-      );
-    }
-    return sorted;
-  }, [items, search, sortKey]);
+  const total = accountsQ.data?.pagination.total ?? 0;
+  const rangeStart = total === 0 ? 0 : offset + 1;
+  const rangeEnd = Math.min(offset + items.length, total);
+  const hasPrevPage = page > 0;
+  const hasNextPage = offset + items.length < total;
 
   return (
     <div className="space-y-3">
@@ -153,32 +149,32 @@ function AllAccountsList() {
         <div className="relative w-full sm:max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, domain, or account key…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by company name or domain…"
             className="h-8 pl-9 text-xs"
           />
         </div>
         <div className="flex flex-wrap items-center gap-1.5 shrink-0">
           {!accountsQ.isLoading && !accountsQ.isError && (
             <span className="mr-2 text-xs tabular-nums text-muted-foreground">
-              {visibleItems.length} of {items.length}
+              {total === 0 ? "0 of 0" : `${rangeStart}–${rangeEnd} of ${total}`}
             </span>
           )}
           <span className="text-xs text-muted-foreground">Sort:</span>
           <Button
             size="sm"
-            variant={sortKey === "updated" ? "default" : "outline"}
+            variant={sort === "updated" ? "default" : "outline"}
             className="h-7 text-xs px-2.5"
-            onClick={() => setSortKey("updated")}
+            onClick={() => setSort("updated")}
           >
             Recently updated
           </Button>
           <Button
             size="sm"
-            variant={sortKey === "name" ? "default" : "outline"}
+            variant={sort === "name" ? "default" : "outline"}
             className="h-7 text-xs px-2.5"
-            onClick={() => setSortKey("name")}
+            onClick={() => setSort("name")}
           >
             Company name
           </Button>
@@ -205,7 +201,7 @@ function AllAccountsList() {
         </InlineNotice>
       )}
 
-      {!accountsQ.isLoading && !accountsQ.isError && items.length === 0 && (
+      {!accountsQ.isLoading && !accountsQ.isError && total === 0 && search === "" && (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>No accounts yet</EmptyTitle>
@@ -213,19 +209,16 @@ function AllAccountsList() {
         </Empty>
       )}
 
-      {!accountsQ.isLoading &&
-        !accountsQ.isError &&
-        items.length > 0 &&
-        visibleItems.length === 0 && (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No matching accounts</EmptyTitle>
-              <EmptyDescription>No accounts match that search.</EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
+      {!accountsQ.isLoading && !accountsQ.isError && total === 0 && search !== "" && (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No matching accounts</EmptyTitle>
+            <EmptyDescription>No accounts match that search.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      )}
 
-      {visibleItems.length > 0 && (
+      {items.length > 0 && (
         <div className="overflow-hidden rounded-lg border border-border bg-card/30">
           <Table className="table-fixed">
             <TableHeader className="bg-muted/35">
@@ -250,11 +243,41 @@ function AllAccountsList() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visibleItems.map((item) => (
+              {items.map((item) => (
                 <AccountRow key={item.account.id} item={item} />
               ))}
             </TableBody>
           </Table>
+        </div>
+      )}
+
+      {!accountsQ.isLoading && !accountsQ.isError && total > 0 && (
+        <div className="flex items-center justify-between gap-3 px-1">
+          <p className="text-xs text-muted-foreground">
+            Page {page + 1} of {Math.max(1, Math.ceil(total / ACCOUNTS_LIST_PAGE_SIZE))}
+          </p>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              disabled={!hasPrevPage}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              <ChevronLeft className="size-3.5" />
+              Prev
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              disabled={!hasNextPage}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+              <ChevronRight className="size-3.5" />
+            </Button>
+          </div>
         </div>
       )}
     </div>

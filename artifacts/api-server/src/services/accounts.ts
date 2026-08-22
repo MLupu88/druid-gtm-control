@@ -16,7 +16,7 @@
 // mqlDecisionReadiness — its referenced account_snapshots row), never
 // re-running the evaluator itself.
 
-import { and, count, desc, eq, inArray, min, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, min, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
   accounts,
@@ -299,12 +299,37 @@ export interface AccountListItem {
   attention: AccountAttentionSummary | null;
 }
 
+export type AccountListSortKey = "updated" | "name";
+
 export interface ListAccountsArgs {
   db: Db;
   limit: number;
   offset: number;
   /** When true, restricts the base account query (and its count) to accounts with at least one open attention_items row. Applied via EXISTS, before pagination — never a post-fetch filter, so pagination.total and limit/offset stay correct against the filtered set. */
   needsAttention: boolean;
+  /**
+   * Case-insensitive substring match against company_name OR
+   * company_domain (already normalized at write time by
+   * canonicalAccountResolution.ts — see its own module comment), applied
+   * in the same WHERE clause as needsAttention/openAttentionExistsFilter
+   * and BEFORE pagination — so total/limit/offset are always correct
+   * against the full matching population, never just whichever page a
+   * prior unfiltered fetch happened to return. Undefined/blank means no
+   * search filter (same "no filter" convention as needsAttention=false).
+   */
+  search?: string;
+  /**
+   * Sort key applied to the FULL filtered population before LIMIT/OFFSET
+   * — never a client-side re-sort of one already-fetched page, which
+   * would silently only reorder within that page. "updated" (default)
+   * is the existing updatedAt-desc/id-desc order; "name" orders by
+   * COALESCE(company_name, company_domain, account_key) ascending — the
+   * exact same three-field fallback the frontend already uses to choose
+   * what to display for "Account" (see accounts.tsx's accountIdentity),
+   * so sort order always matches what's actually shown, tie-broken by id
+   * ascending for determinism.
+   */
+  sort?: AccountListSortKey;
 }
 
 export interface AccountListResult {
@@ -333,7 +358,8 @@ export interface AccountListResult {
 export async function listAccounts(
   args: ListAccountsArgs,
 ): Promise<AccountListResult> {
-  const { db, limit, offset, needsAttention } = args;
+  const { db, limit, offset, needsAttention, sort } = args;
+  const search = args.search?.trim();
 
   // EXISTS against attention_items_open_account_idx (account_id) WHERE
   // status = 'open' — the same partial index the write-path service
@@ -357,17 +383,41 @@ export async function listAccounts(
       )})`
     : undefined;
 
+  // Case-insensitive substring match on company_name OR company_domain.
+  // ILIKE with drizzle-bound parameters (not a raw sql template) so the
+  // search term is always safely escaped, never string-interpolated.
+  const searchFilter =
+    search && search.length > 0
+      ? sql`(${accounts.companyName} ILIKE ${"%" + search + "%"} OR ${accounts.companyDomain} ILIKE ${"%" + search + "%"})`
+      : undefined;
+
+  const whereConditions = [openAttentionExistsFilter, searchFilter].filter(
+    (c): c is NonNullable<typeof c> => c !== undefined,
+  );
+  const whereClause = whereConditions.length > 0 ? and(...whereConditions) : undefined;
+
+  // "name" orders by the SAME three-field display fallback the frontend
+  // uses (company_name, then company_domain, then account_key) — sort
+  // order always matches what "Account" actually shows for a row.
+  const orderBy =
+    sort === "name"
+      ? [
+          asc(sql`coalesce(${accounts.companyName}, ${accounts.companyDomain}, ${accounts.accountKey})`),
+          asc(accounts.id),
+        ]
+      : [desc(accounts.updatedAt), desc(accounts.id)];
+
   const [totalRow] = await db
     .select({ value: count() })
     .from(accounts)
-    .where(openAttentionExistsFilter);
+    .where(whereClause);
   const total = Number(totalRow?.value ?? 0);
 
   const accountRows = await db
     .select()
     .from(accounts)
-    .where(openAttentionExistsFilter)
-    .orderBy(desc(accounts.updatedAt), desc(accounts.id))
+    .where(whereClause)
+    .orderBy(...orderBy)
     .limit(limit)
     .offset(offset);
 
