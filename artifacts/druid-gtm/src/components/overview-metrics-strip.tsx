@@ -61,7 +61,7 @@ export function OverviewMetricsStrip({
       )}
 
       {!isError && (isLoading || !metrics) ? (
-        <div className="mt-3 grid grid-cols-3 gap-4">
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
           {[0, 1, 2].map((i) => (
             <span key={i} className="h-11 w-full animate-pulse rounded-md bg-muted/60" />
           ))}
@@ -69,7 +69,15 @@ export function OverviewMetricsStrip({
       ) : (
         !isError &&
         metrics && (
-          <div className="mt-3 grid grid-cols-3 divide-x divide-border">
+          // LS8 visual-acceptance fix: the LS7 3-column grid had no
+          // responsive fallback (unlike this app's own established
+          // sm:/md: progressive-disclosure convention elsewhere) — on a
+          // narrow viewport it crammed a 24px number + label + hint icon
+          // + sublabel into ~110px columns. Stacks to one column below
+          // the sm breakpoint instead; the divider follows the same axis
+          // (horizontal rule between stacked rows, vertical rule between
+          // side-by-side columns at sm+).
+          <div className="mt-3 grid grid-cols-1 divide-y divide-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <StatBlock
               value={metrics.signalsCaptured}
               label="Observations captured"
@@ -101,7 +109,7 @@ function StatBlock({
   hint?: DefinitionKey;
 }) {
   return (
-    <div className="min-w-0 px-4 first:pl-0 last:pr-0">
+    <div className="min-w-0 py-3 first:pt-0 last:pb-0 sm:px-4 sm:py-0 sm:first:pl-0 sm:first:pt-0 sm:last:pr-0 sm:last:pb-0">
       <p className="text-2xl font-semibold tabular-nums text-foreground leading-none">{value}</p>
       <p className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground">
         <span className="truncate">{label}</span>

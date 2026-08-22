@@ -47,3 +47,8 @@ test("LS7 — Observations captured and Accounts needing attention carry a Defin
   assert.ok(SOURCE.includes('hint="accounts_needing_attention"'));
 });
 
+test("LS8 — the stat grid stacks to one column below the sm breakpoint instead of cramming 3 columns on mobile", () => {
+  assert.ok(SOURCE.includes("grid-cols-1"));
+  assert.ok(SOURCE.includes("sm:grid-cols-3"));
+});
+
