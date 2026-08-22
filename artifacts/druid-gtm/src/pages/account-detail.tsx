@@ -17,6 +17,7 @@ import { AccountIcpPreviewPanel } from "@/components/account-icp-preview-panel";
 import { AccountFactsPanel } from "@/components/account-facts-panel";
 import { AccountTruthPanel } from "@/components/account-truth-panel";
 import { AccountRecentActivityPanel } from "@/components/account-recent-activity-panel";
+import { AccountPeoplePanel } from "@/components/account-people-panel";
 import { humanizeAliasType } from "@/lib/account-truth-presentation";
 import { EvaluationRunsList } from "@/components/evaluation-runs-list";
 import { InlineNotice } from "@/components/inline-notice";
@@ -137,7 +138,7 @@ function AccountDetailContent({
           <OverviewWorkspaceCues onTabChange={onTabChange} />
         </TabsContent>
         <TabsContent value="activity"><AccountRecentActivityPanel accountId={account.id} /></TabsContent>
-        <TabsContent value="people"><WorkspaceEmptyState title="People data is not available" description="No canonical people or contact data is available for this account yet." /></TabsContent>
+        <TabsContent value="people"><AccountPeoplePanel accountId={account.id} /></TabsContent>
         <TabsContent value="intelligence"><ClientRadarResearchPanel accountId={account.id} /></TabsContent>
         <TabsContent value="icp"><AccountIcpPreviewPanel accountId={account.id} /></TabsContent>
         <TabsContent value="actions">
@@ -241,10 +242,6 @@ function LatestEvaluationPanel({ evaluation }: { evaluation: AccountEvaluation |
       </CardContent>
     </Card>
   );
-}
-
-function WorkspaceEmptyState({ title, description }: { title: string; description: string }) {
-  return <Empty className="min-h-48 rounded-lg border border-dashed border-border bg-card/30"><EmptyHeader><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader></Empty>;
 }
 
 function MetaField({

@@ -28,9 +28,14 @@ import {
   type AccountActivityItemDTO,
 } from "../services/accountActivity.js";
 import {
+  AccountNotFoundError as AccountPeopleNotFoundError,
+  type AccountPersonDTO,
+} from "../services/people.js";
+import {
   createAccountsRouter,
   type GetAccountActivityFn,
   type GetAccountByIdFn,
+  type GetAccountPeopleFn,
   type GetAccountTruthFn,
   type ListAccountsFn,
 } from "./accounts.js";
@@ -154,12 +159,16 @@ const unusedGetAccountTruthFn: GetAccountTruthFn = async () => {
 const unusedGetAccountActivityFn: GetAccountActivityFn = async () => {
   throw new Error("getAccountActivityFn should not have been called");
 };
+const unusedGetAccountPeopleFn: GetAccountPeopleFn = async () => {
+  throw new Error("getAccountPeopleFn should not have been called");
+};
 
 function buildTestApp(deps: {
   listAccountsFn?: ListAccountsFn;
   getAccountByIdFn?: GetAccountByIdFn;
   getAccountTruthFn?: GetAccountTruthFn;
   getAccountActivityFn?: GetAccountActivityFn;
+  getAccountPeopleFn?: GetAccountPeopleFn;
 }): Express {
   const app = express();
   app.use(
@@ -169,6 +178,7 @@ function buildTestApp(deps: {
       getAccountByIdFn: deps.getAccountByIdFn ?? unusedGetAccountByIdFn,
       getAccountTruthFn: deps.getAccountTruthFn ?? unusedGetAccountTruthFn,
       getAccountActivityFn: deps.getAccountActivityFn ?? unusedGetAccountActivityFn,
+      getAccountPeopleFn: deps.getAccountPeopleFn ?? unusedGetAccountPeopleFn,
     }),
   );
   return app;
@@ -791,6 +801,98 @@ test("GET /:accountId/activity maps an unexpected service error to a safe 500 re
   await withServer(app, async (baseUrl) => {
     const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/activity`);
     const body = await readJson(res, "GET /:accountId/activity 500 response body");
+
+    assert.equal(res.status, 500);
+    assert.equal(body.code, "internal_error");
+    assert.ok(!String(body.error).includes("pg://internal"));
+  });
+});
+
+// ---------------------------------------------------------------------
+// GET /:accountId/people — LS8
+// ---------------------------------------------------------------------
+
+function syntheticPerson(overrides: Partial<AccountPersonDTO> = {}): AccountPersonDTO {
+  return {
+    id: "aaaaaaaa-0000-4000-8000-000000000003",
+    fullName: "Laura Berkey",
+    workEmail: "laura.berkey@example.test",
+    linkedinUrl: null,
+    title: "Associate Software Engineer",
+    source: "rb2b",
+    firstSeenAt: "2026-08-21T20:33:27.397Z",
+    lastSeenAt: "2026-08-21T20:33:27.397Z",
+    ...overrides,
+  };
+}
+
+test("GET /:accountId/people returns the items array from the service, calling it exactly once", async () => {
+  const getAccountPeopleFn = mock.fn<GetAccountPeopleFn>(async () => [syntheticPerson()]);
+  const app = buildTestApp({ getAccountPeopleFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/people`);
+    const body = await readJson(res, "GET /:accountId/people response body");
+
+    assert.equal(res.status, 200);
+    assert.equal(Array.isArray(body.items), true);
+    assert.deepEqual(body.items, [syntheticPerson()]);
+    assert.equal(getAccountPeopleFn.mock.calls.length, 1);
+    assert.equal(getAccountPeopleFn.mock.calls[0]?.arguments[0], VALID_ACCOUNT_ID);
+  });
+});
+
+test("GET /:accountId/people returns an empty array, never a fabricated placeholder, when no people are associated", async () => {
+  const getAccountPeopleFn = mock.fn<GetAccountPeopleFn>(async () => []);
+  const app = buildTestApp({ getAccountPeopleFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/people`);
+    const body = await readJson(res, "GET /:accountId/people empty response body");
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body.items, []);
+  });
+});
+
+test("GET /:accountId/people rejects a non-UUID accountId with 400, without calling the service", async () => {
+  const getAccountPeopleFn = mock.fn<GetAccountPeopleFn>(async () => []);
+  const app = buildTestApp({ getAccountPeopleFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/not-a-uuid/people`);
+    const body = await readJson(res, "GET /:accountId/people 400 response body");
+
+    assert.equal(res.status, 400);
+    assert.equal(body.code, "invalid_request");
+    assert.equal(getAccountPeopleFn.mock.calls.length, 0);
+  });
+});
+
+test("GET /:accountId/people maps AccountNotFoundError to a 404 account_not_found response", async () => {
+  const getAccountPeopleFn = mock.fn<GetAccountPeopleFn>(async () => {
+    throw new AccountPeopleNotFoundError(VALID_ACCOUNT_ID);
+  });
+  const app = buildTestApp({ getAccountPeopleFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/people`);
+    const body = await readJson(res, "GET /:accountId/people 404 response body");
+
+    assert.equal(res.status, 404);
+    assert.equal(body.code, "account_not_found");
+  });
+});
+
+test("GET /:accountId/people maps an unexpected service error to a safe 500 response", async () => {
+  const getAccountPeopleFn = mock.fn<GetAccountPeopleFn>(async () => {
+    throw new Error("connection terminated unexpectedly at pg://internal");
+  });
+  const app = buildTestApp({ getAccountPeopleFn });
+
+  await withServer(app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/${VALID_ACCOUNT_ID}/people`);
+    const body = await readJson(res, "GET /:accountId/people 500 response body");
 
     assert.equal(res.status, 500);
     assert.equal(body.code, "internal_error");

@@ -53,3 +53,13 @@ test("Decision Controls' 'Promote to MQL is unavailable' heading carries a decis
   // icon layered on top of it.
   assert.ok(!DECISION_CONTROLS_SOURCE.includes("AlertTriangle"));
 });
+
+// LS8 — the People tab used to be a hardcoded static placeholder
+// ("People data is not available") regardless of whether canonical
+// people actually existed. It must now read from the real canonical
+// people/account_people pipeline via AccountPeoplePanel.
+test("the People tab renders AccountPeoplePanel, not a hardcoded static placeholder", () => {
+  assert.ok(SOURCE.includes('from "@/components/account-people-panel"'));
+  assert.ok(SOURCE.includes('<TabsContent value="people"><AccountPeoplePanel accountId={account.id} /></TabsContent>'));
+  assert.ok(!SOURCE.includes("People data is not available"));
+});

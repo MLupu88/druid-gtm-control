@@ -19,6 +19,12 @@ import {
   type AccountActivityItem,
 } from "@/lib/account-activity-api";
 import { formatEvidenceTimestamp, providerDisplayName } from "@/lib/account-truth-presentation";
+import { Mail, Linkedin } from "lucide-react";
+import {
+  extractRb2bActivityFields,
+  formatRb2bLocation,
+  hasAnyRb2bActivityFields,
+} from "@/lib/account-activity-presentation";
 
 interface AccountRecentActivityPanelProps {
   accountId: string;
@@ -86,6 +92,12 @@ export function AccountRecentActivityPanel({ accountId }: AccountRecentActivityP
 function ActivityRow({ item }: { item: AccountActivityItem }) {
   const occurredAt = formatEvidenceTimestamp(item.occurredAt);
 
+  // Provider-scoped on purpose (see extractRb2bActivityFields's own
+  // module comment) — never applied to a non-RB2B row's rawValue.
+  const rb2bFields = item.provider === "rb2b" ? extractRb2bActivityFields(item.rawValue) : null;
+  const showRb2bSummary = rb2bFields !== null && hasAnyRb2bActivityFields(rb2bFields);
+  const location = rb2bFields ? formatRb2bLocation(rb2bFields) : null;
+
   return (
     <li className="rounded-lg border border-border/60 p-2.5 space-y-1.5">
       <div className="flex items-center justify-between gap-3">
@@ -97,6 +109,39 @@ function ActivityRow({ item }: { item: AccountActivityItem }) {
         </span>
         {occurredAt && <span className="text-[11px] text-muted-foreground/70">{occurredAt}</span>}
       </div>
+
+      {showRb2bSummary && rb2bFields && (
+        <div className="space-y-1">
+          {(rb2bFields.personName || rb2bFields.title) && (
+            <p className="text-xs text-foreground">
+              {rb2bFields.personName && <span className="font-medium">{rb2bFields.personName}</span>}
+              {rb2bFields.personName && rb2bFields.title && " — "}
+              {rb2bFields.title && <span className="text-muted-foreground">{rb2bFields.title}</span>}
+            </p>
+          )}
+          {rb2bFields.pageVisited && (
+            <p className="truncate text-[11px] text-muted-foreground">
+              Visited <span className="font-mono">{rb2bFields.pageVisited}</span>
+            </p>
+          )}
+          {(location || rb2bFields.hasEmail || rb2bFields.hasLinkedin) && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground/80">
+              {location && <span>{location}</span>}
+              {rb2bFields.hasEmail && (
+                <span className="inline-flex items-center gap-1">
+                  <Mail className="size-3" /> Email available
+                </span>
+              )}
+              {rb2bFields.hasLinkedin && (
+                <span className="inline-flex items-center gap-1">
+                  <Linkedin className="size-3" /> LinkedIn available
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <TechnicalDetails summary="Raw event data">
         <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground/80">
           {JSON.stringify(item.rawValue, null, 2)}
